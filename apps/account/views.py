@@ -1,45 +1,22 @@
-from django.shortcuts import get_object_or_404
 from rest_framework.permissions import AllowAny
-from rest_framework.request import Request
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.status import HTTP_201_CREATED, HTTP_200_OK
-from apps.account.models import User
-from apps.account.serializers import UserResponseSerializer, UserSerializer
+# from rest_framework.viewsets import ViewSet
+# from rest_framework.response import Response
+# from rest_framework.status import HTTP_201_CREATED
+from apps.core.views import AbstractModelViewSet
+from apps.account.models import CompanyProfile, User
+from apps.account.serializers import (
+    UserSerializer,
+    CompanyProfileSerializer
+)
 
 
-class UserAPIView(APIView):
+class UserViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
-
-    def get(self, request: Request) -> Response:
-        queryset = User.objects.all()
-        serializer = UserResponseSerializer(queryset, many=True)
-
-        return Response(serializer.data, HTTP_200_OK)
+    serializer_class = UserSerializer
+    queryset = User.objects.all()
 
 
-class SignupAPIView(APIView):
-    permission_classes = (AllowAny,)
-
-    def post(self, request: Request) -> Response:
-        serializer = UserSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-
-        return Response(serializer.data, status=HTTP_201_CREATED)
-
-
-class UserDetailAPIView(APIView):
-    def get(self, request: Request, pk) -> Response:
-        queryset = get_object_or_404(User, id=pk)
-        serializer = UserResponseSerializer(queryset)
-
-        return Response(serializer.data, status=HTTP_200_OK)
-
-    def patch(self, request: Request, pk) -> Response:
-        instance = get_object_or_404(User, id=pk)
-        print(instance)
-        serializer = UserSerializer(instance, data=request.data, partial=True)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data, HTTP_200_OK)
+class CompanyProfileViewSet(AbstractModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = CompanyProfileSerializer
+    queryset = CompanyProfile.objects.all()

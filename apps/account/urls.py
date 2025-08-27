@@ -1,10 +1,9 @@
-from django.urls import path
+from rest_framework.routers import DefaultRouter
+from apps.account.views import UserViewSet, CompanyProfileViewSet
 
-from apps.account.views import SignupAPIView, UserAPIView, UserDetailAPIView
+router = DefaultRouter()
 
+router.register("users", UserViewSet, basename='users')
+router.register('companies', CompanyProfileViewSet, basename='companies')
 
-urlpatterns = [
-    path("users/", UserAPIView.as_view(), name="users"),
-    path("signup/", SignupAPIView.as_view(), name="signup"),
-    path("users/<uuid:pk>/", UserDetailAPIView.as_view(), name="user_detail"),
-]
+urlpatterns = router.urls
