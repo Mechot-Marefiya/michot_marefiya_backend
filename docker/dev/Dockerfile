@@ -1,20 +1,21 @@
+# syntax=docker/dockerfile:1.4
 FROM python:3.13-slim
 
-RUN addgroup --system app && adduser --system --group app
+ENV PYTHONUNBUFFERED=1
 
-RUN mkdir /code
+RUN addgroup --system app && adduser --system --group app
 
 WORKDIR /code
 
 # Install uv 
-RUN --mount=type=cache,target=/home/dagi/.cache,id=pip \
+RUN --mount=type=cache,target=/home/dagi/.cache/pip,id=pip \
     python -m pip install uv 
 
 # Install dependencies
 COPY ./requirements/ ./requirements/
 
 # Run uv pip install with caching! 
-RUN --mount=type=cache,target=/home/dagi/.cache,id=pip \
+RUN --mount=type=cache,target=/home/dagi/.cache/pip,id=pip \
     uv pip install --system -r /code/requirements/dev.txt
 
 
