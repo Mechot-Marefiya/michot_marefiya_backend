@@ -32,6 +32,7 @@ SECRET_KEY = env("SECRET_KEY", cast=str)
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env("DEBUG", default=True, cast=bool)
 
+
 ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
 
 CORS_ALLOWED_ORIGINS = []
