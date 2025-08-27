@@ -12,7 +12,7 @@ def test_user_creation(api_client):
         "confirm_password": "12345678",
     }
 
-    res = api_client.post(reverse("signup"), data, format="json")
+    res = api_client.post(reverse("users-list"), data, format="json")
 
     assert res.status_code == 201
     assert res.data["email"] == "test@example.com"
@@ -28,6 +28,6 @@ def test_serializer_raises_validation_error_on_password_mismatch(api_client):
         "confirm_password": "1234567",
     }
 
-    res = api_client.post(reverse("signup"), data, format="json")
+    res = api_client.post(reverse("users-list"), data, format="json")
     assert res.status_code == 400
     assert "Password does not match" in str(res.data)
