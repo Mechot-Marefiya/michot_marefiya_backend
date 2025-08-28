@@ -1,12 +1,16 @@
+from io import BytesIO
+import json
 import pytest
+from PIL import Image
 from django.urls import reverse
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 
 @pytest.mark.django_db
-def test_user_creation(api_client):
+def test_user_creation(api_client, normal_role):
+    # * Having the normal_role here auto creates it
+    # * and that helps our Role.objects.get() code in the serializer
     data = {
-        "first_name": "",
-        "last_name": "",
         "email": "test@example.com",
         "password": "12345678",
         "confirm_password": "12345678",
@@ -16,13 +20,12 @@ def test_user_creation(api_client):
 
     assert res.status_code == 201
     assert res.data["email"] == "test@example.com"
+    assert res.data['role'] == normal_role.id
 
 
 @pytest.mark.django_db
-def test_serializer_raises_validation_error_on_password_mismatch(api_client):
+def test_serializer_raises_validation_error_on_password_mismatch(api_client, normal_role):
     data = {
-        "first_name": "",
-        "last_name": "",
         "email": "test@example.com",
         "password": "12345678",
         "confirm_password": "1234567",
@@ -31,3 +34,82 @@ def test_serializer_raises_validation_error_on_password_mismatch(api_client):
     res = api_client.post(reverse("users-list"), data, format="json")
     assert res.status_code == 400
     assert "Password does not match" in str(res.data)
+
+
+def create_test_image(name="test.png", ext="PNG", size=(100, 100), color=(255, 0, 0)):
+    file = BytesIO()
+    image = Image.new("RGB", size=size, color=color)
+    image.save(file, ext)
+    file.seek(0)
+    return SimpleUploadedFile(name, file.read(), content_type=f"image/{ext.lower()}")
+
+
+@pytest.mark.django_db
+def test_company_registration(api_client, company_role):
+    license = SimpleUploadedFile(
+        "company_license.pdf", b"file_content", content_type="application/pdf"
+    )
+
+    logo = create_test_image("logo.png")
+
+    address = json.dumps({
+        "street_line1": "wollo sefer",
+        "country": "Ethiopia",
+        "city": "Addis ababa",
+        "sub_city": "Bole",
+        "state": "Addis Ababa",
+        "postal_code": "1000",
+        "latitude": "45.12",
+        "longitude": "23.46"
+    })
+
+    data = {
+        "email": "company@example.com",
+        "name": "michot",
+        "phone": "+25111121214",
+        "license": license,
+        "address": address,
+        "logo": logo,
+        "industry": "hospitality",
+    }
+
+    res = api_client.post(reverse("companies-list"), data, format="multipart")
+    # print("RES", res.data)
+    assert res.status_code == 201
+
+    assert res.data['name'] == "michot"
+
+
+@pytest.mark.django_db
+def test_company_registration_fails_on_invalid_data(api_client, company_role):
+    license = SimpleUploadedFile(
+        "company_license.pdf", b"file_content", content_type="application/pdf"
+    )
+
+    logo = create_test_image("logo.png")
+
+    address = json.dumps({
+        "street_line1": "",
+        "country": "Ethiopia",
+        "city": "Addis ababa",
+        "sub_city": "Bole",
+        "state": "Addis Ababa",
+        "postal_code": "1000",
+        "latitude": "45.12",
+        "longitude": "23.46"
+    })
+
+    data = {
+        "email": "company@example.com",
+        "name": "michot",
+        "phone": "+25111121214",
+        "license": license,
+        "address": address,
+        "logo": logo,
+        "industry": "invalid_choice",
+        "description": ""
+    }
+
+    res = api_client.post(reverse("companies-list"), data, format="multipart")
+    # print("RES", res.data)
+    assert res.status_code == 400
