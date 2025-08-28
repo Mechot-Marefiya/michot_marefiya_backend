@@ -35,7 +35,7 @@ class Address(AbstractBaseModel):
         verbose_name_plural = _("Addresses")
         db_table = "addresses"
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.city
 
 
@@ -99,17 +99,19 @@ class CompanyProfile(AbstractBaseModel):
 
     phone = models.CharField(max_length=15, verbose_name=_("Phone Number"))
 
-    logo = models.ImageField(verbose_name=_("Logo"))
+    logo = models.ImageField(verbose_name=_("Logo"), blank=True, null=True)
 
-    license = models.FileField(verbose_name=_(
-        "License"), upload_to="../../company_license/")
+    license = models.FileField(
+        verbose_name=_("License"), upload_to="company_license/")
 
     industry = models.CharField(
         max_length=100, verbose_name=_("Industry"), choices=IndustryChoice)
 
-    description = models.TextField(verbose_name=_("Description"))
+    description = models.TextField(verbose_name=_(
+        "Description"), blank=True, null=True)
 
-    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(
+        Address, on_delete=models.RESTRICT, related_name="+")
 
     class Meta:
         verbose_name = _("Company Profile")
