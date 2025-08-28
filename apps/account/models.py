@@ -99,10 +99,11 @@ class CompanyProfile(AbstractBaseModel):
 
     phone = models.CharField(max_length=15, verbose_name=_("Phone Number"))
 
-    logo = models.ImageField(verbose_name=_("Logo"), blank=True, null=True)
+    logo = models.ImageField(verbose_name=_(
+        "Logo"), upload_to="company_logos/", blank=True, null=True)
 
     license = models.FileField(
-        verbose_name=_("License"), upload_to="company_license/")
+        verbose_name=_("License"), upload_to="company_licenses/")
 
     industry = models.CharField(
         max_length=100, verbose_name=_("Industry"), choices=IndustryChoice)
