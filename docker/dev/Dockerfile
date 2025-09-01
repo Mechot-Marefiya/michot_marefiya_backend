@@ -2,7 +2,7 @@
 FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1
-ENV MAIN_DIR = /code
+ENV MAIN_DIR=/code
 
 RUN addgroup --system app && adduser --system --group app
 
