@@ -1,14 +1,12 @@
 from rest_framework.permissions import AllowAny
-from rest_framework.parsers import MultiPartParser, JSONParser
+# from rest_framework.parsers import MultiPartParser, JSONParser
+
 # from rest_framework.viewsets import ViewSet
 # from rest_framework.response import Response
 # from rest_framework.status import HTTP_201_CREATED
 from apps.core.views import AbstractModelViewSet
 from apps.account.models import CompanyProfile, User
-from apps.account.serializers import (
-    UserSerializer,
-    CompanyProfileSerializer
-)
+from apps.account.serializers import UserSerializer, CompanyProfileSerializer
 
 
 class UserViewSet(AbstractModelViewSet):
@@ -19,6 +17,7 @@ class UserViewSet(AbstractModelViewSet):
 
 class CompanyProfileViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
-    parser_classes = [MultiPartParser, JSONParser]
+    # TODO: Verify the parsing is default or uncomment this
+    # parser_classes = [MultiPartParser, JSONParser]
     serializer_class = CompanyProfileSerializer
     queryset = CompanyProfile.objects.all()

@@ -20,11 +20,13 @@ def test_user_creation(api_client, normal_role):
 
     assert res.status_code == 201
     assert res.data["email"] == "test@example.com"
-    assert res.data['role'] == normal_role.id
+    assert res.data["role"] == normal_role.id
 
 
 @pytest.mark.django_db
-def test_serializer_raises_validation_error_on_password_mismatch(api_client, normal_role):
+def test_serializer_raises_validation_error_on_password_mismatch(
+    api_client, normal_role
+):
     data = {
         "email": "test@example.com",
         "password": "12345678",
@@ -52,16 +54,18 @@ def test_company_registration(api_client, company_role):
 
     logo = create_test_image("logo.png")
 
-    address = json.dumps({
-        "street_line1": "wollo sefer",
-        "country": "Ethiopia",
-        "city": "Addis ababa",
-        "sub_city": "Bole",
-        "state": "Addis Ababa",
-        "postal_code": "1000",
-        "latitude": "45.12",
-        "longitude": "23.46"
-    })
+    address = json.dumps(
+        {
+            "street_line1": "wollo sefer",
+            "country": "Ethiopia",
+            "city": "Addis ababa",
+            "sub_city": "Bole",
+            "state": "Addis Ababa",
+            "postal_code": "1000",
+            "latitude": "45.12",
+            "longitude": "23.46",
+        }
+    )
 
     data = {
         "email": "company@example.com",
@@ -77,7 +81,7 @@ def test_company_registration(api_client, company_role):
     # print("RES", res.data)
     assert res.status_code == 201
 
-    assert res.data['name'] == "michot"
+    assert res.data["name"] == "michot"
 
 
 @pytest.mark.django_db
@@ -88,16 +92,18 @@ def test_company_registration_fails_on_invalid_data(api_client, company_role):
 
     logo = create_test_image("logo.png")
 
-    address = json.dumps({
-        "street_line1": "",
-        "country": "Ethiopia",
-        "city": "Addis ababa",
-        "sub_city": "Bole",
-        "state": "Addis Ababa",
-        "postal_code": "1000",
-        "latitude": "45.12",
-        "longitude": "23.46"
-    })
+    address = json.dumps(
+        {
+            "street_line1": "",
+            "country": "Ethiopia",
+            "city": "Addis ababa",
+            "sub_city": "Bole",
+            "state": "Addis Ababa",
+            "postal_code": "1000",
+            "latitude": "45.12",
+            "longitude": "23.46",
+        }
+    )
 
     data = {
         "email": "company@example.com",
@@ -107,7 +113,7 @@ def test_company_registration_fails_on_invalid_data(api_client, company_role):
         "address": address,
         "logo": logo,
         "industry": "invalid_choice",
-        "description": ""
+        "description": "",
     }
 
     res = api_client.post(reverse("companies-list"), data, format="multipart")

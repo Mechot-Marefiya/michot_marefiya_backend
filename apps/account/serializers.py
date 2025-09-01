@@ -12,8 +12,17 @@ class AddressSerializer(serializers.ModelSerializer):
     class Meta:
         model = Address
         fields = [
-            'city', 'country', 'country', 'sub_city', 'street_line1',
-            'street_line2', 'latitude', 'longitude', 'state', 'postal_code']
+            "city",
+            "country",
+            "country",
+            "sub_city",
+            "street_line1",
+            "street_line2",
+            "latitude",
+            "longitude",
+            "state",
+            "postal_code",
+        ]
 
 
 class JsonSerializerField(serializers.Field):
@@ -21,6 +30,7 @@ class JsonSerializerField(serializers.Field):
 
     def to_internal_value(self, data):
         import json
+
         if isinstance(data, str):
             try:
                 return json.loads(data)
@@ -45,8 +55,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["email", "password",
-                  "confirm_password", "first_name", "last_name"]
+        fields = ["email", "password", "confirm_password", "first_name", "last_name"]
 
     def validate(self, attrs):
         # TODO: Add password strength validtion here
@@ -75,14 +84,13 @@ class UserSerializer(serializers.ModelSerializer):
 class UserResponseSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "email", "first_name",
-                  "last_name", "is_active", "role"]
+        fields = ["id", "email", "first_name", "last_name", "is_active", "role"]
 
 
 class CompanyProfileResponseSerializer(serializers.ModelSerializer):
     class Meta:
         model = CompanyProfile
-        fields = ['name', 'phone', 'industry', 'description']
+        fields = ["name", "phone", "industry", "description"]
 
 
 class CompanyProfileSerializer(serializers.ModelSerializer):
@@ -94,8 +102,16 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CompanyProfile
-        fields = ['email', 'license', 'name', 'address',
-                  'phone', 'logo', 'industry', 'description']
+        fields = [
+            "email",
+            "license",
+            "name",
+            "address",
+            "phone",
+            "logo",
+            "industry",
+            "description",
+        ]
 
     def validate(self, attr):
         # TODO: Do validation
@@ -103,8 +119,8 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
 
     @transaction.atomic()
     def create(self, validated_data):
-        email = validated_data.pop('email')
-        address_data = validated_data.pop('address')
+        email = validated_data.pop("email")
+        address_data = validated_data.pop("address")
         role = Role.objects.get(code=RoleCode.COMPANY.value)
 
         password = generate_password(email)
@@ -114,12 +130,12 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
         user.save()
         address = Address.objects.create(**address_data)
         profile = CompanyProfile.objects.create(
-            user=user, address=address, **validated_data)
+            user=user, address=address, **validated_data
+        )
 
         return profile
 
     def to_representation(self, instance):
         return CompanyProfileResponseSerializer(
-            instance,
-            self.context
+            instance, self.context
         ).to_representation(instance)
