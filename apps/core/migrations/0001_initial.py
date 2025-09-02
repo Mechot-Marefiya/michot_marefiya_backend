@@ -5,32 +5,65 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='Address',
+            name="Address",
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False, verbose_name='Id')),
-                ('created_at', models.DateTimeField(auto_now_add=True, verbose_name='Created At')),
-                ('updated_at', models.DateTimeField(auto_now=True, verbose_name='Updated_at')),
-                ('street_line1', models.CharField(max_length=255)),
-                ('country', models.TextField(default='Ethiopia', max_length=100, verbose_name='Country')),
-                ('city', models.CharField(max_length=100, verbose_name='City')),
-                ('sub_city', models.CharField(blank=True, max_length=100, verbose_name='Sub City')),
-                ('state', models.CharField(blank=True, max_length=100)),
-                ('postal_code', models.CharField(blank=True, max_length=20)),
-                ('latitude', models.DecimalField(blank=True, decimal_places=6, max_digits=9, null=True)),
-                ('longitude', models.DecimalField(blank=True, decimal_places=6, max_digits=9, null=True)),
+                (
+                    "id",
+                    models.UUIDField(
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="Id",
+                    ),
+                ),
+                (
+                    "created_at",
+                    models.DateTimeField(auto_now_add=True, verbose_name="Created At"),
+                ),
+                (
+                    "updated_at",
+                    models.DateTimeField(auto_now=True, verbose_name="Updated_at"),
+                ),
+                ("street_line1", models.CharField(max_length=255)),
+                (
+                    "country",
+                    models.TextField(
+                        default="Ethiopia", max_length=100, verbose_name="Country"
+                    ),
+                ),
+                ("city", models.CharField(max_length=100, verbose_name="City")),
+                (
+                    "sub_city",
+                    models.CharField(
+                        blank=True, max_length=100, verbose_name="Sub City"
+                    ),
+                ),
+                ("state", models.CharField(blank=True, max_length=100)),
+                ("postal_code", models.CharField(blank=True, max_length=20)),
+                (
+                    "latitude",
+                    models.DecimalField(
+                        blank=True, decimal_places=6, max_digits=9, null=True
+                    ),
+                ),
+                (
+                    "longitude",
+                    models.DecimalField(
+                        blank=True, decimal_places=6, max_digits=9, null=True
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'Address',
-                'verbose_name_plural': 'Addresses',
-                'db_table': 'addresses',
+                "verbose_name": "Address",
+                "verbose_name_plural": "Addresses",
+                "db_table": "addresses",
             },
         ),
     ]

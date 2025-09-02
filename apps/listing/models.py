@@ -17,8 +17,8 @@ class ListingImage(AbstractBaseModel):
         on_delete=models.CASCADE,
         verbose_name="Content Type",
     )
-    object_id = models.PositiveIntegerField(verbose_name="Object ID")
-    content_object = GenericForeignKey("content_type", "object_id")
+    object_id = models.UUIDField(verbose_name="Object ID")
+    content_object = GenericForeignKey()
 
     image = models.ImageField(
         upload_to="listing_images/",
@@ -62,7 +62,8 @@ class BaseListing(AbstractBaseModel):
     title = models.CharField(
         max_length=255,
         verbose_name=_("Title"),
-        help_text=_("Title of the listing, e.g., 'Luxury Suite with Pool View'."),
+        help_text=_(
+            "Title of the listing, e.g., 'Luxury Suite with Pool View'."),
     )
 
     description = models.TextField(
@@ -104,7 +105,8 @@ class BaseListing(AbstractBaseModel):
             # * Enforcing either one of the owners(company, or individual) must exist
             models.CheckConstraint(
                 check=(
-                    models.Q(company__isnull=False) | models.Q(individual__isnull=False)
+                    models.Q(company__isnull=False) | models.Q(
+                        individual__isnull=False)
                 ),
                 name="owner_must_exist",
             )
@@ -135,7 +137,14 @@ class HotelListing(BaseListing):
         AUDITORIUM = "auditorium", _("Auditorium")
         CONFERENCE_HALL = "conference_hall", _("Conference Hall")
 
-    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(
+        Address,
+        on_delete=models.RESTRICT,
+        related_name="+",
+        # * Making only optional for validation cause either we use
+        # * from payload or reuse company HQ address
+        blank=True
+    )
 
     capacity = models.PositiveIntegerField(
         verbose_name=_("Capacity"),
@@ -276,7 +285,8 @@ class PropertyListing(BaseListing):
         blank=True,
     )
 
-    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(
+        Address, on_delete=models.RESTRICT, related_name="+")
 
     property_type = models.CharField(
         max_length=50,

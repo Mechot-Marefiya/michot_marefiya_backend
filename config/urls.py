@@ -30,6 +30,7 @@ from drf_spectacular.views import (
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/account/", include("apps.account.urls")),
+    path("api/v1/listing/", include("apps.listing.urls")),
     path("auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path(

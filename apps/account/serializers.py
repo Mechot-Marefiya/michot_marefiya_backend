@@ -5,43 +5,9 @@ from apps.account.models import Address, CompanyProfile, Role
 from apps.account.utils import generate_password
 from rest_framework import serializers
 
+from apps.core.serializers import AddressSerializer, JsonSerializerField
+
 User = get_user_model()
-
-
-class AddressSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Address
-        fields = [
-            "city",
-            "country",
-            "country",
-            "sub_city",
-            "street_line1",
-            "street_line2",
-            "latitude",
-            "longitude",
-            "state",
-            "postal_code",
-        ]
-
-
-class JsonSerializerField(serializers.Field):
-    """Used to convert JSON string to dict"""
-
-    def to_internal_value(self, data):
-        import json
-
-        if isinstance(data, str):
-            try:
-                return json.loads(data)
-            except Exception:
-                raise serializers.ValidationError("Invalid JSON")
-        elif isinstance(data, dict):
-            return data
-        raise serializers.ValidationError("Expected dict or JSON string")
-
-    def to_representation(self, value):
-        return value
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -113,8 +79,12 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
             "description",
         ]
 
+    def validate_address(self, attr):
+        serializer = AddressSerializer(data=attr)
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
+
     def validate(self, attr):
-        # TODO: Do validation
         return attr
 
     @transaction.atomic()
