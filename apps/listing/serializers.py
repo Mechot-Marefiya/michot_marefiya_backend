@@ -23,9 +23,7 @@ class HotelListingResponseSerializer(serializers.ModelSerializer):
 
 class HotelListingSerializer(serializers.ModelSerializer):
     address = JsonSerializerField()
-    images = serializers.ListField(
-        child=serializers.ImageField()
-    )
+    images = serializers.ListField(child=serializers.ImageField())
 
     class Meta:
         model = HotelListing
@@ -47,15 +45,14 @@ class HotelListingSerializer(serializers.ModelSerializer):
 
     @transaction.atomic()
     def create(self, validated_data):
-        validated_data['user'] = self.context["request"].user
+        validated_data["user"] = self.context["request"].user
         # TODO: Proper Error handling
         return ListingService.create_hotel_listing(validated_data)
 
     def to_representation(self, instance):
-        return HotelListingResponseSerializer(
-            instance,
-            self.context
-        ).to_representation(instance)
+        return HotelListingResponseSerializer(instance, self.context).to_representation(
+            instance
+        )
 
 
 class CarListingResponseSerializer(serializers.ModelSerializer):

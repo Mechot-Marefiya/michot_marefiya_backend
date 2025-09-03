@@ -17,7 +17,7 @@ class ListingService:
         # TODO: registration then avoid listing address fill form the UI and
         # TODO:  also make it optional here as well so that we can reuse the HQ address.
         address_data = validated_data.pop("address", None)
-        amenitites = validated_data.pop('amenities')
+        amenitites = validated_data.pop("amenities")
 
         # ? I assumed this listing creation is done by the companies
         # ? themselves. But if this will be done by the Michot admin, this will mess up
@@ -31,9 +31,7 @@ class ListingService:
             address_instance = company.address
 
         hotel_listing_instance = HotelListing.objects.create(
-            company=company,
-            address=address_instance,
-            ** validated_data
+            company=company, address=address_instance, **validated_data
         )
 
         # M2M to amenities
@@ -53,7 +51,7 @@ class ListingService:
         image_objs = []
 
         for img_file in images_payload:
-            if hasattr(img_file, 'is_primary'):
+            if hasattr(img_file, "is_primary"):
                 is_primary = img_file.is_primary
             else:
                 is_primary = False

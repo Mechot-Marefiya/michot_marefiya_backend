@@ -1,6 +1,5 @@
 from io import BytesIO
 from PIL import Image
-import json
 import pytest
 from rest_framework.test import APIClient
 from apps.account.models import CompanyProfile
@@ -12,8 +11,7 @@ from apps.core.models import Address
 @pytest.fixture
 def company_user(django_user_model):
     return django_user_model.objects.create_user(
-        email="company@example.com",
-        password="pass"
+        email="company@example.com", password="pass"
     )
 
 
@@ -39,7 +37,7 @@ def company_profile(company_user):
         "state": "Addis Ababa",
         "postal_code": "1000",
         "latitude": "45.12",
-        "longitude": "23.46"
+        "longitude": "23.46",
     }
 
     address = Address.objects.create(**address_data)
@@ -50,12 +48,9 @@ def company_profile(company_user):
         "license": license,
         "address": address,
         "logo": logo,
-        "industry": "hospitality"
+        "industry": "hospitality",
     }
-    return CompanyProfile.objects.create(
-        user=company_user,
-        **data
-    )
+    return CompanyProfile.objects.create(user=company_user, **data)
 
 
 @pytest.fixture

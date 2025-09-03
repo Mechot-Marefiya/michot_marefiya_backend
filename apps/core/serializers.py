@@ -14,7 +14,7 @@ class AddressSerializer(serializers.ModelSerializer):
             "latitude",
             "longitude",
             "state",
-            "postal_code"
+            "postal_code",
         ]
 
 

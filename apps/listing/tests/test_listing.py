@@ -20,7 +20,7 @@ def create_test_image(name="test.png", ext="PNG", size=(100, 100), color=(255, 0
 def test_hotel_listing_creation(authenticated_company_client):
     images_list = []
     for i in range(1, 6):
-        img_name = 'img_' + str(i)
+        img_name = "img_" + str(i)
         img = create_test_image(f"{img_name}.png")
         images_list.append(img)
 
@@ -36,8 +36,9 @@ def test_hotel_listing_creation(authenticated_company_client):
             "longitude": "23.46",
         }
     )
-    amenities = [Amenity.objects.create(name=am).id
-                 for am in ["wifi", "pool", "balcony"]]
+    amenities = [
+        Amenity.objects.create(name=am).id for am in ["wifi", "pool", "balcony"]
+    ]
     print(amenities)
 
     # json.dumps(amenities)
@@ -50,11 +51,12 @@ def test_hotel_listing_creation(authenticated_company_client):
         "address": address,
         "capacity": 2,
         "service_type": "room",
-        "amenities": amenities
+        "amenities": amenities,
     }
 
-    res = authenticated_company_client.post(reverse('hotel_listings-list'),
-                                            data, format='multipart')
+    res = authenticated_company_client.post(
+        reverse("hotel_listings-list"), data, format="multipart"
+    )
 
     print("RES", res.data)
 

@@ -52,10 +52,12 @@ class User(AbstractUser, AbstractBaseModel):
 
 
 class CompanyProfile(AbstractBaseModel):
-    class IndustryChoice(models.TextChoices):
-        HOSPITALITY = "hospitality", _("Hospitality")
+    class CategoryChoice(models.TextChoices):
+        HOTEL = "hotel", _("Hotel")
+        PENSION = "pension", _("Pension")
+        REALESTATE = "real_estate", _("Real Estate")
+        APARTMENT = "apartment", _("Apartment")
         VEHICLE = "vehicle", _("Vehicle")
-        HOUSE = "house", _("House")
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -74,8 +76,8 @@ class CompanyProfile(AbstractBaseModel):
 
     license = models.FileField(verbose_name=_("License"), upload_to="company_licenses/")
 
-    industry = models.CharField(
-        max_length=100, verbose_name=_("Industry"), choices=IndustryChoice.choices
+    category = models.CharField(
+        max_length=100, verbose_name=_("Category"), choices=CategoryChoice.choices
     )
 
     description = models.TextField(verbose_name=_("Description"), blank=True)
@@ -88,7 +90,7 @@ class CompanyProfile(AbstractBaseModel):
         db_table = "company_profiles"
 
     def __str__(self) -> str:
-        return f"{self.name}::{self.industry}"
+        return f"{self.name}::{self.category}"
 
 
 class IndividualOwnerProfile(AbstractBaseModel):
@@ -97,6 +99,12 @@ class IndividualOwnerProfile(AbstractBaseModel):
     add their detail here than using the AUTH_USER_MODEL.
     """
 
+    class PropertyCategoryChoice(models.TextChoices):
+        CONDOMINIUM = "condominium", _("Condominium")
+        LAND = "land", _("Land")
+        APARTMENT = "apartment", _("Apartment")
+        VEHICLE = "vehicle", _("Vehicle")
+
     first_name = models.CharField(max_length=255, verbose_name=_("First Name"))
 
     last_name = models.CharField(max_length=255, verbose_name=_("LAst Name"))
@@ -104,6 +112,12 @@ class IndividualOwnerProfile(AbstractBaseModel):
     address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
 
     phone = models.CharField(max_length=15, verbose_name=("Phone Number"))
+
+    category = models.CharField(
+        max_length=100,
+        verbose_name=_("Category"),
+        choices=PropertyCategoryChoice.choices,
+    )
 
     national_id_number = models.SmallIntegerField(
         verbose_name=_("National Id Number"), blank=True, null=True
@@ -119,9 +133,21 @@ class IndividualOwnerProfile(AbstractBaseModel):
 
 
 class Facility(AbstractBaseModel):
-    """Shared Hotel level things like Parking, Spa, Gym..."""
+    """
+    Shared Hotel level things(pool, spa, gym, parking, etc.)
+    """
 
-    name = models.CharField(max_length=255, verbose_name=_("Name"))
+    name = models.CharField(max_length=255, unique=True, verbose_name=_("Name"))
+
+    icon = models.CharField(max_length=100, blank=True, verbose_name=_("Icon"))
+
+    class Meta:
+        verbose_name = _("Facility")
+        verbose_name_plural = _("Facilities")
+        db_table = "facilities"
+
+    def __str__(self):
+        return self.name
 
 
 class HotelProfile(AbstractBaseModel):
