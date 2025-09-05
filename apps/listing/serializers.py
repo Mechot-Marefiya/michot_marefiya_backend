@@ -3,39 +3,53 @@ from rest_framework import serializers
 
 from apps.account.serializers import AddressSerializer
 from apps.core.serializers import JsonSerializerField
-from apps.listing.models import HotelListing, CarListing, PropertyListing
+from apps.listing.models import CarListing, PropertyListing, RoomListing
 from apps.listing.services import ListingService
 
 
-class HotelListingResponseSerializer(serializers.ModelSerializer):
+class RoomListingResponseSerializer(serializers.ModelSerializer):
     class Meta:
-        model = HotelListing
+        model = RoomListing
         fields = [
+            "images",
             "title",
             "description",
             "price",
-            "address",
-            "capacity",
-            "service_type",
             "amenities",
+            "number_of_guests",
+            "total_units",
+            "bed_type",
+            "room_size_sqm",
+            "smoking_allowed",
+            "children_allowed",
+            "refundable",
+            "check_in_time",
+            "check_out_time"
         ]
 
 
-class HotelListingSerializer(serializers.ModelSerializer):
+class RoomListingSerializer(serializers.ModelSerializer):
     address = JsonSerializerField()
     images = serializers.ListField(child=serializers.ImageField())
 
     class Meta:
-        model = HotelListing
+        model = RoomListing
         fields = [
             "images",
             "title",
             "description",
             "price",
             "address",
-            "capacity",
-            "service_type",
             "amenities",
+            "number_of_guests",
+            "total_units",
+            "bed_type",
+            "room_size_sqm",
+            "smoking_allowed",
+            "children_allowed",
+            "refundable",
+            "check_in_time",
+            "check_out_time"
         ]
 
     def validate_address(self, attr):
@@ -50,7 +64,7 @@ class HotelListingSerializer(serializers.ModelSerializer):
         return ListingService.create_hotel_listing(validated_data)
 
     def to_representation(self, instance):
-        return HotelListingResponseSerializer(instance, self.context).to_representation(
+        return RoomListingResponseSerializer(instance, self.context).to_representation(
             instance
         )
 

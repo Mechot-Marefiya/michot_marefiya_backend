@@ -56,7 +56,7 @@ class UserResponseSerializer(serializers.ModelSerializer):
 class CompanyProfileResponseSerializer(serializers.ModelSerializer):
     class Meta:
         model = CompanyProfile
-        fields = ["name", "phone", "industry", "description"]
+        fields = ["name", "phone", "category", "description"]
 
 
 class CompanyProfileSerializer(serializers.ModelSerializer):
@@ -75,7 +75,7 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
             "address",
             "phone",
             "logo",
-            "industry",
+            "category",
             "description",
         ]
 

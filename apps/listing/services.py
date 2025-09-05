@@ -1,7 +1,7 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 
-from apps.account.models import CompanyProfile
+from apps.account.models import CompanyProfile, HotelProfile
 from apps.core.models import Address
 from apps.listing.models import HotelListing, ListingImage
 
@@ -23,6 +23,8 @@ class ListingService:
         # ? themselves. But if this will be done by the Michot admin, this will mess up
         company = get_object_or_404(CompanyProfile, user=user)
 
+        hotel_profile = get_object_or_404(HotelProfile, company=company)
+
         address_instance = None
 
         if address_data:
@@ -31,7 +33,7 @@ class ListingService:
             address_instance = company.address
 
         hotel_listing_instance = HotelListing.objects.create(
-            company=company, address=address_instance, **validated_data
+            hotel=hotel_profile, address=address_instance, **validated_data
         )
 
         # M2M to amenities

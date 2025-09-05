@@ -2,7 +2,7 @@ from io import BytesIO
 from PIL import Image
 import pytest
 from rest_framework.test import APIClient
-from apps.account.models import CompanyProfile
+from apps.account.models import CompanyProfile, HotelProfile
 from django.core.files.uploadedfile import SimpleUploadedFile
 
 from apps.core.models import Address
@@ -48,13 +48,25 @@ def company_profile(company_user):
         "license": license,
         "address": address,
         "logo": logo,
-        "industry": "hospitality",
+        "category": "hotel",
     }
     return CompanyProfile.objects.create(user=company_user, **data)
 
 
 @pytest.fixture
+def hotel_profile(company_profile):
+    return HotelProfile.objects.create(company=company_profile, stars=5)
+
+
+@pytest.fixture
 def authenticated_company_client(company_user, company_profile) -> APIClient:
+    client = APIClient()
+    client.force_authenticate(user=company_user)
+    return client
+
+
+@pytest.fixture
+def authenticated_hotel_profile_client(company_user, hotel_profile):
     client = APIClient()
     client.force_authenticate(user=company_user)
     return client

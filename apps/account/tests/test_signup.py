@@ -74,7 +74,7 @@ def test_company_registration(api_client, company_role):
         "license": license,
         "address": address,
         "logo": logo,
-        "industry": "hospitality",
+        "category": "hotel",
     }
 
     res = api_client.post(reverse("companies-list"), data, format="multipart")
@@ -112,7 +112,7 @@ def test_company_registration_fails_on_invalid_data(api_client, company_role):
         "license": license,
         "address": address,
         "logo": logo,
-        "industry": "invalid_choice",
+        "category": "invalid_choice",
         "description": "",
     }
 

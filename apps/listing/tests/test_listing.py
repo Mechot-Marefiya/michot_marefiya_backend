@@ -17,7 +17,7 @@ def create_test_image(name="test.png", ext="PNG", size=(100, 100), color=(255, 0
 
 
 @pytest.mark.django_db
-def test_hotel_listing_creation(authenticated_company_client):
+def test_hotel_listing_creation(authenticated_hotel_profile_client):
     images_list = []
     for i in range(1, 6):
         img_name = "img_" + str(i)
@@ -36,9 +36,11 @@ def test_hotel_listing_creation(authenticated_company_client):
             "longitude": "23.46",
         }
     )
+
     amenities = [
         Amenity.objects.create(name=am).id for am in ["wifi", "pool", "balcony"]
     ]
+
     print(amenities)
 
     # json.dumps(amenities)
@@ -54,7 +56,7 @@ def test_hotel_listing_creation(authenticated_company_client):
         "amenities": amenities,
     }
 
-    res = authenticated_company_client.post(
+    res = authenticated_hotel_profile_client.post(
         reverse("hotel_listings-list"), data, format="multipart"
     )
 

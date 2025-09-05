@@ -6,7 +6,11 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 from django.utils.translation import gettext_lazy as _
 
 from apps.core.models import AbstractBaseModel, Address
-from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile
+from apps.account.models import (
+    CompanyProfile,
+    HotelProfile,
+    IndividualOwnerProfile
+)
 
 
 class ListingImage(AbstractBaseModel):
@@ -54,7 +58,8 @@ class BaseListing(AbstractBaseModel):
     title = models.CharField(
         max_length=255,
         verbose_name=_("Title"),
-        help_text=_("Title of the listing, e.g., 'Luxury Suite with Pool View'."),
+        help_text=_(
+            "Title of the listing, e.g., 'Luxury Suite with Pool View'."),
     )
 
     description = models.TextField(
@@ -63,7 +68,7 @@ class BaseListing(AbstractBaseModel):
         help_text=_("Detailed description of the listing."),
     )
 
-    price = models.DecimalField(
+    base_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
         null=True,
@@ -85,7 +90,8 @@ class BaseListing(AbstractBaseModel):
 class Amenity(AbstractBaseModel):
     """Shared amenities for room-level (AC, balcony, kettle, TV, etc.)"""
 
-    name = models.CharField(max_length=255, unique=True, verbose_name=_("Name"))
+    name = models.CharField(max_length=255, unique=True,
+                            verbose_name=_("Name"))
 
     icon = models.CharField(max_length=100, blank=True, verbose_name=_("Icon"))
 
@@ -96,60 +102,6 @@ class Amenity(AbstractBaseModel):
 
     def __str__(self):
         return self.name
-
-
-class HotelListing(BaseListing):
-    class HotelServiceChoices(models.TextChoices):
-        ROOM = "room", _("Room")
-        AUDITORIUM = "auditorium", _("Auditorium")
-        CONFERENCE_HALL = "conference_hall", _("Conference Hall")
-
-    company = models.ForeignKey(
-        HotelProfile,
-        on_delete=models.CASCADE,
-        related_name="%(class)ss",
-        verbose_name=_("Company"),
-        help_text=_("The company that owns this listing."),
-        null=True,
-        blank=True,
-    )
-
-    address = models.OneToOneField(
-        Address,
-        on_delete=models.RESTRICT,
-        related_name="+",
-        # * Making only optional for validation cause either we use
-        # * from payload or reuse company HQ address
-        blank=True,
-    )
-
-    capacity = models.PositiveIntegerField(
-        verbose_name=_("Capacity"),
-        help_text=_("Number of guests this service can accommodate."),
-        null=True,
-        blank=True,
-    )
-
-    service_type = models.CharField(
-        max_length=50,
-        choices=HotelServiceChoices.choices,
-        verbose_name=_("Service Type"),
-    )
-
-    amenities = models.ManyToManyField(
-        Amenity,
-        blank=True,
-        related_name="hotel_listings",
-        verbose_name=_("Amenities"),
-    )
-
-    class Meta:
-        verbose_name = _("Hotel Listing")
-        verbose_name_plural = _("Hotel Listings")
-        db_table = "hotel_listings"
-
-    def __str__(self):
-        return f"{self.company.name}::{self.service_type}"
 
 
 class CarListing(BaseListing):
@@ -188,7 +140,7 @@ class CarListing(BaseListing):
     company = models.ForeignKey(
         CompanyProfile,
         on_delete=models.CASCADE,
-        related_name="%(class)ss",
+        related_name="car_listings",
         verbose_name=_("Company"),
         help_text=_("The company that owns this listing."),
         null=True,
@@ -198,7 +150,7 @@ class CarListing(BaseListing):
     individual_owner = models.ForeignKey(
         IndividualOwnerProfile,
         on_delete=models.CASCADE,
-        related_name="%(class)ss",
+        related_name="car_listings",
         verbose_name=_("Individual Owner"),
         help_text=_("The individual person that owns this listing."),
         null=True,
@@ -256,7 +208,7 @@ class CarListing(BaseListing):
                     (Q(individual_owner__isnull=False) & Q(company__isnull=True))
                     | (Q(individual_owner__isnull=True) & Q(company__isnull=False))
                 ),
-                name="owner_must_exist",
+                name="car_owner_must_exist",
             )
         ]
 
@@ -275,7 +227,7 @@ class PropertyListing(BaseListing):
     company = models.ForeignKey(
         CompanyProfile,
         on_delete=models.CASCADE,
-        related_name="%(class)ss",
+        related_name="property_listings",
         verbose_name=_("Company"),
         help_text=_("The company that owns this listing."),
         null=True,
@@ -285,14 +237,15 @@ class PropertyListing(BaseListing):
     individual_owner = models.ForeignKey(
         IndividualOwnerProfile,
         on_delete=models.CASCADE,
-        related_name="%(class)ss",
+        related_name="property_listings",
         verbose_name=_("Individual Owner"),
         help_text=_("The individual person that owns this listing."),
         null=True,
         blank=True,
     )
 
-    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(
+        Address, on_delete=models.RESTRICT, related_name="+")
 
     property_type = models.CharField(
         max_length=50,
@@ -332,10 +285,10 @@ class PropertyListing(BaseListing):
             # * Enforcing either one of the owners(company, or individual) must exist
             models.CheckConstraint(
                 check=(
-                    models.Q(company__isnull=False)
-                    | models.Q(individual_owner__isnull=False)
+                    (Q(individual_owner__isnull=False) & Q(company__isnull=True))
+                    | (Q(individual_owner__isnull=True) & Q(company__isnull=False))
                 ),
-                name="owner_must_exist",
+                name="property_owner_must_exist",
             )
         ]
 
@@ -346,7 +299,7 @@ class PropertyListing(BaseListing):
 # -------------------------
 # ROOM-TYPE LISTING (discoverable, bookable)
 # -------------------------
-class RoomType(AbstractBaseModel):
+class RoomListing(BaseListing):
     """
     One row ~= one room type for a given hotel (company with industry=hospitality).
     Example titles: 'Standard Twin Room', 'Deluxe King Suite'
@@ -359,12 +312,33 @@ class RoomType(AbstractBaseModel):
         DOUBLE = "double", _("Double")
         MIXED = "mixed", _("Mixed/Multiple")
 
-    listing = models.ForeignKey(
-        HotelListing,
+    hotel = models.ForeignKey(
+        HotelProfile,
         on_delete=models.CASCADE,
-        related_name="room_types",
-        limit_choices_to={"service_type": HotelListing.HotelServiceChoices.ROOM},
+        related_name="hotel_listings",
+        verbose_name=_("Company"),
+        help_text=_("The company that owns this listing."),
+        null=True,
+        blank=True,
     )
+
+    address = models.OneToOneField(
+        Address,
+        on_delete=models.RESTRICT,
+        related_name="+",
+        # * Making only optional for validation cause either we use
+        # * from payload or reuse company HQ address
+        blank=True,
+    )
+
+    amenities = models.ManyToManyField(
+        Amenity,
+        blank=True,
+        related_name="hotel_listings",
+        verbose_name=_("Amenities"),
+    )
+
+    number_of_guests = models.PositiveIntegerField(default=1)
 
     total_units = models.PositiveIntegerField(
         verbose_name=_("Total Rooms of This Type"),
@@ -375,7 +349,7 @@ class RoomType(AbstractBaseModel):
         max_length=20, choices=BedType.choices, default=BedType.MIXED
     )
 
-    room_size_sqm = models.PositiveIntegerField(blank=True, null=True)
+    room_size_sqm = models.PositiveIntegerField()
 
     smoking_allowed = models.BooleanField(default=False)
 
@@ -385,12 +359,13 @@ class RoomType(AbstractBaseModel):
         default=True, help_text=_("Whether standard rate is refundable.")
     )
 
-    check_in_time = models.TimeField(blank=True, null=True)
-
-    check_out_time = models.TimeField(blank=True, null=True)
+    class Meta:
+        verbose_name = _("Room Type")
+        verbose_name_plural = _("Room Types")
+        db_table = "room_types"
 
     def __str__(self):
-        return f"{self.listing.title}"
+        return f"{self.title}"
 
 
 class RoomInventory(AbstractBaseModel):
@@ -399,61 +374,79 @@ class RoomInventory(AbstractBaseModel):
     price overrides RoomTypeListing.price when set.
     """
 
-    room_type = models.ForeignKey(
-        RoomType,
+    room_listing = models.ForeignKey(
+        RoomListing,
         on_delete=models.CASCADE,
-        related_name="inventory",
+        related_name="inventories"
     )
 
     date = models.DateField(db_index=True)
 
-    # TODO: Thinking the system will auto monitor taken and available units
-    # available_units = models.PositiveIntegerField(
-    #     help_text=_("Units available for this date (<= total_units).")
-    # )
-
     price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        help_text=_("Price for this date; falls back to room base price if null."),
+        help_text=_(
+            "Price for this date; falls back to room base price if null."),
         null=True,
-        blank=True,
+        blank=True
     )
 
     class Meta:
+        verbose_name = _("Room Inventory")
+        verbose_name_plural = _("Room Inventories")
+        db_table = "room_inventories"
         unique_together = ("room_type", "date")
         ordering = ["date"]
 
     def __str__(self):
-        return f"{self.room_type} — {self.date}"
+        return f"{self.room} — {self.date}"
 
 
-# -------------------------
-# EVENT SPACE LISTING (halls / auditoriums)
-# -------------------------
-class EventSpace(AbstractBaseModel):
+class EventSpaceListing(BaseListing):
     class SpaceType(models.TextChoices):
         AUDITORIUM = "auditorium", _("Auditorium")
         CONFERENCE_HALL = "conference_hall", _("Conference Hall")
         MEETING_ROOM = "meeting_room", _("Meeting Room")
 
-    listing = models.ForeignKey(
-        HotelListing,
+    hotel = models.ForeignKey(
+        HotelProfile,
         on_delete=models.CASCADE,
-        related_name="room_types",
-        limit_choices_to={"service_type": HotelListing.HotelServiceChoices.ROOM},
+        related_name="hotel_listings",
+        verbose_name=_("Company"),
+        help_text=_("The company that owns this listing."),
+        null=True,
+        blank=True,
     )
+
+    address = models.OneToOneField(
+        Address,
+        on_delete=models.RESTRICT,
+        related_name="+",
+        # * Making only optional for validation cause either we use
+        # * from payload or reuse company HQ address
+        blank=True,
+    )
+
+    amenities = models.ManyToManyField(
+        Amenity,
+        blank=True,
+        related_name="hotel_listings",
+        verbose_name=_("Amenities"),
+    )
+
+    number_of_guests = models.PositiveIntegerField(default=1)
 
     space_type = models.CharField(max_length=50, choices=SpaceType.choices)
 
     floor_area_sqm = models.PositiveIntegerField(blank=True, null=True)
 
-    check_in_time = models.TimeField(blank=True, null=True)
-
-    check_out_time = models.TimeField(blank=True, null=True)
+    class Meta:
+        verbose_name = _("Event space")
+        verbose_name_plural = _("Event Spaces")
+        db_table = "event_spaces"
 
     def __str__(self):
-        return f"{self.listing.title}"
+        return f"{self.title}"
 
 
 class EventSpaceAvailability(AbstractBaseModel):
@@ -462,38 +455,40 @@ class EventSpaceAvailability(AbstractBaseModel):
     Later you can add time-slot granularity.
     """
 
-    space = models.ForeignKey(
-        EventSpace, on_delete=models.CASCADE, related_name="availability"
+    space_listing = models.ForeignKey(
+        EventSpaceListing,
+        on_delete=models.CASCADE,
+        related_name="availability"
     )
 
     date = models.DateField(db_index=True)
 
-    # available_units = models.PositiveIntegerField(default=1)
-
-    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True)
 
     class Meta:
+        verbose_name = _("Event space Availability")
+        verbose_name_plural = _("Event Space Availabilities")
+        db_table = "event_space_availabilities"
         unique_together = ("space", "date")
         ordering = ["date"]
 
     def __str__(self):
-        return f"{self.space} — {self.date}"
+        return f"{self.space_listing} — {self.date}"
 
 
-# -------------------------
-# BOOKINGS (single table; exactly one target: room OR event space)
-# -------------------------
 class Booking(AbstractBaseModel):
     class BookingStatus(models.TextChoices):
         PENDING = "pending", _("Pending")
         CONFIRMED = "confirmed", _("Confirmed")
         CANCELLED = "cancelled", _("Cancelled")
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL,
+                             on_delete=models.CASCADE)
 
     # Choose ONE of these (enforced by DB constraint below)
-    room_type = models.ForeignKey(
-        RoomType,
+    room = models.ForeignKey(
+        RoomListing,
         on_delete=models.CASCADE,
         null=True,
         blank=True,
@@ -501,28 +496,33 @@ class Booking(AbstractBaseModel):
     )
 
     event_space = models.ForeignKey(
-        EventSpace,
+        EventSpaceListing,
         on_delete=models.CASCADE,
         null=True,
         blank=True,
         related_name="bookings",
     )
 
+    units_booked = models.PositiveIntegerField(default=1)
+
     # for rooms: first night; for halls: event start date
-    check_in = models.DateField()
+    check_in_date = models.DateField()
 
     # for rooms: last night (exclusive); for halls: event end date (MVP: same day)
-    check_out = models.DateField()
-
-    guests = models.PositiveIntegerField(default=1)
+    check_out_date = models.DateField()
 
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
 
     status = models.CharField(
-        max_length=20, choices=BookingStatus.choices, default=BookingStatus.PENDING
+        max_length=20,
+        choices=BookingStatus.choices,
+        default=BookingStatus.PENDING
     )
 
     class Meta:
+        verbose_name = _("Booking")
+        verbose_name_plural = _("Bookings")
+        db_table = "bookings"
         constraints = [
             # Exactly one target must be set
             models.CheckConstraint(
@@ -540,7 +540,7 @@ class Booking(AbstractBaseModel):
         ]
 
     def __str__(self):
-        target = self.room_type or self.event_space
+        target = self.room or self.event_space
         return f"Booking #{self.id} - {self.user} @ {target}"
 
 
@@ -562,6 +562,11 @@ class Payment(AbstractBaseModel):
     )
 
     transaction_id = models.CharField(max_length=100, blank=True, null=True)
+
+    class Meta:
+        verbose_name = _("Payment")
+        verbose_name_plural = _("Payments")
+        db_table = "payments"
 
     def __str__(self):
         return f"Payment for Booking #{self.booking.id} - {self.status}"
