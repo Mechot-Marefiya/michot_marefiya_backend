@@ -13,3 +13,7 @@ so I'm thinking:
 
 - Allow michot admin to add such verified individuals properties to listings. To do so,
 We need to make two foreign keys (`CompanyProfile`, and `IndividualProfile`) in the listings table. Both should be `blank=true, null=true` but we gonna enforce one of them using `checkConstraint`.
+
+## How are we going to Handle Filtering by checkin date?
+
+We are going to use the `Booking` model as a source of truth for filtering. We filter rooms by checking `check_in_date < 'user_prefered_checkin_date` and `check_out_date > 'user_prefered_checkin_date'` and count `units_booked` for those filtered and if it's less than `total_units`, we gonna show them.  
