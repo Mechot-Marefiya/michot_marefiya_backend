@@ -1,9 +1,9 @@
-from apps.listing.views import HotelListingViewSet
+from apps.listing.views import RoomListingViewSet
 from rest_framework.routers import DefaultRouter
 
 
 router = DefaultRouter()
 
-router.register("hotel-listings", HotelListingViewSet, basename="hotel_listings")
+router.register("rooms", RoomListingViewSet, basename="rooms")
 
 urlpatterns = router.urls

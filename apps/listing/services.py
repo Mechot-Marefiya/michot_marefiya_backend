@@ -3,7 +3,7 @@ from django.shortcuts import get_object_or_404
 
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.core.models import Address
-from apps.listing.models import HotelListing, ListingImage
+from apps.listing.models import ListingImage, RoomListing
 
 
 class ListingService:
@@ -32,16 +32,16 @@ class ListingService:
         else:
             address_instance = company.address
 
-        hotel_listing_instance = HotelListing.objects.create(
+        room_listing_instance = RoomListing.objects.create(
             hotel=hotel_profile, address=address_instance, **validated_data
         )
 
         # M2M to amenities
-        hotel_listing_instance.amenities.set(amenitites)
+        room_listing_instance.amenities.set(amenitites)
 
-        ListingService.create_images(hotel_listing_instance, images)
+        ListingService.create_images(room_listing_instance, images)
 
-        return hotel_listing_instance
+        return room_listing_instance
 
     @staticmethod
     def create_address(address_data) -> Address:

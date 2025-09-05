@@ -14,7 +14,7 @@ class RoomListingResponseSerializer(serializers.ModelSerializer):
             "images",
             "title",
             "description",
-            "price",
+            "base_price",
             "amenities",
             "number_of_guests",
             "total_units",
@@ -22,9 +22,7 @@ class RoomListingResponseSerializer(serializers.ModelSerializer):
             "room_size_sqm",
             "smoking_allowed",
             "children_allowed",
-            "refundable",
-            "check_in_time",
-            "check_out_time"
+            "refundable"
         ]
 
 
@@ -38,7 +36,7 @@ class RoomListingSerializer(serializers.ModelSerializer):
             "images",
             "title",
             "description",
-            "price",
+            "base_price",
             "address",
             "amenities",
             "number_of_guests",
@@ -47,9 +45,7 @@ class RoomListingSerializer(serializers.ModelSerializer):
             "room_size_sqm",
             "smoking_allowed",
             "children_allowed",
-            "refundable",
-            "check_in_time",
-            "check_out_time"
+            "refundable"
         ]
 
     def validate_address(self, attr):

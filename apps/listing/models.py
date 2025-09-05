@@ -71,8 +71,6 @@ class BaseListing(AbstractBaseModel):
     base_price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        null=True,
-        blank=True,
         verbose_name=_("Price"),
         help_text=_("Price of the service/product (if applicable)."),
     )
@@ -315,7 +313,7 @@ class RoomListing(BaseListing):
     hotel = models.ForeignKey(
         HotelProfile,
         on_delete=models.CASCADE,
-        related_name="hotel_listings",
+        related_name="room_listings",
         verbose_name=_("Company"),
         help_text=_("The company that owns this listing."),
         null=True,
@@ -334,7 +332,7 @@ class RoomListing(BaseListing):
     amenities = models.ManyToManyField(
         Amenity,
         blank=True,
-        related_name="hotel_listings",
+        related_name="room_listings",
         verbose_name=_("Amenities"),
     )
 
@@ -371,7 +369,7 @@ class RoomListing(BaseListing):
 class RoomInventory(AbstractBaseModel):
     """
     Per-day stock & price for a given room type.
-    price overrides RoomTypeListing.price when set.
+    price overrides RoomListing.base_price when set.
     """
 
     room_listing = models.ForeignKey(
@@ -395,11 +393,11 @@ class RoomInventory(AbstractBaseModel):
         verbose_name = _("Room Inventory")
         verbose_name_plural = _("Room Inventories")
         db_table = "room_inventories"
-        unique_together = ("room_type", "date")
+        unique_together = ("room_listing", "date")
         ordering = ["date"]
 
     def __str__(self):
-        return f"{self.room} — {self.date}"
+        return f"{self.room_listing} — {self.date}"
 
 
 class EventSpaceListing(BaseListing):
@@ -411,7 +409,7 @@ class EventSpaceListing(BaseListing):
     hotel = models.ForeignKey(
         HotelProfile,
         on_delete=models.CASCADE,
-        related_name="hotel_listings",
+        related_name="event_space_listings",
         verbose_name=_("Company"),
         help_text=_("The company that owns this listing."),
         null=True,
@@ -430,7 +428,7 @@ class EventSpaceListing(BaseListing):
     amenities = models.ManyToManyField(
         Amenity,
         blank=True,
-        related_name="hotel_listings",
+        related_name="event_space_listings",
         verbose_name=_("Amenities"),
     )
 
@@ -470,7 +468,7 @@ class EventSpaceAvailability(AbstractBaseModel):
         verbose_name = _("Event space Availability")
         verbose_name_plural = _("Event Space Availabilities")
         db_table = "event_space_availabilities"
-        unique_together = ("space", "date")
+        unique_together = ("space_listing", "date")
         ordering = ["date"]
 
     def __str__(self):
@@ -527,14 +525,14 @@ class Booking(AbstractBaseModel):
             # Exactly one target must be set
             models.CheckConstraint(
                 check=(
-                    (Q(room_type__isnull=False) & Q(event_space__isnull=True))
-                    | (Q(room_type__isnull=True) & Q(event_space__isnull=False))
+                    (Q(room__isnull=False) & Q(event_space__isnull=True))
+                    | (Q(room__isnull=True) & Q(event_space__isnull=False))
                 ),
                 name="booking_exactly_one_target",
             ),
             # Valid date range
             models.CheckConstraint(
-                check=Q(check_in__lt=F("check_out")),
+                check=Q(check_in_date__lt=F("check_out_date")),
                 name="booking_valid_dates",
             ),
         ]

@@ -1,17 +1,18 @@
 from rest_framework.permissions import AllowAny
 from apps.core.views import AbstractModelViewSet
-from apps.listing.models import CarListing, PropertyListing, Room
+from apps.listing.models import CarListing, PropertyListing, RoomListing
 from apps.listing.serializers import (
     CarListingSerializer,
     # HotelListingSerializer,
     PropertyListingSerializer,
+    RoomListingSerializer,
 )
 
 
 class RoomListingViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = RoomListingSerializer
-    queryset = Room.objects.all()
+    queryset = RoomListing.objects.all()
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
