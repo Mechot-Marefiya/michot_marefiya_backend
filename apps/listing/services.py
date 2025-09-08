@@ -3,7 +3,7 @@ from django.shortcuts import get_object_or_404
 
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.core.models import Address
-from apps.listing.models import ListingImage, RoomListing
+from apps.listing.models import GuestHouseListing, ListingImage, RoomListing
 
 
 class ListingService:
@@ -17,8 +17,8 @@ class ListingService:
         # TODO: registration then avoid listing address fill form the UI and
         # TODO:  also make it optional here as well so that we can reuse the HQ address.
         address_data = validated_data.pop("address", None)
-        amenitites = validated_data.pop("amenities")
-
+        amenities = validated_data.pop("amenities")
+        print("UM", amenities)
         # ? I assumed this listing creation is done by the companies
         # ? themselves. But if this will be done by the Michot admin, this will mess up
         company = get_object_or_404(CompanyProfile, user=user)
@@ -37,11 +37,31 @@ class ListingService:
         )
 
         # M2M to amenities
-        room_listing_instance.amenities.set(amenitites)
+        room_listing_instance.amenities.set(amenities)
 
         ListingService.create_images(room_listing_instance, images)
 
         return room_listing_instance
+
+    @staticmethod
+    @transaction.atomic()
+    def create_guest_house_listing(validated_data: dict):
+        print("VD", validated_data)
+        images = validated_data.pop("images")
+        address_data = validated_data.pop("address", None)
+        amenities = validated_data.pop("amenities")
+
+        address_instance = ListingService.create_address(address_data)
+
+        guest_house_listing_instance = GuestHouseListing.objects.create(
+            address=address_instance, **validated_data
+        )
+        # M2M to amenities
+        guest_house_listing_instance.amenities.set(amenities)
+
+        ListingService.create_images(guest_house_listing_instance, images)
+
+        return guest_house_listing_instance
 
     @staticmethod
     def create_address(address_data) -> Address:

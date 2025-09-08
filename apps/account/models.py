@@ -55,6 +55,7 @@ class CompanyProfile(AbstractBaseModel):
     class CategoryChoice(models.TextChoices):
         HOTEL = "hotel", _("Hotel")
         PENSION = "pension", _("Pension")
+        GUEST_HOUSE = "guest_house", _("Guest House")
         REALESTATE = "real_estate", _("Real Estate")
         APARTMENT = "apartment", _("Apartment")
         VEHICLE = "vehicle", _("Vehicle")
@@ -154,5 +155,8 @@ class HotelProfile(AbstractBaseModel):
     company = models.OneToOneField(
         CompanyProfile, on_delete=models.CASCADE, related_name="+"
     )
-    stars = models.PositiveSmallIntegerField(verbose_name=_("Stars"))
+    # * Making these two nullable cause pensions/some hotels might not have those.
+    stars = models.PositiveSmallIntegerField(
+        verbose_name=_("Stars"), null=True, blank=True
+    )
     facilities = models.ManyToManyField(Facility, blank=True)

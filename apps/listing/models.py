@@ -135,6 +135,14 @@ class CarListing(BaseListing):
         FIAT = "fiat", _("Fiat")
         PEUGEOT = "peugeot", _("Peugeot")
 
+    class ListingTypeChoices(models.TextChoices):
+        SELL = "sale", _("For Sale")
+        RENT = "rent", _("For Rent")
+
+    class ConditionChoices(models.TextChoices):
+        NEW = "new", _("Brand New")
+        USED = "used", _("Used")
+
     company = models.ForeignKey(
         CompanyProfile,
         on_delete=models.CASCADE,
@@ -190,9 +198,16 @@ class CarListing(BaseListing):
         verbose_name=_("Transmission"),
     )
 
-    is_for_sale = models.BooleanField(
-        default=False,
-        verbose_name=_("Is for Sale"),
+    listing_type = models.CharField(
+        max_length=200,
+        choices=ListingTypeChoices.choices,
+        default=ListingTypeChoices.RENT,
+        verbose_name=_("Listing Type"),
+        help_text=_("Whether the item is For sell or Rent."),
+    )
+
+    condition = models.CharField(
+        max_length=200, choices=ConditionChoices.choices, verbose_name=_("Condition")
     )
 
     class Meta:
@@ -294,12 +309,74 @@ class PropertyListing(BaseListing):
         return self.property_type
 
 
-# -------------------------
-# ROOM-TYPE LISTING (discoverable, bookable)
-# -------------------------
+class GuestHouseListing(BaseListing):
+    company = models.ForeignKey(
+        CompanyProfile,
+        on_delete=models.CASCADE,
+        related_name="guest_house_listings",
+        verbose_name=_("Company"),
+        help_text=_("The company that owns this listing."),
+        null=True,
+        blank=True,
+    )
+
+    individual_owner = models.ForeignKey(
+        IndividualOwnerProfile,
+        on_delete=models.CASCADE,
+        related_name="guest_house_listings",
+        verbose_name=_("Individual Owner"),
+        help_text=_("The individual person that owns this listing."),
+        null=True,
+        blank=True,
+    )
+
+    address = models.OneToOneField(
+        Address, on_delete=models.RESTRICT, related_name="+", blank=True
+    )
+
+    total_rooms = models.PositiveIntegerField(
+        verbose_name=_("Total Rooms"),
+        help_text=_("Number of rooms available in the guest house."),
+    )
+
+    amenities = models.ManyToManyField(
+        Amenity,
+        blank=True,
+        related_name="guest_house_listings",
+        verbose_name=_("Amenities"),
+    )
+
+    rating = models.DecimalField(
+        max_digits=3,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name=_("Average Rating"),
+        help_text=_("Average rating from user reviews (0–5)."),
+    )
+
+    class Meta:
+        verbose_name = _("Guest House")
+        verbose_name_plural = _("Guest Houses")
+        db_table = "guest_houses"
+        constraints = [
+            # * Enforcing either one of the owners(company, or individual) must exist
+            models.CheckConstraint(
+                check=(
+                    (Q(individual_owner__isnull=False) & Q(company__isnull=True))
+                    | (Q(individual_owner__isnull=True) & Q(company__isnull=False))
+                ),
+                name="guest_house_owner_must_exist",
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.title} ({self.address.city})"
+
+
 class RoomListing(BaseListing):
     """
-    One row ~= one room type for a given hotel (company with industry=hospitality).
+    One row ~= one room type for a given hotel.
     Example titles: 'Standard Twin Room', 'Deluxe King Suite'
     """
 
@@ -360,7 +437,7 @@ class RoomListing(BaseListing):
     class Meta:
         verbose_name = _("Room Type")
         verbose_name_plural = _("Room Types")
-        db_table = "room_types"
+        db_table = "room_listings"
 
     def __str__(self):
         return f"{self.title}"
@@ -373,9 +450,7 @@ class RoomInventory(AbstractBaseModel):
     """
 
     room_listing = models.ForeignKey(
-        RoomListing,
-        on_delete=models.CASCADE,
-        related_name="inventories"
+        RoomListing, on_delete=models.CASCADE, related_name="inventories"
     )
 
     date = models.DateField(db_index=True)
@@ -386,7 +461,7 @@ class RoomInventory(AbstractBaseModel):
         help_text=_(
             "Price for this date; falls back to room base price if null."),
         null=True,
-        blank=True
+        blank=True,
     )
 
     class Meta:
@@ -454,9 +529,7 @@ class EventSpaceAvailability(AbstractBaseModel):
     """
 
     space_listing = models.ForeignKey(
-        EventSpaceListing,
-        on_delete=models.CASCADE,
-        related_name="availability"
+        EventSpaceListing, on_delete=models.CASCADE, related_name="availability"
     )
 
     date = models.DateField(db_index=True)
@@ -512,9 +585,7 @@ class Booking(AbstractBaseModel):
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
 
     status = models.CharField(
-        max_length=20,
-        choices=BookingStatus.choices,
-        default=BookingStatus.PENDING
+        max_length=20, choices=BookingStatus.choices, default=BookingStatus.PENDING
     )
 
     class Meta:
@@ -556,7 +627,9 @@ class Payment(AbstractBaseModel):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
 
     status = models.CharField(
-        max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING
+        max_length=20,
+        choices=PaymentStatus.choices,
+        default=PaymentStatus.PENDING
     )
 
     transaction_id = models.CharField(max_length=100, blank=True, null=True)
