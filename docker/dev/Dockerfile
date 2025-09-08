@@ -2,32 +2,29 @@
 FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1
-ENV MAIN_DIR=/code
+ENV MAIN_DIR=/usr/src/app
 
-RUN addgroup --system app && adduser --system --group app
+# Build args we expect from the compose. 1000 is just default vals
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+
+# Create non-root user with matching UID/GID
+RUN addgroup --system --gid $GROUP_ID app && \
+    adduser --system --uid $USER_ID --gid $GROUP_ID app
 
 WORKDIR $MAIN_DIR
 
-# # Create the static and media files directories
-# RUN mkdir $MAIN_DIR/staticfiles
-# RUN mkdir $MAIN_DIR/mediafiles
+# Install uv with pip cache
+RUN --mount=type=cache,target=/home/app/.cache/pip,id=pip \
+    python -m pip install uv
 
-# Install uv 
-RUN --mount=type=cache,target=/home/dagi/.cache/pip,id=pip \
-    python -m pip install uv 
-
-# Install dependencies
+# Install dependencies (requirements first for better caching)
 COPY ./requirements/ ./requirements/
 
-# Run uv pip install with caching! 
-RUN --mount=type=cache,target=/home/dagi/.cache/pip,id=pip \
+RUN --mount=type=cache,target=/home/app/.cache/pip,id=pip \
     uv pip install --system -r ./requirements/dev.txt
 
-
-# Copy the rest of the application code
+# Copy the rest of the code (ownership doesn’t matter — will be bind-mounted in dev)
 COPY . .
-
-# change the ownership all the files to the app user
-RUN chown -R app:app $MAIN_DIR
 
 EXPOSE 8000
