@@ -6,11 +6,7 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 from django.utils.translation import gettext_lazy as _
 
 from apps.core.models import AbstractBaseModel, Address
-from apps.account.models import (
-    CompanyProfile,
-    HotelProfile,
-    IndividualOwnerProfile
-)
+from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile
 
 
 class ListingImage(AbstractBaseModel):
@@ -58,8 +54,7 @@ class BaseListing(AbstractBaseModel):
     title = models.CharField(
         max_length=255,
         verbose_name=_("Title"),
-        help_text=_(
-            "Title of the listing, e.g., 'Luxury Suite with Pool View'."),
+        help_text=_("Title of the listing, e.g., 'Luxury Suite with Pool View'."),
     )
 
     description = models.TextField(
@@ -88,8 +83,7 @@ class BaseListing(AbstractBaseModel):
 class Amenity(AbstractBaseModel):
     """Shared amenities for room-level (AC, balcony, kettle, TV, etc.)"""
 
-    name = models.CharField(max_length=255, unique=True,
-                            verbose_name=_("Name"))
+    name = models.CharField(max_length=255, unique=True, verbose_name=_("Name"))
 
     icon = models.CharField(max_length=100, blank=True, verbose_name=_("Icon"))
 
@@ -237,6 +231,10 @@ class PropertyListing(BaseListing):
         HOUSE = "house", _("House")
         LAND = "land", _("Land")
 
+    class ListingTypeChoices(models.TextChoices):
+        SELL = "sale", _("For Sale")
+        RENT = "rent", _("For Rent")
+
     company = models.ForeignKey(
         CompanyProfile,
         on_delete=models.CASCADE,
@@ -257,8 +255,7 @@ class PropertyListing(BaseListing):
         blank=True,
     )
 
-    address = models.OneToOneField(
-        Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
 
     property_type = models.CharField(
         max_length=50,
@@ -285,9 +282,12 @@ class PropertyListing(BaseListing):
         verbose_name=_("Is Furnished"),
     )
 
-    is_for_sale = models.BooleanField(
-        default=False,
-        verbose_name=_("Is for Sale"),
+    listing_type = models.CharField(
+        max_length=200,
+        choices=ListingTypeChoices.choices,
+        default=ListingTypeChoices.RENT,
+        verbose_name=_("Listing Type"),
+        help_text=_("Whether the item is For sell or Rent."),
     )
 
     class Meta:
@@ -458,8 +458,7 @@ class RoomInventory(AbstractBaseModel):
     price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        help_text=_(
-            "Price for this date; falls back to room base price if null."),
+        help_text=_("Price for this date; falls back to room base price if null."),
         null=True,
         blank=True,
     )
@@ -534,8 +533,7 @@ class EventSpaceAvailability(AbstractBaseModel):
 
     date = models.DateField(db_index=True)
 
-    price = models.DecimalField(
-        max_digits=10, decimal_places=2, null=True, blank=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     class Meta:
         verbose_name = _("Event space Availability")
@@ -554,8 +552,7 @@ class Booking(AbstractBaseModel):
         CONFIRMED = "confirmed", _("Confirmed")
         CANCELLED = "cancelled", _("Cancelled")
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL,
-                             on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
 
     # Choose ONE of these (enforced by DB constraint below)
     room = models.ForeignKey(
@@ -627,9 +624,7 @@ class Payment(AbstractBaseModel):
     amount = models.DecimalField(max_digits=10, decimal_places=2)
 
     status = models.CharField(
-        max_length=20,
-        choices=PaymentStatus.choices,
-        default=PaymentStatus.PENDING
+        max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING
     )
 
     transaction_id = models.CharField(max_length=100, blank=True, null=True)

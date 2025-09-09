@@ -5,11 +5,7 @@ from PIL import Image
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 from apps.core.models import Address
-from apps.account.models import (
-    CompanyProfile,
-    HotelProfile,
-    IndividualOwnerProfile
-)
+from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile
 from apps.listing.models import Amenity
 
 
@@ -23,9 +19,7 @@ def company_user(django_user_model):
 @pytest.fixture
 def michot_admin(django_user_model, admin_role):
     return django_user_model.objects.create_user(
-        email="company@example.com",
-        password="pass",
-        role=admin_role
+        email="company@example.com", password="pass", role=admin_role
     )
 
 
@@ -76,7 +70,7 @@ def company_profile(company_user) -> CompanyProfile:
         "state": "Addis Ababa",
         "postal_code": "1000",
         "latitude": "45.12",
-        "longitude": "23.46"
+        "longitude": "23.46",
     }
 
     address = Address.objects.create(**address_data)
@@ -87,7 +81,7 @@ def company_profile(company_user) -> CompanyProfile:
         "license": license,
         "address": address,
         "logo": logo,
-        "category": CompanyProfile.CategoryChoice.HOTEL
+        "category": CompanyProfile.CategoryChoice.HOTEL,
     }
     return CompanyProfile.objects.create(user=company_user, **data)
 
@@ -146,7 +140,4 @@ def authenticated_hotel_profile_client(company_user, hotel_profile) -> APIClient
 
 @pytest.fixture
 def amenities():
-    return [
-        Amenity.objects.create(name=am).id
-        for am in ["wifi", "pool", "balcony"]
-    ]
+    return [Amenity.objects.create(name=am).id for am in ["wifi", "pool", "balcony"]]

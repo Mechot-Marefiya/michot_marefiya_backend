@@ -20,8 +20,9 @@ class Command(BaseCommand):
 
         project_root = options["path"] or settings.BASE_DIR
 
-        self.stdout.write(self.style.NOTICE(
-            f"Scanning for migration files in: {project_root}\n"))
+        self.stdout.write(
+            self.style.NOTICE(f"Scanning for migration files in: {project_root}\n")
+        )
 
         # Walk through the project directory
         for root, dirs, files in os.walk(project_root):
@@ -32,7 +33,8 @@ class Command(BaseCommand):
             if "migrations" in dirs:
                 migration_path = os.path.join(root, "migrations")
                 self.stdout.write(
-                    self.style.WARNING(f"Found 'migrations' folder: {migration_path}"))
+                    self.style.WARNING(f"Found 'migrations' folder: {migration_path}")
+                )
 
                 # Get all migration files (excluding __init__.py)
                 migration_files = [
@@ -48,17 +50,18 @@ class Command(BaseCommand):
                             os.remove(file_path)
                             self.stdout.write(
                                 self.style.SUCCESS(
-                                    f"Deleted migration file: {file_path}")
+                                    f"Deleted migration file: {file_path}"
+                                )
                             )
                         except Exception as e:
                             self.stderr.write(
-                                self.style.ERROR(
-                                    f"Failed to delete {file_path}: {e}")
+                                self.style.ERROR(f"Failed to delete {file_path}: {e}")
                             )
                 else:
                     self.stdout.write(
                         self.style.NOTICE(
-                            f"No migration files to delete in: {migration_path}")
+                            f"No migration files to delete in: {migration_path}"
+                        )
                     )
 
         self.stdout.write(self.style.SUCCESS("\nMigration cleanup complete!"))

@@ -3,9 +3,8 @@ from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 
 from apps.account.enums import RoleCode
-from apps.account.models import CompanyProfile, IndividualOwnerProfile
+from apps.account.models import CompanyProfile
 from apps.account.serializers import AddressSerializer
-from apps.core.models import Address
 from apps.core.serializers import JsonSerializerField
 from apps.listing.models import (
     Amenity,
@@ -34,6 +33,7 @@ class RoomListingResponseSerializer(serializers.ModelSerializer):
     class Meta:
         model = RoomListing
         fields = [
+            "id",
             "images",
             "title",
             "description",
@@ -94,13 +94,14 @@ class GuestHouseListingResponseSerializer(serializers.ModelSerializer):
     class Meta:
         model = GuestHouseListing
         fields = [
+            "id",
             "title",
             "description",
             "images",
             "total_rooms",
             "amenities",
             "address",
-            "rating"
+            "rating",
         ]
 
 
@@ -119,7 +120,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             "total_rooms",
             "amenities",
             "address",
-            "rating"
+            "rating",
         ]
 
         def validate_address(self, attr):
@@ -127,22 +128,8 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             serializer.is_valid(raise_exception=True)
             return serializer.validated_data
 
-        # def validate(self, attrs):
-        #     print(attrs)
-        #     # Enforce either individual_owner OR company.
-        #     user = self.context["request"].user
-        #     print("USER", user)
-        #     individual_owner = attrs.get("individual_owner")
-
-        #     if not individual_owner:
-        #         company = get_object_or_404(CompanyProfile, user=user)
-        #         attrs["company"] = company
-
-        #     return attrs
-
     def create(self, validated_data):
         user = self.context["request"].user
-        print("USER", user)
         individual_owner = validated_data.get("individual_owner")
 
         if not individual_owner:
@@ -151,11 +138,11 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             # Which means the logged in user is Michot admin (not another vendor)
             if user.role and user.role.code == RoleCode.ADMIN.value:
                 raise serializers.ValidationError(
-                    "Valid Company or individual owner must exist")
+                    "Valid Company or individual owner must exist."
+                )
             company = get_object_or_404(CompanyProfile, user=user)
             validated_data["company"] = company
 
-        print("DAG", validated_data)
         # TODO: proper error handling
         return ListingService.create_guest_house_listing(validated_data)
 
@@ -168,22 +155,134 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
 class CarListingResponseSerializer(serializers.ModelSerializer):
     class Meta:
         model = CarListing
-        fields = []
+        fields = [
+            "id",
+            "title",
+            "description",
+            "images",
+            "base_price",
+            "brand",
+            "model",
+            "year",
+            "mileage",
+            "fuel_type",
+            "transmission",
+            "listing_type",
+            "condition",
+        ]
 
 
 class CarListingSerializer(serializers.ModelSerializer):
+    images = serializers.ListField(child=serializers.ImageField())
+
     class Meta:
         model = CarListing
-        fields = []
+        fields = [
+            "title",
+            "description",
+            "images",
+            "base_price",
+            "individual_owner",
+            "brand",
+            "model",
+            "year",
+            "mileage",
+            "fuel_type",
+            "transmission",
+            "listing_type",
+            "condition",
+        ]
+
+    @transaction.atomic()
+    def create(self, validated_data):
+        user = self.context["request"].user
+        individual_owner = validated_data.get("individual_owner")
+
+        if not individual_owner:
+            # Checking if the company is not doing this but rather the Michot
+            # admin doing this and in some case the individual owner is missed.
+            # Which means the logged in user is Michot admin (not another vendor)
+            if user.role and user.role.code == RoleCode.ADMIN.value:
+                raise serializers.ValidationError(
+                    "Valid Company or individual owner must exist."
+                )
+            company = get_object_or_404(CompanyProfile, user=user)
+            validated_data["company"] = company
+
+        images = validated_data.pop("images")
+
+        car_listing_instance = CarListing(**validated_data)
+
+        car_listing_instance.save()
+
+        ListingService.create_images(car_listing_instance, images)
+
+        return car_listing_instance
+
+    def to_representation(self, instance):
+        return CarListingResponseSerializer(instance, self.context).to_representation(
+            instance
+        )
 
 
 class PropertyListingResponseSerializer(serializers.ModelSerializer):
     class Meta:
         model = PropertyListing
-        fields = []
+        fields = [
+            "id",
+            "title",
+            "description",
+            "images",
+            "base_price",
+            "address",
+            "property_type",
+            "bedrooms",
+            "bathrooms",
+            "square_meters",
+            "is_furnished",
+            "listing_type",
+        ]
 
 
 class PropertyListingSerializer(serializers.ModelSerializer):
+    address = JsonSerializerField()
+    images = serializers.ListField(child=serializers.ImageField())
+
     class Meta:
         model = PropertyListing
-        fields = []
+        fields = [
+            "title",
+            "description",
+            "images",
+            "base_price",
+            "individual_owner",
+            "address",
+            "property_type",
+            "bedrooms",
+            "bathrooms",
+            "square_meters",
+            "is_furnished",
+            "listing_type",
+        ]
+
+    def create(self, validated_data):
+        user = self.context["request"].user
+        individual_owner = validated_data.get("individual_owner")
+
+        if not individual_owner:
+            # Checking if the company is not doing this
+            # but rather the Michot admin doing this and in some case the individual owner is missed.
+            # Which means the logged in user is Michot admin (not another vendor)
+            if user.role and user.role.code == RoleCode.ADMIN.value:
+                raise serializers.ValidationError(
+                    "Valid Company or individual owner must exist."
+                )
+            company = get_object_or_404(CompanyProfile, user=user)
+            validated_data["company"] = company
+
+        return ListingService.create_property_listing(validated_data)
+
+    def to_representation(self, instance):
+        return PropertyListingResponseSerializer(
+            instance, self.context
+        ).to_representation(instance)

@@ -3,7 +3,12 @@ from django.shortcuts import get_object_or_404
 
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.core.models import Address
-from apps.listing.models import GuestHouseListing, ListingImage, RoomListing
+from apps.listing.models import (
+    GuestHouseListing,
+    ListingImage,
+    PropertyListing,
+    RoomListing,
+)
 
 
 class ListingService:
@@ -62,6 +67,22 @@ class ListingService:
         ListingService.create_images(guest_house_listing_instance, images)
 
         return guest_house_listing_instance
+
+    @staticmethod
+    @transaction.atomic()
+    def create_property_listing(validated_data: dict):
+        images = validated_data.pop("images")
+        address_data = validated_data.pop("address", None)
+
+        address_instance = ListingService.create_address(address_data)
+
+        property_listing_instance = PropertyListing.objects.create(
+            address=address_instance, **validated_data
+        )
+
+        ListingService.create_images(property_listing_instance, images)
+
+        return property_listing_instance
 
     @staticmethod
     def create_address(address_data) -> Address:

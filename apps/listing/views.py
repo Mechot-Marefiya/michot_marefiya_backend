@@ -1,4 +1,5 @@
 from rest_framework.permissions import AllowAny
+from drf_spectacular.utils import extend_schema
 from apps.core.views import AbstractModelViewSet
 from apps.listing.models import (
     CarListing,
@@ -7,13 +8,18 @@ from apps.listing.models import (
     RoomListing,
 )
 from apps.listing.serializers import (
+    CarListingResponseSerializer,
     CarListingSerializer,
+    GuestHouseListingResponseSerializer,
     GuestHouseListingSerializer,
+    PropertyListingResponseSerializer,
     PropertyListingSerializer,
+    RoomListingResponseSerializer,
     RoomListingSerializer,
 )
 
 
+@extend_schema(responses=RoomListingResponseSerializer)
 class RoomListingViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = RoomListingSerializer
@@ -27,6 +33,7 @@ class RoomListingViewSet(AbstractModelViewSet):
         return context
 
 
+@extend_schema(responses=GuestHouseListingResponseSerializer)
 class GuestHouseListingViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = GuestHouseListingSerializer
@@ -40,12 +47,14 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
         return context
 
 
+@extend_schema(responses=CarListingResponseSerializer)
 class CarListingViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = CarListingSerializer
     queryset = CarListing.objects.all()
 
 
+@extend_schema(responses=PropertyListingResponseSerializer)
 class PropertyListingViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = PropertyListingSerializer

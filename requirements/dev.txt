@@ -7,3 +7,4 @@ pytest-cov==6.2.1
 pytest-django==4.11.1
 pre-commit==4.3.0
 ruff==0.12.11
+factory-boy==3.3.3
