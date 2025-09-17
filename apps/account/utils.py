@@ -1,2 +1,3 @@
 def generate_password(email):
-    return "".join([email, "@1234"])
+    email_str = email.split("@")
+    return "".join([email_str[0], "@1234"])

@@ -1,4 +1,6 @@
 from rest_framework.permissions import AllowAny
+from rest_framework_simplejwt.views import TokenObtainPairView
+
 # from rest_framework.parsers import MultiPartParser, JSONParser
 
 # from rest_framework.viewsets import ViewSet
@@ -6,7 +8,11 @@ from rest_framework.permissions import AllowAny
 # from rest_framework.status import HTTP_201_CREATED
 from apps.core.views import AbstractModelViewSet
 from apps.account.models import CompanyProfile, User
-from apps.account.serializers import UserSerializer, CompanyProfileSerializer
+from apps.account.serializers import CustomTokenObtainPairSerializer, UserSerializer, CompanyProfileSerializer
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    serializer_class = CustomTokenObtainPairSerializer
 
 
 class UserViewSet(AbstractModelViewSet):

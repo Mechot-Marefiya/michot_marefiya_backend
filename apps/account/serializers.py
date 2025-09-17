@@ -1,5 +1,6 @@
 from django.db import transaction
 from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.account.enums import RoleCode
 from apps.account.models import Address, CompanyProfile, Role
 from apps.account.utils import generate_password
@@ -8,6 +9,24 @@ from rest_framework import serializers
 from apps.core.serializers import AddressSerializer, JsonSerializerField
 
 User = get_user_model()
+
+
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        data = super().validate(attrs)
+
+        # Add custom data
+        data["role"] = self.user.role.code  # e.g., "company" or "user"
+
+        if self.user.role.code == RoleCode.COMPANY.value and hasattr(
+            self.user, "company_profile"
+        ):
+            data["company"] = {
+                "id": self.user.company_profile.id,
+                "name": self.user.company_profile.company_name,
+            }
+
+        return data
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -21,7 +40,8 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["email", "password", "confirm_password", "first_name", "last_name"]
+        fields = ["email", "password",
+                  "confirm_password", "first_name", "last_name"]
 
     def validate(self, attrs):
         # TODO: Add password strength validtion here
@@ -50,7 +70,8 @@ class UserSerializer(serializers.ModelSerializer):
 class UserResponseSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ["id", "email", "first_name", "last_name", "is_active", "role"]
+        fields = ["id", "email", "first_name",
+                  "last_name", "is_active", "role"]
 
 
 class CompanyProfileResponseSerializer(serializers.ModelSerializer):

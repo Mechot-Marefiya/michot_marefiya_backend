@@ -35,7 +35,9 @@ DEBUG = env("DEBUG", default=True, cast=bool)
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
 
-CORS_ALLOWED_ORIGINS = []
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+]
 
 WSGI_APPLICATION = "config.wsgi.application"
 
