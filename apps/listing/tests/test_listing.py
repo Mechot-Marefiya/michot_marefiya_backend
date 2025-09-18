@@ -249,7 +249,7 @@ class TestCarListingAPI:
         assert res.status_code == status.HTTP_201_CREATED
         car = CarListing.objects.get(id=res.data["id"])
         assert car.individual_owner is None
-        assert str(car) == "bmw::X5"
+        assert str(car) == "bmw::X5::normal"
 
     def test_create_car_with_individual_owner(
         self,
