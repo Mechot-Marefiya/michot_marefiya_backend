@@ -133,7 +133,6 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
 
 
 class HotelProfileResponseSerializer(serializers.ModelSerializer):
-    # TODO: Make the company flat response
     company = CompanyProfileResponseSerializer()
 
     class Meta:
@@ -144,6 +143,11 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
             'stars',
             'facilities'
         ]
+
+    def to_representation(self, instance):
+        rep = super().to_representation(instance)
+        company_data = rep.pop("company", {})
+        return {**rep, **company_data}
 
 
 class HotelProfileSerializer(serializers.ModelSerializer):
