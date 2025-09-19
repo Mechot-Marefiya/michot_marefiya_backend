@@ -1,6 +1,9 @@
 from rest_framework.permissions import AllowAny
+from rest_framework import filters
+from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from apps.core.views import AbstractModelViewSet
+from apps.listing.filters import RoomFilter
 from apps.listing.models import (
     CarListing,
     GuestHouseListing,
@@ -24,6 +27,8 @@ class RoomListingViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = RoomListingSerializer
     queryset = RoomListing.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = RoomFilter
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

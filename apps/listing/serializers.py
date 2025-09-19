@@ -83,7 +83,10 @@ class RoomListingSerializer(serializers.ModelSerializer):
         return ListingService.create_hotel_listing(validated_data)
 
     def to_representation(self, instance):
-        return RoomListingResponseSerializer(instance, self.context).to_representation(
+        return RoomListingResponseSerializer(
+            instance,
+            self.context
+        ).to_representation(
             instance
         )
 
