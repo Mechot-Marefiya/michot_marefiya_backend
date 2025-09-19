@@ -2,7 +2,7 @@ from django.db import transaction
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.account.enums import RoleCode
-from apps.account.models import Address, CompanyProfile, Role
+from apps.account.models import Address, CompanyProfile, HotelProfile, Role
 from apps.account.utils import generate_password
 from rest_framework import serializers
 
@@ -130,3 +130,16 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
         return CompanyProfileResponseSerializer(
             instance, self.context
         ).to_representation(instance)
+
+
+class HotelProfileResponseSerializer(serializers.ModelSerializer):
+    company = CompanyProfileResponseSerializer()
+
+    class Meta:
+        model = HotelProfile
+        fields = [
+            'id',
+            'company',
+            'stars',
+            'facilities'
+        ]

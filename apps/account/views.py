@@ -7,8 +7,8 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 # from rest_framework.response import Response
 # from rest_framework.status import HTTP_201_CREATED
 from apps.core.views import AbstractModelViewSet
-from apps.account.models import CompanyProfile, User
-from apps.account.serializers import CustomTokenObtainPairSerializer, UserSerializer, CompanyProfileSerializer
+from apps.account.models import CompanyProfile, HotelProfile, User
+from apps.account.serializers import CustomTokenObtainPairSerializer, HotelProfileResponseSerializer, UserSerializer, CompanyProfileSerializer
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -27,3 +27,9 @@ class CompanyProfileViewSet(AbstractModelViewSet):
     # parser_classes = [MultiPartParser, JSONParser]
     serializer_class = CompanyProfileSerializer
     queryset = CompanyProfile.objects.all()
+
+
+class HotelProfileViewSet(AbstractModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = HotelProfileResponseSerializer
+    queryset = HotelProfile.objects.all()
