@@ -4,7 +4,7 @@ services:
     env_file:
       - .env
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U XgkJUcqxEw -d marefiya"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -34,7 +34,7 @@ services:
     ports:
       - 8000:8000
     volumes:
-      - ./:/code
+      - ./:/usr/src/app
     user: "${UID}:${GID}"
     command: python manage.py runserver 0.0.0.0:8000
     restart: unless-stopped

@@ -27,10 +27,14 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
+from apps.account.views import CustomTokenObtainPairView
+
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/account/", include("apps.account.urls")),
-    path("auth/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("api/v1/listing/", include("apps.listing.urls")),
+    path("auth/token/", CustomTokenObtainPairView.as_view(),
+         name="token_obtain_pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path(
         "api/docs/",

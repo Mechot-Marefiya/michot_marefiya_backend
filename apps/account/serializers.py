@@ -1,37 +1,32 @@
 from django.db import transaction
 from django.contrib.auth import get_user_model
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.account.enums import RoleCode
 from apps.account.models import Address, CompanyProfile, Role
 from apps.account.utils import generate_password
 from rest_framework import serializers
 
+from apps.core.serializers import AddressSerializer, JsonSerializerField
+
 User = get_user_model()
 
 
-class AddressSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Address
-        fields = [
-            'city', 'country', 'country', 'sub_city', 'street_line1',
-            'street_line2', 'latitude', 'longitude', 'state', 'postal_code']
+class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        data = super().validate(attrs)
 
+        # Add custom data
+        data["role"] = self.user.role.code  # e.g., "company" or "user"
 
-class JsonSerializerField(serializers.Field):
-    """Used to convert JSON string to dict"""
+        if self.user.role.code == RoleCode.COMPANY.value and hasattr(
+            self.user, "company_profile"
+        ):
+            data["company"] = {
+                "id": self.user.company_profile.id,
+                "name": self.user.company_profile.company_name,
+            }
 
-    def to_internal_value(self, data):
-        import json
-        if isinstance(data, str):
-            try:
-                return json.loads(data)
-            except Exception:
-                raise serializers.ValidationError("Invalid JSON")
-        elif isinstance(data, dict):
-            return data
-        raise serializers.ValidationError("Expected dict or JSON string")
-
-    def to_representation(self, value):
-        return value
+        return data
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -82,7 +77,7 @@ class UserResponseSerializer(serializers.ModelSerializer):
 class CompanyProfileResponseSerializer(serializers.ModelSerializer):
     class Meta:
         model = CompanyProfile
-        fields = ['name', 'phone', 'industry', 'description']
+        fields = ["name", "phone", "category", "description"]
 
 
 class CompanyProfileSerializer(serializers.ModelSerializer):
@@ -94,17 +89,29 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CompanyProfile
-        fields = ['email', 'license', 'name', 'address',
-                  'phone', 'logo', 'industry', 'description']
+        fields = [
+            "email",
+            "license",
+            "name",
+            "address",
+            "phone",
+            "logo",
+            "category",
+            "description",
+        ]
+
+    def validate_address(self, attr):
+        serializer = AddressSerializer(data=attr)
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
 
     def validate(self, attr):
-        # TODO: Do validation
         return attr
 
     @transaction.atomic()
     def create(self, validated_data):
-        email = validated_data.pop('email')
-        address_data = validated_data.pop('address')
+        email = validated_data.pop("email")
+        address_data = validated_data.pop("address")
         role = Role.objects.get(code=RoleCode.COMPANY.value)
 
         password = generate_password(email)
@@ -114,12 +121,12 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
         user.save()
         address = Address.objects.create(**address_data)
         profile = CompanyProfile.objects.create(
-            user=user, address=address, **validated_data)
+            user=user, address=address, **validated_data
+        )
 
         return profile
 
     def to_representation(self, instance):
         return CompanyProfileResponseSerializer(
-            instance,
-            self.context
+            instance, self.context
         ).to_representation(instance)

@@ -35,7 +35,9 @@ DEBUG = env("DEBUG", default=True, cast=bool)
 
 ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
 
-CORS_ALLOWED_ORIGINS = []
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:5173",
+]
 
 WSGI_APPLICATION = "config.wsgi.application"
 
@@ -59,7 +61,7 @@ THIRD_PARTY_APPS = [
     "corsheaders",
 ]
 
-CUSTOM_APPS = ["apps.account", "apps.core"]
+CUSTOM_APPS = ["apps.account", "apps.core", "apps.listing"]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + CUSTOM_APPS
 
@@ -132,6 +134,18 @@ USE_TZ = env("USE_TZ", cast=bool, default=True)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "mediafiles"
+
+# DATALOOKUP_MODEL = "core.DataLookup"
+
+# POLICIES_FILE_PATH = env(
+#     "ACCESS_POLICY_FILE",
+#     default=os.path.join(BASE_DIR, "config", "policies.json"),
+#     cast=str,
+# )
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

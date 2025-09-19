@@ -3,7 +3,7 @@ from apps.account.views import UserViewSet, CompanyProfileViewSet
 
 router = DefaultRouter()
 
-router.register("users", UserViewSet, basename='users')
-router.register('companies', CompanyProfileViewSet, basename='companies')
+router.register("users", UserViewSet, basename="users")
+router.register("companies", CompanyProfileViewSet, basename="companies")
 
 urlpatterns = router.urls
