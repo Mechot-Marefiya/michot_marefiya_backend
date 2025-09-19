@@ -53,8 +53,8 @@ class User(AbstractUser, AbstractBaseModel):
 
 class CompanyProfile(AbstractBaseModel):
     class CategoryChoice(models.TextChoices):
-        HOTEL = "hotel", _("Hotel")
-        PENSION = "pension", _("Pension")
+        # HOTEL = "hotel", _("Hotel")
+        # PENSION = "pension", _("Pension")
         GUEST_HOUSE = "guest_house", _("Guest House")
         REALESTATE = "real_estate", _("Real Estate")
         APARTMENT = "apartment", _("Apartment")
@@ -75,7 +75,8 @@ class CompanyProfile(AbstractBaseModel):
         verbose_name=_("Logo"), upload_to="company_logos/", blank=True, null=True
     )
 
-    license = models.FileField(verbose_name=_("License"), upload_to="company_licenses/")
+    license = models.FileField(verbose_name=_(
+        "License"), upload_to="company_licenses/")
 
     category = models.CharField(
         max_length=100, verbose_name=_("Category"), choices=CategoryChoice.choices
@@ -83,7 +84,8 @@ class CompanyProfile(AbstractBaseModel):
 
     description = models.TextField(verbose_name=_("Description"), blank=True)
 
-    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(
+        Address, on_delete=models.RESTRICT, related_name="+")
 
     class Meta:
         verbose_name = _("Company Profile")
@@ -110,7 +112,8 @@ class IndividualOwnerProfile(AbstractBaseModel):
 
     last_name = models.CharField(max_length=255, verbose_name=_("LAst Name"))
 
-    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(
+        Address, on_delete=models.RESTRICT, related_name="+")
 
     phone = models.CharField(max_length=15, verbose_name=("Phone Number"))
 
@@ -138,7 +141,8 @@ class Facility(AbstractBaseModel):
     Shared Hotel level things(pool, spa, gym, parking, etc.)
     """
 
-    name = models.CharField(max_length=255, unique=True, verbose_name=_("Name"))
+    name = models.CharField(max_length=255, unique=True,
+                            verbose_name=_("Name"))
 
     icon = models.CharField(max_length=100, blank=True, verbose_name=_("Icon"))
 

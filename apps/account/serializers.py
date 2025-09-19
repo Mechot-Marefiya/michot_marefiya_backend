@@ -77,7 +77,7 @@ class UserResponseSerializer(serializers.ModelSerializer):
 class CompanyProfileResponseSerializer(serializers.ModelSerializer):
     class Meta:
         model = CompanyProfile
-        fields = ["name", "phone", "category", "description"]
+        fields = ["name", "phone", "category", "description", "logo"]
 
 
 class CompanyProfileSerializer(serializers.ModelSerializer):
@@ -133,6 +133,7 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
 
 
 class HotelProfileResponseSerializer(serializers.ModelSerializer):
+    # TODO: Make the company flat response
     company = CompanyProfileResponseSerializer()
 
     class Meta:
@@ -143,3 +144,25 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
             'stars',
             'facilities'
         ]
+
+
+class HotelProfileSerializer(serializers.ModelSerializer):
+    company = CompanyProfileResponseSerializer()
+
+    class Meta:
+        model = HotelProfile
+        fields = [
+            'company',
+            'stars',
+            'facilities'
+        ]
+
+    @transaction.atomic()
+    def create(self, validated_data):
+        company_info = validated_data.pop('company')
+
+        company = CompanyProfile.objects.create(**company_info)
+
+        hotel = HotelProfile.objects.create(company=company, **validated_data)
+
+        return hotel
