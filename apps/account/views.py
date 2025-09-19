@@ -33,3 +33,4 @@ class HotelProfileViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = HotelProfileResponseSerializer
     queryset = HotelProfile.objects.all()
+    http_method_names = ['get']
