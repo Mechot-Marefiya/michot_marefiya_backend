@@ -2,11 +2,18 @@ from django.db import transaction
 from django.contrib.auth import get_user_model
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.account.enums import RoleCode
-from apps.account.models import Address, CompanyProfile, HotelProfile, Role
+from apps.account.models import (
+    Address,
+    CompanyProfile,
+    HotelProfile,
+    IndividualOwnerProfile,
+    Role
+)
 from apps.account.utils import generate_password
 from rest_framework import serializers
 
 from apps.core.serializers import AddressSerializer, JsonSerializerField
+
 
 User = get_user_model()
 
@@ -128,6 +135,52 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         return CompanyProfileResponseSerializer(
+            instance, self.context
+        ).to_representation(instance)
+
+
+class IndividualOwnerProfileResponseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = IndividualOwnerProfile
+        fields = [
+            "id",
+            "first_name",
+            "last_name",
+            "address",
+            "phone",
+            "category"
+        ]
+
+
+class IndividualOwnerProfileSerializer(serializers.ModelSerializer):
+    address = AddressSerializer()
+
+    class Meta:
+        model = IndividualOwnerProfile
+        fields = [
+            "first_name",
+            "last_name",
+            "address",
+            "phone",
+            "category",
+            "national_id_number"
+        ]
+
+    @transaction.atomic()
+    def create(self, validated_data):
+        address_data = validated_data.pop("address")
+
+        address = Address.objects.create(**address_data)
+
+        profile = IndividualOwnerProfile.objects.create(
+            address=address,
+            **validated_data
+        )
+
+        return profile
+
+    def to_representation(self, instance):
+        return IndividualOwnerProfileResponseSerializer(
             instance, self.context
         ).to_representation(instance)
 

@@ -79,7 +79,9 @@ class CompanyProfile(AbstractBaseModel):
         "License"), upload_to="company_licenses/")
 
     category = models.CharField(
-        max_length=100, verbose_name=_("Category"), choices=CategoryChoice.choices
+        max_length=100,
+        choices=CategoryChoice.choices,
+        verbose_name=_("Category")
     )
 
     description = models.TextField(verbose_name=_("Description"), blank=True)
@@ -156,11 +158,32 @@ class Facility(AbstractBaseModel):
 
 
 class HotelProfile(AbstractBaseModel):
+    class CategoryChoice(models.TextChoices):
+        HOTEL = "hotel", _("Hotel")
+        PENSION = "pension", _("Pension")
+
     company = models.OneToOneField(
         CompanyProfile, on_delete=models.CASCADE, related_name="+"
     )
+
+    category = models.CharField(
+        max_length=100,
+        choices=CategoryChoice.choices,
+        default=CategoryChoice.HOTEL,
+        verbose_name=_("Category")
+    )
+
     # * Making these two nullable cause pensions/some hotels might not have those.
     stars = models.PositiveSmallIntegerField(
         verbose_name=_("Stars"), null=True, blank=True
     )
+
     facilities = models.ManyToManyField(Facility, blank=True)
+
+    class Meta:
+        verbose_name = _("Hotel Profile")
+        verbose_name_plural = _("Hotel Profiles")
+        # db_table = "hotels"
+
+    def __str__(self) -> str:
+        return self.company.name
