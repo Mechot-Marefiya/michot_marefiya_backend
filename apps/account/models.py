@@ -128,7 +128,7 @@ class IndividualOwnerProfile(AbstractBaseModel):
         choices=PropertyCategoryChoice.choices,
     )
 
-    national_id_number = models.PositiveIntegerField(
+    national_id_number = models.BigIntegerField(
         verbose_name=_("National Id Number"), blank=True, null=True
     )
 
