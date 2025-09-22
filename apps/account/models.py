@@ -60,7 +60,6 @@ class CompanyProfile(AbstractBaseModel):
         APARTMENT = "apartment", _("Apartment")
         VEHICLE = "vehicle", _("Vehicle")
         VILLA = "villa", _("Villa")
-        CONDOMINIUM = "condominium", _("Condominium")
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -107,9 +106,11 @@ class IndividualOwnerProfile(AbstractBaseModel):
     """
 
     class PropertyCategoryChoice(models.TextChoices):
-        CONDOMINIUM = "condominium", _("Condominium")
+        GUEST_HOUSE = "guest_house", _("Guest House")
         LAND = "land", _("Land")
         APARTMENT = "apartment", _("Apartment")
+        CONDOMINIUM = "condominium", _("Condominium")
+        VILLA = "villa", _("Villa")
         VEHICLE = "vehicle", _("Vehicle")
 
     first_name = models.CharField(max_length=255, verbose_name=_("First Name"))
