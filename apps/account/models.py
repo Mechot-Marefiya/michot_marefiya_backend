@@ -59,6 +59,8 @@ class CompanyProfile(AbstractBaseModel):
         REALESTATE = "real_estate", _("Real Estate")
         APARTMENT = "apartment", _("Apartment")
         VEHICLE = "vehicle", _("Vehicle")
+        VILLA = "villa", _("Villa")
+        CONDOMINIUM = "condominium", _("Condominium")
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
