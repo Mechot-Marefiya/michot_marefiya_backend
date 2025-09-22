@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from apps.core.models import Address
+from apps.core.models import Address, Facility
 
 
 class AddressSerializer(serializers.ModelSerializer):
@@ -35,3 +35,13 @@ class JsonSerializerField(serializers.Field):
 
     def to_representation(self, value):
         return value
+
+
+class FacilityResponseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Facility
+        fields = [
+            "id",
+            "name",
+            "icon"
+        ]

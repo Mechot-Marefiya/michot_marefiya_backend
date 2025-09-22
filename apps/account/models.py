@@ -4,7 +4,7 @@ from django.contrib.auth.models import AbstractUser
 from django.utils.translation import gettext_lazy as _
 
 from apps.account.managers import CustomUserManager
-from apps.core.models import AbstractBaseModel, Address
+from apps.core.models import AbstractBaseModel, Address, Facility
 
 
 class Role(AbstractBaseModel):
@@ -139,25 +139,6 @@ class IndividualOwnerProfile(AbstractBaseModel):
 
     def __str__(self) -> str:
         return f"{self.first_name} {self.last_name}"
-
-
-class Facility(AbstractBaseModel):
-    """
-    Shared Hotel level things(pool, spa, gym, parking, etc.)
-    """
-
-    name = models.CharField(max_length=255, unique=True,
-                            verbose_name=_("Name"))
-
-    icon = models.CharField(max_length=100, blank=True, verbose_name=_("Icon"))
-
-    class Meta:
-        verbose_name = _("Facility")
-        verbose_name_plural = _("Facilities")
-        db_table = "facilities"
-
-    def __str__(self):
-        return self.name
 
 
 class HotelProfile(AbstractBaseModel):

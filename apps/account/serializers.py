@@ -1,5 +1,7 @@
+import json
 from django.db import transaction
 from django.contrib.auth import get_user_model
+from django.shortcuts import get_object_or_404
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.account.enums import RoleCode
 from apps.account.models import (
@@ -12,6 +14,7 @@ from apps.account.models import (
 from apps.account.utils import generate_password
 from rest_framework import serializers
 
+from apps.core.models import Facility
 from apps.core.serializers import AddressSerializer, JsonSerializerField
 
 
@@ -203,31 +206,52 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
         return {**rep, **company_data}
 
 
-class HotelProfileSerializer(serializers.ModelSerializer):
-    # company = CompanyProfileResponseSerializer()
-    company = serializers.DictField()
+class HotelProfileSerializer(serializers.Serializer):
+    company = JsonSerializerField()
     logo = serializers.ImageField()
     license = serializers.FileField()
+    facilities = JsonSerializerField()
+    stars = serializers.IntegerField()
 
-    class Meta:
-        model = HotelProfile
-        fields = [
-            'company',
-            'logo',
-            'license',
-            'stars',
-            'facilities'
-        ]
+    def validate(self, attrs):
+        company_data = attrs.pop('company')
+        address_data = company_data.pop('address')
+        serializer = AddressSerializer(data=address_data)
+        serializer.is_valid(raise_exception=True)
+        attrs['address'] = serializer.validated_data
+        attrs['company'] = company_data
+        return attrs
 
     @transaction.atomic()
     def create(self, validated_data):
         company_info = validated_data.pop('company')
+        email = company_info.pop("email")
+        address_info = validated_data.pop('address')
         license = validated_data.pop('license')
         logo = validated_data.pop('logo')
+        facilities = validated_data.pop('facilities')
 
+        role = Role.objects.get(code=RoleCode.COMPANY.value)
+        password = generate_password(email)
+        user = User(email=email, role=role)
+        user.set_password(password)
+        user.save()
+        address = Address.objects.create(**address_info)
         company = CompanyProfile.objects.create(
-            logo=logo, license=license, **company_info)
+            user=user, logo=logo, license=license, **company_info, address=address)
 
         hotel = HotelProfile.objects.create(company=company, **validated_data)
+        facility_instances = []
+        for id in facilities:
+            ins = get_object_or_404(Facility, id=id)
+            facility_instances.append(ins)
+
+        hotel.facilities.set(facility_instances)
 
         return hotel
+
+    def to_representation(self, instance):
+        return HotelProfileResponseSerializer(
+            instance,
+            self.context
+        ).to_representation(instance)
