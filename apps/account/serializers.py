@@ -204,12 +204,17 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
 
 
 class HotelProfileSerializer(serializers.ModelSerializer):
-    company = CompanyProfileResponseSerializer()
+    # company = CompanyProfileResponseSerializer()
+    company = serializers.DictField()
+    logo = serializers.ImageField()
+    license = serializers.FileField()
 
     class Meta:
         model = HotelProfile
         fields = [
             'company',
+            'logo',
+            'license',
             'stars',
             'facilities'
         ]
@@ -217,8 +222,11 @@ class HotelProfileSerializer(serializers.ModelSerializer):
     @transaction.atomic()
     def create(self, validated_data):
         company_info = validated_data.pop('company')
+        license = validated_data.pop('license')
+        logo = validated_data.pop('logo')
 
-        company = CompanyProfile.objects.create(**company_info)
+        company = CompanyProfile.objects.create(
+            logo=logo, license=license, **company_info)
 
         hotel = HotelProfile.objects.create(company=company, **validated_data)
 
