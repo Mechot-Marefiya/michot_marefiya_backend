@@ -1,0 +1,162 @@
+[
+  {
+    "model": "listing.amenity",
+    "pk": "0812d5d7-2447-451c-919b-1b08dd740e4c",
+    "fields": {
+      "created_at": "2025-09-23T10:08:59.961Z",
+      "updated_at": "2025-09-23T10:08:59.961Z",
+      "name": "Hair Dryer",
+      "icon": "mdi mdi-hair-dryer"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "09870807-9f14-4e79-83b6-26f6e0d71558",
+    "fields": {
+      "created_at": "2025-09-23T10:10:01.364Z",
+      "updated_at": "2025-09-23T10:10:01.364Z",
+      "name": "Shower",
+      "icon": "mdi mdi-shower"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "0c5c9136-937a-4e89-b69e-0c97192597af",
+    "fields": {
+      "created_at": "2025-09-23T10:07:57.934Z",
+      "updated_at": "2025-09-23T10:07:57.934Z",
+      "name": "Coffee Maker",
+      "icon": "mdi mdi-coffee-maker"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "11eebc89-bfca-4058-835f-677e1c0f2dcc",
+    "fields": {
+      "created_at": "2025-09-23T10:10:48.140Z",
+      "updated_at": "2025-09-23T10:10:48.140Z",
+      "name": "WI-FI",
+      "icon": "mdi mdi-wifi"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "14ae8caa-0358-4624-9774-d31f54af1692",
+    "fields": {
+      "created_at": "2025-09-23T10:08:10.936Z",
+      "updated_at": "2025-09-23T10:08:10.936Z",
+      "name": "Kettle",
+      "icon": "mdi mdi-kettle"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "2f3b01b6-6ac4-4a87-babf-411673f6e560",
+    "fields": {
+      "created_at": "2025-09-23T10:07:46.469Z",
+      "updated_at": "2025-09-23T10:07:46.469Z",
+      "name": "Mini Bar",
+      "icon": "mdi mdi-fridge"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "430767bf-b7d7-4fec-bb92-7dc112e1c245",
+    "fields": {
+      "created_at": "2025-09-23T10:09:23.954Z",
+      "updated_at": "2025-09-23T10:09:23.954Z",
+      "name": "Wardrobe",
+      "icon": "mdi mdi-wardrobe"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "4acf74e6-cd0a-470a-92d2-5b4cae990be2",
+    "fields": {
+      "created_at": "2025-09-23T10:05:33.233Z",
+      "updated_at": "2025-09-23T10:05:33.233Z",
+      "name": "TV",
+      "icon": "mdi mdi-television"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "63298626-8276-4b7e-ad13-d6a57644406f",
+    "fields": {
+      "created_at": "2025-09-23T10:05:14.273Z",
+      "updated_at": "2025-09-23T10:05:14.273Z",
+      "name": "Air Conditioning",
+      "icon": "mdi mdi-air-conditioner"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "97cd37a2-1ca7-4d34-85db-311f8f552683",
+    "fields": {
+      "created_at": "2025-09-23T10:10:29.138Z",
+      "updated_at": "2025-09-23T10:10:29.138Z",
+      "name": "Towels",
+      "icon": "mdi mdi-towel"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "99153864-306e-439e-8332-67d705e40f9a",
+    "fields": {
+      "created_at": "2025-09-23T10:08:44.202Z",
+      "updated_at": "2025-09-23T10:08:44.202Z",
+      "name": "Balcony",
+      "icon": "mdi mdi-balcony"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "b175d1df-7eeb-46c1-98c5-8decb43c4c6c",
+    "fields": {
+      "created_at": "2025-09-23T10:09:40.122Z",
+      "updated_at": "2025-09-23T10:09:40.122Z",
+      "name": "Safe",
+      "icon": "mdi mdi-lock"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "bd174f88-79b2-4244-912e-72e038a95cfd",
+    "fields": {
+      "created_at": "2025-09-23T10:09:10.601Z",
+      "updated_at": "2025-09-23T10:09:10.601Z",
+      "name": "Iron",
+      "icon": "mdi mdi-iron"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "e465b287-3482-47e2-be66-2d2e7acf33b4",
+    "fields": {
+      "created_at": "2025-09-23T10:10:18.570Z",
+      "updated_at": "2025-09-23T10:10:18.570Z",
+      "name": "Bathtub",
+      "icon": "mdi mdi-bathtub"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "e61ba8a9-91c4-45c7-9fa8-9078e105581b",
+    "fields": {
+      "created_at": "2025-09-23T10:09:50.686Z",
+      "updated_at": "2025-09-23T10:09:50.686Z",
+      "name": "Phone",
+      "icon": "mdi mdi-phone"
+    }
+  },
+  {
+    "model": "listing.amenity",
+    "pk": "f9ef18d4-7595-4e7f-b656-9f44ae3a1beb",
+    "fields": {
+      "created_at": "2025-09-23T10:08:30.859Z",
+      "updated_at": "2025-09-23T10:08:30.859Z",
+      "name": "Desk",
+      "icon": "mdi mdi-desk"
+    }
+  }
+]

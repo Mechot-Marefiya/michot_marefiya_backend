@@ -4,6 +4,7 @@ from django.shortcuts import get_object_or_404
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.core.models import Address
 from apps.listing.models import (
+    Amenity,
     GuestHouseListing,
     ListingImage,
     PropertyListing,
@@ -15,18 +16,21 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_hotel_listing(validated_data: dict):
-        user = validated_data.pop("user")
+        hotel_id = validated_data.pop("hotel_id", None)
         images = validated_data.pop("images")
         # TODO: Do some way of handling the duplicate address creation
         # TODO: by maybe asking hotels to fill how many branches they have on
         # TODO: registration then avoid listing address fill form the UI and
         # TODO:  also make it optional here as well so that we can reuse the HQ address.
         address_data = validated_data.pop("address", None)
-        amenities = validated_data.pop("amenities")
-        print("UM", amenities)
-        # ? I assumed this listing creation is done by the companies
-        # ? themselves. But if this will be done by the Michot admin, this will mess up
-        company = get_object_or_404(CompanyProfile, user=user)
+        amenity_ids = validated_data.pop("amenities")
+
+        if hotel_id:
+            company = get_object_or_404(
+                CompanyProfile, id=hotel_id)
+        else:
+            company = get_object_or_404(
+                CompanyProfile, user=validated_data.pop('user'))
 
         hotel_profile = get_object_or_404(HotelProfile, company=company)
 
@@ -40,6 +44,11 @@ class ListingService:
         room_listing_instance = RoomListing.objects.create(
             hotel=hotel_profile, address=address_instance, **validated_data
         )
+
+        amenities = []
+        for id in amenity_ids:
+            instance = get_object_or_404(Amenity, id=id)
+            amenities.append(instance)
 
         # M2M to amenities
         room_listing_instance.amenities.set(amenities)

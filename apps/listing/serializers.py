@@ -17,10 +17,10 @@ from apps.listing.models import (
 from apps.listing.services import ListingService
 
 
-class AmenitiesSerializer(serializers.ModelSerializer):
+class AmenityResponseSSerializer(serializers.ModelSerializer):
     class Meta:
         model = Amenity
-        fields = ["name"]
+        fields = ["id", "name", "icon"]
 
 
 class ListingImageSerializer(serializers.ModelSerializer):
@@ -34,6 +34,7 @@ class RoomListingResponseSerializer(serializers.ModelSerializer):
         model = RoomListing
         fields = [
             "id",
+            # "hotel",
             "images",
             "title",
             "description",
@@ -50,14 +51,21 @@ class RoomListingResponseSerializer(serializers.ModelSerializer):
 
 
 class RoomListingSerializer(serializers.ModelSerializer):
-    address = JsonSerializerField()
+    # TODO: Handle HQ or branch address cases.
+    # TODO: We only expect the address from the payload if it's for branch
+    address = JsonSerializerField(required=False)
     images = serializers.ListField(child=serializers.ImageField())
+    amenities = JsonSerializerField()
+    # TODO: We need this to handle registration by michot admin
+    # TODO: where the admin passes the hotel id.
+    hotel_id = serializers.UUIDField(required=False)
 
     class Meta:
         model = RoomListing
         fields = [
             "images",
             "title",
+            "hotel_id",
             "description",
             "base_price",
             "address",
@@ -78,7 +86,10 @@ class RoomListingSerializer(serializers.ModelSerializer):
 
     @transaction.atomic()
     def create(self, validated_data):
-        validated_data["user"] = self.context["request"].user
+        hotel_id = validated_data.get('hotel_id', None)
+        if not hotel_id:
+            validated_data["user"] = self.context["request"].user
+        validated_data['hotel_id'] = hotel_id
         # TODO: Proper Error handling
         return ListingService.create_hotel_listing(validated_data)
 

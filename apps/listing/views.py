@@ -4,12 +4,14 @@ from drf_spectacular.utils import extend_schema
 from apps.core.views import AbstractModelViewSet
 from apps.listing.filters import PropertyFilter, RoomFilter, CarFilter
 from apps.listing.models import (
+    Amenity,
     CarListing,
     GuestHouseListing,
     PropertyListing,
     RoomListing,
 )
 from apps.listing.serializers import (
+    AmenityResponseSSerializer,
     CarListingResponseSerializer,
     CarListingSerializer,
     GuestHouseListingResponseSerializer,
@@ -67,3 +69,10 @@ class PropertyListingViewSet(AbstractModelViewSet):
     queryset = PropertyListing.objects.all()
     filter_backends = [DjangoFilterBackend]
     filterset_class = PropertyFilter
+
+
+class AmenityViewSet(AbstractModelViewSet):
+    http_method_names = ['get']
+    permission_classes = [AllowAny]
+    serializer_class = AmenityResponseSSerializer
+    queryset = Amenity.objects.all()
