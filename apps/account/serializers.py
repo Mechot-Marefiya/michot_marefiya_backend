@@ -1,4 +1,3 @@
-import json
 from django.db import transaction
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
@@ -85,9 +84,12 @@ class UserResponseSerializer(serializers.ModelSerializer):
 
 
 class CompanyProfileResponseSerializer(serializers.ModelSerializer):
+    address = AddressSerializer()
+
     class Meta:
         model = CompanyProfile
-        fields = ["name", "phone", "category", "description", "logo"]
+        fields = ["name", "phone", "category",
+                  "description", "logo", "address"]
 
 
 class CompanyProfileSerializer(serializers.ModelSerializer):
@@ -143,6 +145,8 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
 
 
 class IndividualOwnerProfileResponseSerializer(serializers.ModelSerializer):
+    address = AddressSerializer()
+
     class Meta:
         model = IndividualOwnerProfile
         fields = [

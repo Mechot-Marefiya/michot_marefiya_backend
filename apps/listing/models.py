@@ -245,7 +245,6 @@ class PropertyListing(BaseListing):
         APARTMENT = "apartment", _("Apartment")
         CONDO = "condo", _("Condo")
         VILLA = "villa", _("Villa")
-        HOUSE = "house", _("House")
         LAND = "land", _("Land")
 
     class ListingTypeChoices(models.TextChoices):

@@ -2,7 +2,7 @@ from rest_framework.permissions import AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from apps.core.views import AbstractModelViewSet
-from apps.listing.filters import RoomFilter, CarFilter
+from apps.listing.filters import PropertyFilter, RoomFilter, CarFilter
 from apps.listing.models import (
     CarListing,
     GuestHouseListing,
@@ -65,3 +65,5 @@ class PropertyListingViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = PropertyListingSerializer
     queryset = PropertyListing.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = PropertyFilter

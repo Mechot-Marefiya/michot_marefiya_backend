@@ -1,6 +1,6 @@
 from rest_framework.permissions import AllowAny
 from rest_framework_simplejwt.views import TokenObtainPairView
-
+from drf_spectacular.utils import extend_schema
 # from rest_framework.parsers import MultiPartParser, JSONParser
 
 # from rest_framework.viewsets import ViewSet
@@ -14,9 +14,12 @@ from apps.account.models import (
     User
 )
 from apps.account.serializers import (
+    CompanyProfileResponseSerializer,
     CustomTokenObtainPairSerializer,
+    HotelProfileResponseSerializer,
     # HotelProfileResponseSerializer,
     HotelProfileSerializer,
+    IndividualOwnerProfileResponseSerializer,
     IndividualOwnerProfileSerializer,
     UserSerializer,
     CompanyProfileSerializer
@@ -33,18 +36,21 @@ class UserViewSet(AbstractModelViewSet):
     queryset = User.objects.all()
 
 
+@extend_schema(responses=CompanyProfileResponseSerializer)
 class CompanyProfileViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = CompanyProfileSerializer
     queryset = CompanyProfile.objects.all()
 
 
+@extend_schema(responses=IndividualOwnerProfileResponseSerializer)
 class IndividualOwnerProfileViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = IndividualOwnerProfileSerializer
     queryset = IndividualOwnerProfile.objects.all()
 
 
+@extend_schema(responses=HotelProfileResponseSerializer)
 class HotelProfileViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
     serializer_class = HotelProfileSerializer
