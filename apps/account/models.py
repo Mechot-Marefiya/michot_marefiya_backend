@@ -53,8 +53,8 @@ class User(AbstractUser, AbstractBaseModel):
 
 class CompanyProfile(AbstractBaseModel):
     class CategoryChoice(models.TextChoices):
-        # HOTEL = "hotel", _("Hotel")
-        # PENSION = "pension", _("Pension")
+        HOTEL = "hotel", _("Hotel")
+        PENSION = "pension", _("Pension")
         GUEST_HOUSE = "guest_house", _("Guest House")
         REALESTATE = "real_estate", _("Real Estate")
         APARTMENT = "apartment", _("Apartment")
