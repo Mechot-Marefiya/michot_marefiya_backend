@@ -56,7 +56,7 @@ class CompanyProfile(AbstractBaseModel):
         HOTEL = "hotel", _("Hotel")
         PENSION = "pension", _("Pension")
         GUEST_HOUSE = "guest_house", _("Guest House")
-        REALESTATE = "real_estate", _("Real Estate")
+        # REALESTATE = "real_estate", _("Real Estate")
         APARTMENT = "apartment", _("Apartment")
         VEHICLE = "vehicle", _("Vehicle")
         VILLA = "villa", _("Villa")
@@ -100,9 +100,10 @@ class CompanyProfile(AbstractBaseModel):
 
 
 class IndividualOwnerProfile(AbstractBaseModel):
-    """This Model is aimed only for handling individual property owners. We don't needed neither to give
-    individuals the ability to add properties through dashboard like companies. We need our admin to verify them in-person and
-    add their detail here than using the AUTH_USER_MODEL.
+    """This Model is aimed only for handling individual property owners.
+    We don't needed neither to give individuals the ability to add properties
+    through dashboard like companies. We need our admin to verify them
+    in-person and add their detail here than using the AUTH_USER_MODEL.
     """
 
     class PropertyCategoryChoice(models.TextChoices):

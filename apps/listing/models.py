@@ -4,7 +4,6 @@ from django.db.models import Q, F
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.utils.translation import gettext_lazy as _
-
 from apps.core.models import AbstractBaseModel, Address
 from apps.account.models import (
     CompanyProfile,
@@ -245,7 +244,6 @@ class PropertyListing(BaseListing):
         APARTMENT = "apartment", _("Apartment")
         CONDO = "condo", _("Condo")
         VILLA = "villa", _("Villa")
-        LAND = "land", _("Land")
 
     class ListingTypeChoices(models.TextChoices):
         SELL = "sale", _("For Sale")
