@@ -107,7 +107,6 @@ class IndividualOwnerProfile(AbstractBaseModel):
 
     class PropertyCategoryChoice(models.TextChoices):
         GUEST_HOUSE = "guest_house", _("Guest House")
-        LAND = "land", _("Land")
         APARTMENT = "apartment", _("Apartment")
         CONDOMINIUM = "condominium", _("Condominium")
         VILLA = "villa", _("Villa")
