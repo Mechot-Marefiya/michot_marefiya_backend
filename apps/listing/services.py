@@ -1,7 +1,7 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 
-from apps.account.models import CompanyProfile, HotelProfile
+from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile
 from apps.core.models import Address
 from apps.listing.models import (
     Amenity,
@@ -60,16 +60,25 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_guest_house_listing(validated_data: dict):
-        print("VD", validated_data)
         images = validated_data.pop("images")
         address_data = validated_data.pop("address", None)
-        amenities = validated_data.pop("amenities")
-
+        amenity_ids = validated_data.pop("amenities")
+        individual_owner_id = validated_data.pop('individual_owner')
         address_instance = ListingService.create_address(address_data)
 
+        individual_owner = get_object_or_404(
+            IndividualOwnerProfile, id=individual_owner_id)
+
         guest_house_listing_instance = GuestHouseListing.objects.create(
-            address=address_instance, **validated_data
+            address=address_instance,
+            individual_owner=individual_owner,
+            **validated_data
         )
+        amenities = []
+        for id in amenity_ids:
+            instance = get_object_or_404(Amenity, id=id)
+            amenities.append(instance)
+
         # M2M to amenities
         guest_house_listing_instance.amenities.set(amenities)
 

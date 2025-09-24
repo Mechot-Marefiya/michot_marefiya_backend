@@ -3,6 +3,7 @@ from django.contrib import admin
 from apps.listing.models import (
     CarListing,
     EventSpaceListing,
+    GuestHouseListing,
     PropertyListing,
     RoomListing,
 )
@@ -12,4 +13,5 @@ admin.site.register(RoomListing)
 admin.site.register(EventSpaceListing)
 admin.site.register(CarListing)
 admin.site.register(PropertyListing)
+admin.site.register(GuestHouseListing)
 admin.site.register(Amenity)

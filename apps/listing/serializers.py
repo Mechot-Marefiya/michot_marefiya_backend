@@ -111,18 +111,20 @@ class GuestHouseListingResponseSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "title",
+            "base_price",
             "description",
             "images",
             "total_rooms",
             "amenities",
             "address",
-            "rating",
+            "rating"
         ]
 
 
 class GuestHouseListingSerializer(serializers.ModelSerializer):
     address = JsonSerializerField()
     images = serializers.ListField(child=serializers.ImageField())
+    amenities = JsonSerializerField()
 
     class Meta:
         model = GuestHouseListing
@@ -130,12 +132,11 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             "title",
             "images",
             "base_price",
-            "individual_owner",
+            # "individual_owner",
             "description",
             "total_rooms",
             "amenities",
-            "address",
-            "rating",
+            "address"
         ]
 
         def validate_address(self, attr):
@@ -144,19 +145,20 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             return serializer.validated_data
 
     def create(self, validated_data):
-        user = self.context["request"].user
-        individual_owner = validated_data.get("individual_owner")
 
-        if not individual_owner:
-            # Checking if the company is not doing this
-            # but rather the Michot admin doing this and in some case the individual owner is missed.
-            # Which means the logged in user is Michot admin (not another vendor)
-            if user.role and user.role.code == RoleCode.ADMIN.value:
-                raise serializers.ValidationError(
-                    "Valid Company or individual owner must exist."
-                )
-            company = get_object_or_404(CompanyProfile, user=user)
-            validated_data["company"] = company
+        # user = self.context["request"].user
+        # individual_owner = validated_data.get("individual_owner")
+        validated_data['individual_owner'] = "a02a46f3-2349-453d-a6b1-956ce88ed3f3"
+        # if not individual_owner:
+        #     # ! Checking if the company is not doing this
+        #     # ! but rather the Michot admin doing this and in some case the individual owner is missed.
+        #     # ! Which means the logged in user is Michot admin (not another vendor)
+        #     if user.role and user.role.code == RoleCode.ADMIN.value:
+        #         raise serializers.ValidationError(
+        #             "Valid Company or individual owner must exist."
+        #         )
+        #     company = get_object_or_404(CompanyProfile, user=user)
+        #     validated_data["company"] = company
 
         # TODO: proper error handling
         return ListingService.create_guest_house_listing(validated_data)
