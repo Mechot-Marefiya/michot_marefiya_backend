@@ -93,9 +93,17 @@ class ListingService:
         address_data = validated_data.pop("address", None)
 
         address_instance = ListingService.create_address(address_data)
+        individual_owner_id = validated_data.pop('individual_owner')
+
+        individual_owner = get_object_or_404(
+            IndividualOwnerProfile,
+            id=individual_owner_id
+        )
 
         property_listing_instance = PropertyListing.objects.create(
-            address=address_instance, **validated_data
+            address=address_instance,
+            individual_owner=individual_owner,
+            **validated_data
         )
 
         ListingService.create_images(property_listing_instance, images)

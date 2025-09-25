@@ -115,7 +115,7 @@ class IndividualOwnerProfile(AbstractBaseModel):
 
     first_name = models.CharField(max_length=255, verbose_name=_("First Name"))
 
-    last_name = models.CharField(max_length=255, verbose_name=_("LAst Name"))
+    last_name = models.CharField(max_length=255, verbose_name=_("Last Name"))
 
     address = models.OneToOneField(
         Address, on_delete=models.RESTRICT, related_name="+")

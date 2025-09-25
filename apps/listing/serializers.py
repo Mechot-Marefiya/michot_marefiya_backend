@@ -132,7 +132,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             "title",
             "images",
             "base_price",
-            # "individual_owner",
+            "individual_owner",
             "description",
             "total_rooms",
             "amenities",
@@ -148,7 +148,10 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
 
         # user = self.context["request"].user
         # individual_owner = validated_data.get("individual_owner")
-        validated_data['individual_owner'] = "a02a46f3-2349-453d-a6b1-956ce88ed3f3"
+
+        # ? Just for testing purpose
+        # validated_data['individual_owner'] = "8393efcf-27c8-4408-bac1-cea75cccee96"
+
         # if not individual_owner:
         #     # ! Checking if the company is not doing this
         #     # ! but rather the Michot admin doing this and in some case the individual owner is missed.
@@ -275,7 +278,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "description",
             "images",
             "base_price",
-            "individual_owner",
+            # "individual_owner",
             "address",
             "property_type",
             "bedrooms",
@@ -286,19 +289,22 @@ class PropertyListingSerializer(serializers.ModelSerializer):
         ]
 
     def create(self, validated_data):
-        user = self.context["request"].user
-        individual_owner = validated_data.get("individual_owner")
+        # user = self.context["request"].user
+        # individual_owner = validated_data.get("individual_owner")
 
-        if not individual_owner:
-            # Checking if the company is not doing this
-            # but rather the Michot admin doing this and in some case the individual owner is missed.
-            # Which means the logged in user is Michot admin (not another vendor)
-            if user.role and user.role.code == RoleCode.ADMIN.value:
-                raise serializers.ValidationError(
-                    "Valid Company or individual owner must exist."
-                )
-            company = get_object_or_404(CompanyProfile, user=user)
-            validated_data["company"] = company
+        # ? Just for testing purpose
+        # validated_data['individual_owner'] = "8393efcf-27c8-4408-bac1-cea75cccee96"
+
+        # if not individual_owner:
+        #     # Checking if the company is not doing this
+        #     # but rather the Michot admin doing this and in some case the individual owner is missed.
+        #     # Which means the logged in user is Michot admin (not another vendor)
+        #     if user.role and user.role.code == RoleCode.ADMIN.value:
+        #         raise serializers.ValidationError(
+        #             "Valid Company or individual owner must exist."
+        #         )
+        #     company = get_object_or_404(CompanyProfile, user=user)
+        #     validated_data["company"] = company
 
         return ListingService.create_property_listing(validated_data)
 
