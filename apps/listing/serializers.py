@@ -3,7 +3,7 @@ from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 
 from apps.account.enums import RoleCode
-from apps.account.models import CompanyProfile
+from apps.account.models import CompanyProfile, IndividualOwnerProfile
 from apps.account.serializers import AddressSerializer
 from apps.core.serializers import JsonSerializerField
 from apps.listing.models import (
@@ -188,6 +188,7 @@ class CarListingResponseSerializer(serializers.ModelSerializer):
             "fuel_type",
             "transmission",
             "listing_type",
+            "car_class",
             "condition",
         ]
 
@@ -202,7 +203,7 @@ class CarListingSerializer(serializers.ModelSerializer):
             "description",
             "images",
             "base_price",
-            "individual_owner",
+            # "individual_owner",
             "brand",
             "model",
             "year",
@@ -210,28 +211,40 @@ class CarListingSerializer(serializers.ModelSerializer):
             "fuel_type",
             "transmission",
             "listing_type",
+            "car_class",
             "condition",
         ]
 
     @transaction.atomic()
     def create(self, validated_data):
-        user = self.context["request"].user
-        individual_owner = validated_data.get("individual_owner")
+        # user = self.context["request"].user
+        # individual_owner = validated_data.get("individual_owner")
+        # # ? Just for testing purpose
+        # validated_data['individual_owner'] = "8393efcf-27c8-4408-bac1-cea75cccee96"
 
-        if not individual_owner:
-            # Checking if the company is not doing this but rather the Michot
-            # admin doing this and in some case the individual owner is missed.
-            # Which means the logged in user is Michot admin (not another vendor)
-            if user.role and user.role.code == RoleCode.ADMIN.value:
-                raise serializers.ValidationError(
-                    "Valid Company or individual owner must exist."
-                )
-            company = get_object_or_404(CompanyProfile, user=user)
-            validated_data["company"] = company
+        # if not individual_owner:
+        #     # Checking if the company is not doing this but rather the Michot
+        #     # admin doing this and in some case the individual owner is missed.
+        #     # Which means the logged in user is Michot admin (not another vendor)
+        #     if user.role and user.role.code == RoleCode.ADMIN.value:
+        #         raise serializers.ValidationError(
+        #             "Valid Company or individual owner must exist."
+        #         )
+        #     company = get_object_or_404(CompanyProfile, user=user)
+        #     validated_data["company"] = company
 
         images = validated_data.pop("images")
 
-        car_listing_instance = CarListing(**validated_data)
+        individual_owner_id = validated_data.pop('individual_owner')
+
+        individual_owner = get_object_or_404(
+            IndividualOwnerProfile,
+            id=individual_owner_id
+        )
+
+        car_listing_instance = CarListing(
+            individual_owner=individual_owner,
+            **validated_data)
 
         car_listing_instance.save()
 

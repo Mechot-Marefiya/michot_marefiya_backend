@@ -213,7 +213,7 @@ class CarListing(BaseListing):
         max_length=200,
         choices=CarClassChoices.choices,
         default=CarClassChoices.NORMAL,
-        verbose_name=_("Category")
+        verbose_name=_("Class Category")
     )
 
     condition = models.CharField(
