@@ -56,10 +56,10 @@ class CompanyProfile(AbstractBaseModel):
         HOTEL = "hotel", _("Hotel")
         PENSION = "pension", _("Pension")
         GUEST_HOUSE = "guest_house", _("Guest House")
-        # REALESTATE = "real_estate", _("Real Estate")
         APARTMENT = "apartment", _("Apartment")
         VEHICLE = "vehicle", _("Vehicle")
         VILLA = "villa", _("Villa")
+        # REALESTATE = "real_estate", _("Real Estate")
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -142,20 +142,20 @@ class IndividualOwnerProfile(AbstractBaseModel):
 
 
 class HotelProfile(AbstractBaseModel):
-    class CategoryChoice(models.TextChoices):
-        HOTEL = "hotel", _("Hotel")
-        PENSION = "pension", _("Pension")
+    # class CategoryChoice(models.TextChoices):
+    #     HOTEL = "hotel", _("Hotel")
+    #     PENSION = "pension", _("Pension")
 
     company = models.OneToOneField(
         CompanyProfile, on_delete=models.CASCADE, related_name="+"
     )
 
-    category = models.CharField(
-        max_length=100,
-        choices=CategoryChoice.choices,
-        default=CategoryChoice.HOTEL,
-        verbose_name=_("Category")
-    )
+    # category = models.CharField(
+    #     max_length=100,
+    #     choices=CategoryChoice.choices,
+    #     default=CategoryChoice.HOTEL,
+    #     verbose_name=_("Category")
+    # )
 
     # * Making these two nullable cause pensions/some hotels might not have those.
     stars = models.PositiveSmallIntegerField(
