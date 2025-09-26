@@ -1,11 +1,10 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import serializers
-
-from apps.account.enums import RoleCode
-from apps.account.models import CompanyProfile, IndividualOwnerProfile
+from apps.account.models import IndividualOwnerProfile
 from apps.account.serializers import AddressSerializer
 from apps.core.serializers import JsonSerializerField
+from apps.listing.services import ListingService
 from apps.listing.models import (
     Amenity,
     CarListing,
@@ -14,7 +13,6 @@ from apps.listing.models import (
     PropertyListing,
     RoomListing,
 )
-from apps.listing.services import ListingService
 
 
 class AmenityResponseSSerializer(serializers.ModelSerializer):

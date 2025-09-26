@@ -120,7 +120,11 @@ class IndividualOwnerProfile(AbstractBaseModel):
     address = models.OneToOneField(
         Address, on_delete=models.RESTRICT, related_name="+")
 
-    phone = models.CharField(max_length=15, verbose_name=("Phone Number"))
+    phone = models.CharField(
+        max_length=15,
+        unique=True,
+        verbose_name=("Phone Number")
+    )
 
     category = models.CharField(
         max_length=100,
@@ -128,6 +132,7 @@ class IndividualOwnerProfile(AbstractBaseModel):
         choices=PropertyCategoryChoice.choices,
     )
 
+    # TODO: Make this unique once it's required
     national_id_number = models.BigIntegerField(
         verbose_name=_("National Id Number"), blank=True, null=True
     )
