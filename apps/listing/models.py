@@ -6,7 +6,11 @@ from django.contrib.contenttypes.fields import GenericForeignKey
 from django.utils.translation import gettext_lazy as _
 
 from apps.core.models import AbstractBaseModel, Address
-from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile
+from apps.account.models import (
+    CompanyProfile,
+    HotelProfile,
+    IndividualOwnerProfile
+)
 
 
 class ListingImage(AbstractBaseModel):
@@ -150,7 +154,7 @@ class CarListing(BaseListing):
         verbose_name=_("Company"),
         help_text=_("The company that owns this listing."),
         null=True,
-        blank=True,
+        blank=True
     )
 
     individual_owner = models.ForeignKey(
