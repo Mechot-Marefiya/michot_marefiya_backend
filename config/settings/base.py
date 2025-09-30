@@ -39,6 +39,7 @@ ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
 #     "http://localhost:5173",
 # ]
 
+# ! THIS SHOULD BE FOR DEV ONLY !!!
 CORS_ALLOW_ALL_ORIGINS = True
 
 WSGI_APPLICATION = "config.wsgi.application"
