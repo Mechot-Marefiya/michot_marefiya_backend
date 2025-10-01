@@ -151,6 +151,7 @@ class IndividualOwnerProfileResponseSerializer(serializers.ModelSerializer):
         model = IndividualOwnerProfile
         fields = [
             "id",
+            "national_id_number",
             "first_name",
             "last_name",
             "address",
