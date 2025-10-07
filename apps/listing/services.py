@@ -16,7 +16,7 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_hotel_listing(validated_data: dict):
-        hotel_id = validated_data.pop("hotel_id", None)
+        hotel_id = validated_data.get("hotel_id")
         images = validated_data.pop("images")
         # TODO: Do some way of handling the duplicate address creation
         # TODO: by maybe asking hotels to fill how many branches they have on
@@ -28,11 +28,11 @@ class ListingService:
         if hotel_id:
             company = get_object_or_404(
                 CompanyProfile, id=hotel_id)
-        else:
-            company = get_object_or_404(
-                CompanyProfile, user=validated_data.pop('user'))
+        # else:
+        #     company = get_object_or_404(
+        #         CompanyProfile, user=validated_data.pop('user'))
 
-        hotel_profile = get_object_or_404(HotelProfile, company=company)
+        # hotel_profile = get_object_or_404(HotelProfile, company=company)
 
         address_instance = None
 
@@ -42,7 +42,9 @@ class ListingService:
             address_instance = company.address
 
         room_listing_instance = RoomListing.objects.create(
-            hotel=hotel_profile, address=address_instance, **validated_data
+            # hotel=hotel_profile,
+            address=address_instance,
+            **validated_data
         )
 
         amenities = []
@@ -63,15 +65,15 @@ class ListingService:
         images = validated_data.pop("images")
         address_data = validated_data.pop("address", None)
         amenity_ids = validated_data.pop("amenities")
-        individual_owner_id = validated_data.pop('individual_owner')
+        # individual_owner_id = validated_data.pop('individual_owner')
         address_instance = ListingService.create_address(address_data)
 
-        individual_owner = get_object_or_404(
-            IndividualOwnerProfile, id=individual_owner_id)
+        # individual_owner = get_object_or_404(
+        #     IndividualOwnerProfile, id=individual_owner_id)
 
         guest_house_listing_instance = GuestHouseListing.objects.create(
             address=address_instance,
-            individual_owner=individual_owner,
+            # individual_owner=individual_owner,
             **validated_data
         )
         amenities = []

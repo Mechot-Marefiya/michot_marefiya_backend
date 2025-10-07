@@ -1,7 +1,7 @@
 from django.db import transaction
-from django.shortcuts import get_object_or_404
+# from django.shortcuts import get_object_or_404
 from rest_framework import serializers
-from apps.account.models import IndividualOwnerProfile
+# from apps.account.models import IndividualOwnerProfile
 from apps.account.serializers import AddressSerializer
 from apps.core.serializers import JsonSerializerField
 from apps.listing.services import ListingService
@@ -63,7 +63,8 @@ class RoomListingSerializer(serializers.ModelSerializer):
         fields = [
             "images",
             "title",
-            "hotel_id",
+            # "hotel_id",
+            "hotel",
             "description",
             "base_price",
             "address",
@@ -84,10 +85,10 @@ class RoomListingSerializer(serializers.ModelSerializer):
 
     @transaction.atomic()
     def create(self, validated_data):
-        hotel_id = validated_data.get('hotel_id', None)
-        if not hotel_id:
-            validated_data["user"] = self.context["request"].user
-        validated_data['hotel_id'] = hotel_id
+        # hotel_id = validated_data.get('hotel_id', None)
+        # if not hotel_id:
+        #     validated_data["user"] = self.context["request"].user
+        # validated_data['hotel_id'] = hotel_id
         # TODO: Proper Error handling
         return ListingService.create_hotel_listing(validated_data)
 
@@ -131,16 +132,28 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             "images",
             "base_price",
             "individual_owner",
+            "company",
             "description",
             "total_rooms",
             "amenities",
             "address"
         ]
 
-        def validate_address(self, attr):
-            serializer = AddressSerializer(data=attr)
-            serializer.is_valid(raise_exception=True)
-            return serializer.validated_data
+    def validate_address(self, attr):
+        serializer = AddressSerializer(data=attr)
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
+
+    def validate(self, data):
+        company_id = data.get("company")
+        individual_id = data.get("individual_owner")
+
+        if company_id and individual_id:
+            raise serializers.ValidationError(
+                "Only one owner type allowed.")
+        if not company_id and not individual_id:
+            raise serializers.ValidationError("An owner is required.")
+        return data
 
     def create(self, validated_data):
 
@@ -201,7 +214,8 @@ class CarListingSerializer(serializers.ModelSerializer):
             "description",
             "images",
             "base_price",
-            # "individual_owner",
+            "individual_owner",
+            "company",
             "brand",
             "model",
             "year",
@@ -213,12 +227,23 @@ class CarListingSerializer(serializers.ModelSerializer):
             "condition",
         ]
 
+    def validate(self, data):
+        company_id = data.get("company")
+        individual_id = data.get("individual_owner")
+
+        if company_id and individual_id:
+            raise serializers.ValidationError(
+                "Only one owner type allowed.")
+        if not company_id and not individual_id:
+            raise serializers.ValidationError("An owner is required.")
+        return data
+
     @transaction.atomic()
     def create(self, validated_data):
         # user = self.context["request"].user
         # individual_owner = validated_data.get("individual_owner")
         # # ? Just for testing purpose
-        validated_data['individual_owner'] = "6ca9a7cf-44cc-4979-be3b-d49b8b484ef6"
+        # validated_data['individual_owner'] = "6ca9a7cf-44cc-4979-be3b-d49b8b484ef6"
 
         # if not individual_owner:
         #     # Checking if the company is not doing this but rather the Michot
@@ -233,15 +258,15 @@ class CarListingSerializer(serializers.ModelSerializer):
 
         images = validated_data.pop("images")
 
-        individual_owner_id = validated_data.pop('individual_owner')
+        # individual_owner_id = validated_data.pop('individual_owner')
 
-        individual_owner = get_object_or_404(
-            IndividualOwnerProfile,
-            id=individual_owner_id
-        )
+        # individual_owner = get_object_or_404(
+        #     IndividualOwnerProfile,
+        #     id=individual_owner_id
+        # )
 
         car_listing_instance = CarListing(
-            individual_owner=individual_owner,
+            # individual_owner=individual_owner,
             **validated_data)
 
         car_listing_instance.save()
@@ -305,7 +330,8 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             individual_id = data.get("individual_owner")
 
             if company_id and individual_id:
-                raise serializers.ValidationError("Only one owner type allowed.")
+                raise serializers.ValidationError(
+                    "Only one owner type allowed.")
             if not company_id and not individual_id:
                 raise serializers.ValidationError("An owner is required.")
             return data
