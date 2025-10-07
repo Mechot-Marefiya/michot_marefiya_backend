@@ -106,12 +106,12 @@ class IndividualOwnerProfile(AbstractBaseModel):
     in-person and add their detail here than using the AUTH_USER_MODEL.
     """
 
-    class PropertyCategoryChoice(models.TextChoices):
-        GUEST_HOUSE = "guest_house", _("Guest House")
-        APARTMENT = "apartment", _("Apartment")
-        CONDOMINIUM = "condominium", _("Condominium")
-        VILLA = "villa", _("Villa")
-        VEHICLE = "vehicle", _("Vehicle")
+    # class PropertyCategoryChoice(models.TextChoices):
+    #     GUEST_HOUSE = "guest_house", _("Guest House")
+    #     APARTMENT = "apartment", _("Apartment")
+    #     CONDOMINIUM = "condominium", _("Condominium")
+    #     VILLA = "villa", _("Villa")
+    #     VEHICLE = "vehicle", _("Vehicle")
 
     first_name = models.CharField(max_length=255, verbose_name=_("First Name"))
 
@@ -126,13 +126,13 @@ class IndividualOwnerProfile(AbstractBaseModel):
         verbose_name=("Phone Number")
     )
 
-    category = models.CharField(
-        max_length=100,
-        verbose_name=_("Category"),
-        choices=PropertyCategoryChoice.choices,
-    )
+    # category = models.CharField(
+    #     max_length=100,
+    #     verbose_name=_("Category"),
+    #     choices=PropertyCategoryChoice.choices,
+    # )
 
-    # TODO: Make this unique once it's required
+    # TODO: Make this unique once it's required in the future.
     national_id_number = models.BigIntegerField(
         verbose_name=_("National Id Number"), blank=True, null=True
     )
