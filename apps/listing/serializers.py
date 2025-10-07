@@ -218,7 +218,7 @@ class CarListingSerializer(serializers.ModelSerializer):
         # user = self.context["request"].user
         # individual_owner = validated_data.get("individual_owner")
         # # ? Just for testing purpose
-        # validated_data['individual_owner'] = "8393efcf-27c8-4408-bac1-cea75cccee96"
+        validated_data['individual_owner'] = "6ca9a7cf-44cc-4979-be3b-d49b8b484ef6"
 
         # if not individual_owner:
         #     # Checking if the company is not doing this but rather the Michot
@@ -289,7 +289,8 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "description",
             "images",
             "base_price",
-            # "individual_owner",
+            "individual_owner",
+            "company",
             "address",
             "property_type",
             "bedrooms",
@@ -299,12 +300,23 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "listing_type",
         ]
 
+        def validate(self, data):
+            company_id = data.get("company")
+            individual_id = data.get("individual_owner")
+
+            if company_id and individual_id:
+                raise serializers.ValidationError("Only one owner type allowed.")
+            if not company_id and not individual_id:
+                raise serializers.ValidationError("An owner is required.")
+            return data
+
     def create(self, validated_data):
         # user = self.context["request"].user
         # individual_owner = validated_data.get("individual_owner")
+        # company_owner = validated_data.get("company_owner")
 
         # ? Just for testing purpose
-        # validated_data['individual_owner'] = "8393efcf-27c8-4408-bac1-cea75cccee96"
+        # validated_data['individual_owner'] = "6ca9a7cf-44cc-4979-be3b-d49b8b484ef6"
 
         # if not individual_owner:
         #     # Checking if the company is not doing this
