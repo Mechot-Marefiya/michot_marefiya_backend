@@ -170,7 +170,7 @@ class IndividualOwnerProfileSerializer(serializers.ModelSerializer):
             "last_name",
             "address",
             "phone",
-            "category",
+            # "category",
             "national_id_number"
         ]
 
