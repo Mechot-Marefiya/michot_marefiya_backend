@@ -56,7 +56,7 @@ class RoomListingSerializer(serializers.ModelSerializer):
     amenities = JsonSerializerField()
     # TODO: We need this to handle registration by michot admin
     # TODO: where the admin passes the hotel id.
-    hotel_id = serializers.UUIDField(required=False)
+    # hotel_id = serializers.UUIDField(required=False)
 
     class Meta:
         model = RoomListing
