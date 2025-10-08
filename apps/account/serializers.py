@@ -156,7 +156,7 @@ class IndividualOwnerProfileResponseSerializer(serializers.ModelSerializer):
             "last_name",
             "address",
             "phone",
-            "category"
+            # "category"
         ]
 
 
