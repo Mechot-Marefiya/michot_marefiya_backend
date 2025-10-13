@@ -28,6 +28,8 @@ class ListingImageSerializer(serializers.ModelSerializer):
 
 
 class RoomListingResponseSerializer(serializers.ModelSerializer):
+    images = ListingImageSerializer(many=True)
+
     class Meta:
         model = RoomListing
         fields = [
@@ -184,6 +186,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
 
 
 class CarListingResponseSerializer(serializers.ModelSerializer):
+    images = ListingImageSerializer(many=True)
     class Meta:
         model = CarListing
         fields = [

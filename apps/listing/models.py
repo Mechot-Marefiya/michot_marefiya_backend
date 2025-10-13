@@ -2,7 +2,7 @@ from django.conf import settings
 from django.db import models
 from django.db.models import Q, F
 from django.contrib.contenttypes.models import ContentType
-from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from django.utils.translation import gettext_lazy as _
 from apps.core.models import AbstractBaseModel, Address
 from apps.account.models import (
@@ -52,7 +52,9 @@ class ListingImage(AbstractBaseModel):
 
 
 class BaseListing(AbstractBaseModel):
-    images = models.ManyToManyField(ListingImage)
+    # images = models.ManyToManyField(ListingImage)
+
+    images = GenericRelation(ListingImage, related_query_name="listings")
 
     title = models.CharField(
         max_length=255,

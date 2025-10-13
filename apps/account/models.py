@@ -55,11 +55,13 @@ class CompanyProfile(AbstractBaseModel):
     class CategoryChoice(models.TextChoices):
         HOTEL = "hotel", _("Hotel")
         PENSION = "pension", _("Pension")
-        GUEST_HOUSE = "guest_house", _("Guest House")
-        APARTMENT = "apartment", _("Apartment")
+        HOUSE = "house", _("House")
         VEHICLE = "vehicle", _("Vehicle")
-        VILLA = "villa", _("Villa")
-        # REALESTATE = "real_estate", _("Real Estate")
+        # ? I don't see the point having each type than categorizing as House
+        # GUEST_HOUSE = "guest_house", _("Guest House")
+        # APARTMENT = "apartment", _("Apartment")
+        # VILLA = "villa", _("Villa")
+        # CONDO = "condo", _("Condominium")
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,

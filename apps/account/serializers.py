@@ -23,9 +23,7 @@ User = get_user_model()
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         data = super().validate(attrs)
-
-        # Add custom data
-        data["role"] = self.user.role.code  # e.g., "company" or "user"
+        data["role"] = self.user.role.code
 
         if self.user.role.code == RoleCode.COMPANY.value and hasattr(
             self.user, "company_profile"
@@ -88,8 +86,15 @@ class CompanyProfileResponseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CompanyProfile
-        fields = ["id", "name", "phone", "category",
-                  "description", "logo", "address"]
+        fields = [
+            "id",
+            "name",
+            "phone",
+            "category",
+            "description",
+            # "logo",
+            "address"
+        ]
 
 
 class CompanyProfileSerializer(serializers.ModelSerializer):
