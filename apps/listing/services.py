@@ -16,7 +16,7 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_hotel_listing(validated_data: dict):
-        hotel_id = validated_data.get("hotel_id")
+        company_id = validated_data.pop("company_id")
         images = validated_data.pop("images")
         # TODO: Do some way of handling the duplicate address creation
         # TODO: by maybe asking hotels to fill how many branches they have on
@@ -25,9 +25,9 @@ class ListingService:
         address_data = validated_data.pop("address", None)
         amenity_ids = validated_data.pop("amenities")
 
-        if hotel_id:
+        if company_id:
             company = get_object_or_404(
-                CompanyProfile, id=hotel_id)
+                CompanyProfile, id=company_id)
         # else:
         #     company = get_object_or_404(
         #         CompanyProfile, user=validated_data.pop('user'))
@@ -42,7 +42,7 @@ class ListingService:
             address_instance = company.address
 
         room_listing_instance = RoomListing.objects.create(
-            # hotel=hotel_profile,
+            hotel=company.hotel,
             address=address_instance,
             **validated_data
         )

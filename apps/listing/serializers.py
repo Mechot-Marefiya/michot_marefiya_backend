@@ -59,14 +59,14 @@ class RoomListingSerializer(serializers.ModelSerializer):
     # TODO: We need this to handle registration by michot admin
     # TODO: where the admin passes the hotel id.
     # hotel_id = serializers.UUIDField(required=False)
+    company_id = serializers.UUIDField()
 
     class Meta:
         model = RoomListing
         fields = [
             "images",
             "title",
-            # "hotel_id",
-            "hotel",
+            "company_id",
             "description",
             "base_price",
             "address",
@@ -187,6 +187,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
 
 class CarListingResponseSerializer(serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
+
     class Meta:
         model = CarListing
         fields = [

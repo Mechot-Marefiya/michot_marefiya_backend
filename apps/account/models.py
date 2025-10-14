@@ -154,7 +154,7 @@ class HotelProfile(AbstractBaseModel):
     #     PENSION = "pension", _("Pension")
 
     company = models.OneToOneField(
-        CompanyProfile, on_delete=models.CASCADE, related_name="+"
+        CompanyProfile, on_delete=models.CASCADE, related_name="hotel"
     )
 
     # category = models.CharField(
