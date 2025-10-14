@@ -28,11 +28,13 @@ class ListingService:
         if company_id:
             company = get_object_or_404(
                 CompanyProfile, id=company_id)
+
+        print("------->", company)
         # else:
         #     company = get_object_or_404(
         #         CompanyProfile, user=validated_data.pop('user'))
 
-        # hotel_profile = get_object_or_404(HotelProfile, company=company)
+        hotel_profile = get_object_or_404(HotelProfile, company=company_id)
 
         address_instance = None
 
@@ -42,7 +44,7 @@ class ListingService:
             address_instance = company.address
 
         room_listing_instance = RoomListing.objects.create(
-            hotel=company.hotel,
+            hotel=hotel_profile,
             address=address_instance,
             **validated_data
         )

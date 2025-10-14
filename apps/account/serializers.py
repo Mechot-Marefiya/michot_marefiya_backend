@@ -251,6 +251,7 @@ class HotelProfileSerializer(serializers.Serializer):
             user=user, logo=logo, license=license, **company_info, address=address)
 
         hotel = HotelProfile.objects.create(company=company, **validated_data)
+        print("=====>", (hotel, company))
         facility_instances = []
         for id in facilities:
             ins = get_object_or_404(Facility, id=id)
