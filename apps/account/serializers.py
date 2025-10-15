@@ -206,6 +206,7 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
         fields = [
             'id',
             'company',
+            'images',
             'stars',
             'facilities'
         ]
