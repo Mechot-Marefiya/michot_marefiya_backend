@@ -7,6 +7,7 @@ from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelatio
 from apps.account.managers import CustomUserManager
 from apps.core.models import AbstractBaseModel, Address, Facility
 
+
 class Role(AbstractBaseModel):
     name = models.CharField(max_length=50, verbose_name=_("Name"))
 

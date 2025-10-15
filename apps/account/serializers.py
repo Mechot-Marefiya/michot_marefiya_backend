@@ -213,6 +213,7 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         rep = super().to_representation(instance)
         company_data = rep.pop("company", {})
+        company_data.pop("id") # Avoiding the actual hotel id override by company id
         return {**rep, **company_data}
 
 
