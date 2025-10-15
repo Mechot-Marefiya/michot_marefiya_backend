@@ -1,11 +1,11 @@
 from django.db import models
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
+from django.contrib.contenttypes.models import ContentType
 from django.utils.translation import gettext_lazy as _
-
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from apps.account.managers import CustomUserManager
 from apps.core.models import AbstractBaseModel, Address, Facility
-
 
 class Role(AbstractBaseModel):
     name = models.CharField(max_length=50, verbose_name=_("Name"))
@@ -49,6 +49,45 @@ class User(AbstractUser, AbstractBaseModel):
 
     def __str__(self) -> str:
         return self.email
+
+
+class ListingImage(AbstractBaseModel):
+    """
+    A generic image model for any listing type (hotel, car, property).
+    """
+
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.CASCADE,
+        verbose_name="Content Type",
+    )
+    object_id = models.UUIDField(verbose_name="Object ID")
+    content_object = GenericForeignKey()
+
+    image = models.ImageField(
+        upload_to="listing_images/",
+        verbose_name="Image File",
+        help_text="Upload an image for the listing.",
+    )
+    alt_text = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Alt Text",
+        help_text="Alternative text for the image.",
+    )
+    is_primary = models.BooleanField(
+        default=False,
+        verbose_name="Primary Image",
+        help_text="Marks the main image for the listing.",
+    )
+
+    class Meta:
+        verbose_name = "Listing Image"
+        verbose_name_plural = "Listing Images"
+        db_table = "listing_images"
+
+    def __str__(self):
+        return f"Image for {self.content_object} ({str(self.id)[:6]})"
 
 
 class CompanyProfile(AbstractBaseModel):
@@ -156,6 +195,8 @@ class HotelProfile(AbstractBaseModel):
     company = models.OneToOneField(
         CompanyProfile, on_delete=models.CASCADE, related_name="hotel"
     )
+
+    images = GenericRelation(ListingImage, related_query_name="listings")
 
     # category = models.CharField(
     #     max_length=100,

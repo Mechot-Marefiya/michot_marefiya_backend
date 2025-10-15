@@ -1,54 +1,15 @@
 from django.conf import settings
 from django.db import models
 from django.db.models import Q, F
-from django.contrib.contenttypes.models import ContentType
-from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
+from django.contrib.contenttypes.fields import GenericRelation
 from django.utils.translation import gettext_lazy as _
 from apps.core.models import AbstractBaseModel, Address
 from apps.account.models import (
     CompanyProfile,
     HotelProfile,
-    IndividualOwnerProfile
+    IndividualOwnerProfile,
+    ListingImage
 )
-
-
-class ListingImage(AbstractBaseModel):
-    """
-    A generic image model for any listing type (hotel, car, property).
-    """
-
-    content_type = models.ForeignKey(
-        ContentType,
-        on_delete=models.CASCADE,
-        verbose_name="Content Type",
-    )
-    object_id = models.UUIDField(verbose_name="Object ID")
-    content_object = GenericForeignKey()
-
-    image = models.ImageField(
-        upload_to="listing_images/",
-        verbose_name="Image File",
-        help_text="Upload an image for the listing.",
-    )
-    alt_text = models.CharField(
-        max_length=255,
-        blank=True,
-        verbose_name="Alt Text",
-        help_text="Alternative text for the image.",
-    )
-    is_primary = models.BooleanField(
-        default=False,
-        verbose_name="Primary Image",
-        help_text="Marks the main image for the listing.",
-    )
-
-    class Meta:
-        verbose_name = "Listing Image"
-        verbose_name_plural = "Listing Images"
-        db_table = "listing_images"
-
-    def __str__(self):
-        return f"Image for {self.content_object} ({str(self.id)[:6]})"
 
 
 class BaseListing(AbstractBaseModel):
