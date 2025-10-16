@@ -14,4 +14,5 @@ class HotelProfileDocSerializer(serializers.Serializer):
     description = serializers.CharField()
     stars = serializers.IntegerField()
     address = AddressSerializer()
+    images = serializers.ListField(child=serializers.ImageField())
     facilities = serializers.ListField(child=serializers.CharField())
