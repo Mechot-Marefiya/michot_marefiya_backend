@@ -1,12 +1,16 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 
-from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile
+from apps.account.models import (
+    CompanyProfile,
+    HotelProfile,
+    IndividualOwnerProfile
+)
+from apps.account.services import ImageCreationService
 from apps.core.models import Address
 from apps.listing.models import (
     Amenity,
     GuestHouseListing,
-    ListingImage,
     PropertyListing,
     RoomListing,
 )
@@ -57,7 +61,7 @@ class ListingService:
         # M2M to amenities
         room_listing_instance.amenities.set(amenities)
 
-        ListingService.create_images(room_listing_instance, images)
+        ImageCreationService.create_images(room_listing_instance, images)
 
         return room_listing_instance
 
@@ -86,7 +90,8 @@ class ListingService:
         # M2M to amenities
         guest_house_listing_instance.amenities.set(amenities)
 
-        ListingService.create_images(guest_house_listing_instance, images)
+        ImageCreationService.create_images(
+            guest_house_listing_instance, images)
 
         return guest_house_listing_instance
 
@@ -110,34 +115,10 @@ class ListingService:
             **validated_data
         )
 
-        ListingService.create_images(property_listing_instance, images)
+        ImageCreationService.create_images(property_listing_instance, images)
 
         return property_listing_instance
 
     @staticmethod
     def create_address(address_data) -> Address:
         return Address.objects.create(**address_data)
-
-    @staticmethod
-    def create_images(content_object, images_payload):
-        # create images
-        image_objs = []
-
-        for img_file in images_payload:
-            if hasattr(img_file, "is_primary"):
-                is_primary = img_file.is_primary
-            else:
-                is_primary = False
-
-            img_instance = ListingImage(
-                content_object=content_object,
-                image=img_file,
-                alt_text=img_file.name,
-                # TODO: Expect a metadata attached in the payload
-                is_primary=is_primary,
-            )
-            image_objs.append(img_instance)
-
-        images = ListingImage.objects.bulk_create(image_objs)
-
-        print("Images Created", images)
