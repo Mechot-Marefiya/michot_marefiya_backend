@@ -2,7 +2,7 @@ from django.db import transaction
 # from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 # from apps.account.models import IndividualOwnerProfile
-from apps.account.serializers import AddressSerializer
+from apps.account.serializers import AddressSerializer, ListingImageSerializer
 from apps.core.serializers import JsonSerializerField
 from apps.listing.services import ListingService
 from apps.listing.models import (
@@ -21,12 +21,6 @@ class AmenityResponseSSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "icon"]
 
 
-class ListingImageSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ListingImage
-        fields = ["image", "alt_text"]
-
-
 class RoomListingResponseSerializer(serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
 
@@ -34,7 +28,6 @@ class RoomListingResponseSerializer(serializers.ModelSerializer):
         model = RoomListing
         fields = [
             "id",
-            # "hotel",
             "images",
             "title",
             "description",

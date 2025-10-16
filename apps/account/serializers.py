@@ -1,6 +1,7 @@
 from django.db import transaction
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
+from apps.listing.services import ListingService
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.account.enums import RoleCode
 from apps.account.models import (
@@ -8,6 +9,7 @@ from apps.account.models import (
     CompanyProfile,
     HotelProfile,
     IndividualOwnerProfile,
+    ListingImage,
     Role
 )
 from apps.account.utils import generate_password
@@ -34,6 +36,12 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             }
 
         return data
+
+
+class ListingImageSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ListingImage
+        fields = ["image", "alt_text"]
 
 
 class RoleSerializer(serializers.ModelSerializer):
@@ -200,6 +208,7 @@ class IndividualOwnerProfileSerializer(serializers.ModelSerializer):
 
 class HotelProfileResponseSerializer(serializers.ModelSerializer):
     company = CompanyProfileResponseSerializer()
+    images = ListingImageSerializer(many=True)
 
     class Meta:
         model = HotelProfile
@@ -214,7 +223,8 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         rep = super().to_representation(instance)
         company_data = rep.pop("company", {})
-        company_data.pop("id") # Avoiding the actual hotel id override by company id
+        # Avoiding the actual hotel id override by company id
+        company_data.pop("id")
         return {**rep, **company_data}
 
 
@@ -224,6 +234,7 @@ class HotelProfileSerializer(serializers.Serializer):
     license = serializers.FileField()
     facilities = JsonSerializerField()
     stars = serializers.IntegerField()
+    images = serializers.ListField(child=serializers.ImageField())
 
     def validate(self, attrs):
         company_data = attrs.pop('company')
@@ -242,7 +253,7 @@ class HotelProfileSerializer(serializers.Serializer):
         license = validated_data.pop('license')
         logo = validated_data.pop('logo')
         facilities = validated_data.pop('facilities')
-
+        images = validated_data.pop('images')
         role = Role.objects.get(code=RoleCode.COMPANY.value)
         password = generate_password(email)
         user = User(email=email, role=role)
@@ -253,13 +264,14 @@ class HotelProfileSerializer(serializers.Serializer):
             user=user, logo=logo, license=license, **company_info, address=address)
 
         hotel = HotelProfile.objects.create(company=company, **validated_data)
-        print("=====>", (hotel, company))
         facility_instances = []
         for id in facilities:
             ins = get_object_or_404(Facility, id=id)
             facility_instances.append(ins)
 
         hotel.facilities.set(facility_instances)
+
+        ListingService.create_images(hotel, images)
 
         return hotel
 
