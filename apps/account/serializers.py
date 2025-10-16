@@ -1,7 +1,7 @@
 from django.db import transaction
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
-from apps.listing.services import ListingService
+from apps.account.services import ImageCreationService
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.account.enums import RoleCode
 from apps.account.models import (
@@ -271,7 +271,7 @@ class HotelProfileSerializer(serializers.Serializer):
 
         hotel.facilities.set(facility_instances)
 
-        ListingService.create_images(hotel, images)
+        ImageCreationService.create_images(hotel, images)
 
         return hotel
 
