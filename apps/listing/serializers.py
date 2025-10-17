@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.shortcuts import get_object_or_404
 from rest_framework import serializers
 from apps.account.services import ImageCreationService
 from apps.account.serializers import AddressSerializer, ListingImageSerializer
@@ -6,6 +7,7 @@ from apps.core.serializers import JsonSerializerField
 from apps.listing.services import ListingService
 from apps.listing.models import (
     Amenity,
+    Booking,
     CarListing,
     GuestHouseListing,
     PropertyListing,
@@ -356,3 +358,51 @@ class PropertyListingSerializer(serializers.ModelSerializer):
         return PropertyListingResponseSerializer(
             instance, self.context
         ).to_representation(instance)
+
+
+class BookingResponseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Booking
+        fields = [
+            "id",
+            "user"
+            "room",
+            "units_booked",
+            "check_in_date",
+            "check_out_date",
+            "total_price",
+            "status"
+        ]
+
+
+class BookingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Booking
+        fields = [
+            "room",
+            "units_booked",
+            "check_in_date",
+            "check_out_date"
+        ]
+
+    def create(self, validated_data):
+        room_id = validated_data.get('room')
+        room_quantity = validated_data.get('units_booked')
+        room_obj = get_object_or_404(RoomListing, id=room_id)
+
+        price = room_obj.base_price
+
+        total_price = room_quantity * price
+
+        # pass status as default PENDING
+
+        booking = Booking.objects.create(
+            total_price=total_price, **validated_data)
+
+        return booking
+
+    def to_representation(self, instance):
+        return BookingResponseSerializer(
+            instance, self.context
+        ).to_representation(instance)
+

@@ -1,6 +1,6 @@
 from django_filters import rest_framework as filters
 
-from apps.listing.models import CarListing, PropertyListing, RoomListing
+from apps.listing.models import Booking, CarListing, PropertyListing, RoomListing
 
 
 class RoomFilter(filters.FilterSet):
@@ -21,3 +21,9 @@ class PropertyFilter(filters.FilterSet):
     class Meta:
         model = PropertyListing
         fields = ['property_type', 'listing_type']
+
+
+class BookingFilter(filters.FilterSet):
+    class Meta:
+        model = Booking
+        fields = ['status']

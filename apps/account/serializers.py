@@ -280,3 +280,22 @@ class HotelProfileSerializer(serializers.Serializer):
             instance,
             self.context
         ).to_representation(instance)
+
+
+class HotelRoomAvailabilityResponseSerializer(serializers.Serializer):
+    room_id = serializers.UUIDField()
+    room_name = serializers.CharField()
+    available_units = serializers.IntegerField()
+
+
+class HotelRoomAvailabilitySerializer(serializers.Serializer):
+    check_in_date = serializers.DateField()
+    check_out_date = serializers.DateField()
+
+    def validate(self, data):
+        """Ensure check-out date is after check-in date."""
+        if data['check_out_date'] <= data['check_in_date']:
+            raise serializers.ValidationError(
+                "Check-out date must be after check-in date."
+            )
+        return data

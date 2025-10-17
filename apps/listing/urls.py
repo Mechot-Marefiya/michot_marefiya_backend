@@ -1,4 +1,6 @@
 from apps.listing.views import (
+    BookingViewSet,
+    # HotelRoomAvailabilityViewSet,
     RoomListingViewSet,
     GuestHouseListingViewSet,
     CarListingViewSet,
@@ -16,4 +18,8 @@ router.register("guest-houses", GuestHouseListingViewSet,
 router.register("cars", CarListingViewSet, basename="cars")
 router.register("properties", PropertyListingViewSet, basename="properties")
 router.register('amenities', AmenityViewSet, basename='amenities')
+router.register('bookings', BookingViewSet, basename='bookings')
+# router.register('room-availability', HotelRoomAvailabilityViewSet,
+#                 basename='room-availability')
+
 urlpatterns = router.urls
