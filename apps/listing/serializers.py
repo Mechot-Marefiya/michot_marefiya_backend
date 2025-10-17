@@ -1,7 +1,6 @@
 from django.db import transaction
-# from django.shortcuts import get_object_or_404
 from rest_framework import serializers
-# from apps.account.models import IndividualOwnerProfile
+from apps.account.services import ImageCreationService
 from apps.account.serializers import AddressSerializer, ListingImageSerializer
 from apps.core.serializers import JsonSerializerField
 from apps.listing.services import ListingService
@@ -9,9 +8,8 @@ from apps.listing.models import (
     Amenity,
     CarListing,
     GuestHouseListing,
-    ListingImage,
     PropertyListing,
-    RoomListing,
+    RoomListing
 )
 
 
@@ -268,7 +266,7 @@ class CarListingSerializer(serializers.ModelSerializer):
 
         car_listing_instance.save()
 
-        ListingService.create_images(car_listing_instance, images)
+        ImageCreationService.create_images(car_listing_instance, images)
 
         return car_listing_instance
 
