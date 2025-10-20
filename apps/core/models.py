@@ -51,8 +51,7 @@ class Facility(AbstractBaseModel):
     Shared Hotel level things(pool, spa, gym, parking, etc.)
     """
 
-    name = models.CharField(max_length=255, unique=True,
-                            verbose_name=_("Name"))
+    name = models.CharField(max_length=255, unique=True, verbose_name=_("Name"))
 
     icon = models.CharField(max_length=100, blank=True, verbose_name=_("Icon"))
 

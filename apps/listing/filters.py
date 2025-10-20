@@ -4,26 +4,26 @@ from apps.listing.models import Booking, CarListing, PropertyListing, RoomListin
 
 
 class RoomFilter(filters.FilterSet):
-    hotel = filters.UUIDFilter('hotel')
+    hotel = filters.UUIDFilter("hotel")
 
     class Meta:
         model = RoomListing
-        fields = ['hotel']
+        fields = ["hotel"]
 
 
 class CarFilter(filters.FilterSet):
     class Meta:
         model = CarListing
-        fields = ['listing_type', 'car_class']
+        fields = ["listing_type", "car_class"]
 
 
 class PropertyFilter(filters.FilterSet):
     class Meta:
         model = PropertyListing
-        fields = ['property_type', 'listing_type']
+        fields = ["property_type", "listing_type"]
 
 
 class BookingFilter(filters.FilterSet):
     class Meta:
         model = Booking
-        fields = ['status']
+        fields = ["status"]

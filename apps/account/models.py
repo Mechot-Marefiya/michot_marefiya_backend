@@ -118,19 +118,15 @@ class CompanyProfile(AbstractBaseModel):
         verbose_name=_("Logo"), upload_to="company_logos/", blank=True, null=True
     )
 
-    license = models.FileField(verbose_name=_(
-        "License"), upload_to="company_licenses/")
+    license = models.FileField(verbose_name=_("License"), upload_to="company_licenses/")
 
     category = models.CharField(
-        max_length=100,
-        choices=CategoryChoice.choices,
-        verbose_name=_("Category")
+        max_length=100, choices=CategoryChoice.choices, verbose_name=_("Category")
     )
 
     description = models.TextField(verbose_name=_("Description"), blank=True)
 
-    address = models.OneToOneField(
-        Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
 
     class Meta:
         verbose_name = _("Company Profile")
@@ -159,14 +155,9 @@ class IndividualOwnerProfile(AbstractBaseModel):
 
     last_name = models.CharField(max_length=255, verbose_name=_("Last Name"))
 
-    address = models.OneToOneField(
-        Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
 
-    phone = models.CharField(
-        max_length=15,
-        unique=True,
-        verbose_name=("Phone Number")
-    )
+    phone = models.CharField(max_length=15, unique=True, verbose_name=("Phone Number"))
 
     # category = models.CharField(
     #     max_length=100,

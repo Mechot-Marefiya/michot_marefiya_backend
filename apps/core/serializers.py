@@ -40,8 +40,4 @@ class JsonSerializerField(serializers.Field):
 class FacilityResponseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Facility
-        fields = [
-            "id",
-            "name",
-            "icon"
-        ]
+        fields = ["id", "name", "icon"]

@@ -8,7 +8,7 @@ from apps.account.models import (
     CompanyProfile,
     HotelProfile,
     IndividualOwnerProfile,
-    ListingImage
+    ListingImage,
 )
 
 
@@ -116,7 +116,7 @@ class CarListing(BaseListing):
         verbose_name=_("Company"),
         help_text=_("The company that owns this listing."),
         null=True,
-        blank=True
+        blank=True,
     )
 
     individual_owner = models.ForeignKey(
@@ -176,7 +176,7 @@ class CarListing(BaseListing):
         max_length=200,
         choices=CarClassChoices.choices,
         default=CarClassChoices.NORMAL,
-        verbose_name=_("Class Category")
+        verbose_name=_("Class Category"),
     )
 
     condition = models.CharField(
@@ -375,13 +375,12 @@ class RoomListing(BaseListing):
         blank=True,
     )
 
-    address = models.OneToOneField(
+    # * This is needed here cause we might have hotels
+    # * with many branches in d/t location
+    address = models.ForeignKey(
         Address,
         on_delete=models.RESTRICT,
-        related_name="+",
-        # * Making only optional for validation cause either we use
-        # * from payload or reuse company HQ address
-        blank=True,
+        related_name="+"
     )
 
     amenities = models.ManyToManyField(

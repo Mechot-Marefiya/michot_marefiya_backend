@@ -2,18 +2,14 @@ from rest_framework.permissions import AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from apps.core.views import AbstractModelViewSet
-from apps.listing.filters import (
-    PropertyFilter,
-    RoomFilter,
-    CarFilter,
-    BookingFilter)
+from apps.listing.filters import PropertyFilter, RoomFilter, CarFilter, BookingFilter
 from apps.listing.models import (
     Amenity,
     CarListing,
     GuestHouseListing,
     PropertyListing,
     RoomListing,
-    Booking
+    Booking,
 )
 from apps.listing.serializers import (
     AmenityResponseSSerializer,
@@ -78,7 +74,7 @@ class PropertyListingViewSet(AbstractModelViewSet):
 
 
 class AmenityViewSet(AbstractModelViewSet):
-    http_method_names = ['get']
+    http_method_names = ["get"]
     permission_classes = [AllowAny]
     serializer_class = AmenityResponseSSerializer
     queryset = Amenity.objects.all()

@@ -19,8 +19,14 @@ class ListingImageInline(GenericTabularInline):
 
 @admin.register(PropertyListing)
 class PropertyListingAdmin(admin.ModelAdmin):
-    list_display = ("property_type", "bedrooms", "bathrooms",
-                    "square_meters", "is_furnished", "listing_type")
+    list_display = (
+        "property_type",
+        "bedrooms",
+        "bathrooms",
+        "square_meters",
+        "is_furnished",
+        "listing_type",
+    )
     inlines = [ListingImageInline]
 
 

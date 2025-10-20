@@ -1,11 +1,7 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 
-from apps.account.models import (
-    CompanyProfile,
-    HotelProfile,
-    IndividualOwnerProfile
-)
+from apps.account.models import CompanyProfile, HotelProfile
 from apps.account.services import ImageCreationService
 from apps.core.models import Address
 from apps.listing.models import (
@@ -19,7 +15,7 @@ from apps.listing.models import (
 class ListingService:
     @staticmethod
     @transaction.atomic()
-    def create_hotel_listing(validated_data: dict):
+    def create_room_listing(validated_data: dict):
         company_id = validated_data.pop("company_id")
         images = validated_data.pop("images")
         # TODO: Do some way of handling the duplicate address creation
@@ -30,8 +26,7 @@ class ListingService:
         amenity_ids = validated_data.pop("amenities")
 
         if company_id:
-            company = get_object_or_404(
-                CompanyProfile, id=company_id)
+            company = get_object_or_404(CompanyProfile, id=company_id)
 
         print("------->", company)
         # else:
@@ -48,9 +43,7 @@ class ListingService:
             address_instance = company.address
 
         room_listing_instance = RoomListing.objects.create(
-            hotel=hotel_profile,
-            address=address_instance,
-            **validated_data
+            hotel=hotel_profile, address=address_instance, **validated_data
         )
 
         amenities = []
@@ -80,7 +73,7 @@ class ListingService:
         guest_house_listing_instance = GuestHouseListing.objects.create(
             address=address_instance,
             # individual_owner=individual_owner,
-            **validated_data
+            **validated_data,
         )
         amenities = []
         for id in amenity_ids:
@@ -112,7 +105,7 @@ class ListingService:
         property_listing_instance = PropertyListing.objects.create(
             address=address_instance,
             # individual_owner=individual_owner,
-            **validated_data
+            **validated_data,
         )
 
         ImageCreationService.create_images(property_listing_instance, images)

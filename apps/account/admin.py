@@ -6,7 +6,7 @@ from apps.account.models import (
     User,
     HotelProfile,
     CompanyProfile,
-    IndividualOwnerProfile
+    IndividualOwnerProfile,
 )
 
 
@@ -18,9 +18,7 @@ class ListingImageInline(GenericTabularInline):
 
 @admin.register(HotelProfile)
 class HotelProfileModelAdmin(admin.ModelAdmin):
-    list_display = [
-        "stars", "company"
-    ]
+    list_display = ["stars", "company"]
     inlines = [ListingImageInline]
 
 

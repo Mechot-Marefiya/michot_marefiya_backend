@@ -11,7 +11,7 @@ from apps.listing.models import (
     CarListing,
     GuestHouseListing,
     PropertyListing,
-    RoomListing
+    RoomListing,
 )
 
 
@@ -23,6 +23,7 @@ class AmenityResponseSSerializer(serializers.ModelSerializer):
 
 class RoomListingResponseSerializer(serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
+    amenities = AmenityResponseSSerializer(many=True)
 
     class Meta:
         model = RoomListing
@@ -85,13 +86,10 @@ class RoomListingSerializer(serializers.ModelSerializer):
         #     validated_data["user"] = self.context["request"].user
         # validated_data['hotel_id'] = hotel_id
         # TODO: Proper Error handling
-        return ListingService.create_hotel_listing(validated_data)
+        return ListingService.create_room_listing(validated_data)
 
     def to_representation(self, instance):
-        return RoomListingResponseSerializer(
-            instance,
-            self.context
-        ).to_representation(
+        return RoomListingResponseSerializer(instance, self.context).to_representation(
             instance
         )
 
@@ -99,6 +97,7 @@ class RoomListingSerializer(serializers.ModelSerializer):
 class GuestHouseListingResponseSerializer(serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     address = AddressSerializer()
+    amenities = AmenityResponseSSerializer(many=True)
 
     class Meta:
         model = GuestHouseListing
@@ -111,7 +110,7 @@ class GuestHouseListingResponseSerializer(serializers.ModelSerializer):
             "total_rooms",
             "amenities",
             "address",
-            "rating"
+            "rating",
         ]
 
 
@@ -131,7 +130,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             "description",
             "total_rooms",
             "amenities",
-            "address"
+            "address",
         ]
 
     def validate_address(self, attr):
@@ -144,14 +143,12 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
         individual_id = data.get("individual_owner")
 
         if company_id and individual_id:
-            raise serializers.ValidationError(
-                "Only one owner type allowed.")
+            raise serializers.ValidationError("Only one owner type allowed.")
         if not company_id and not individual_id:
             raise serializers.ValidationError("An owner is required.")
         return data
 
     def create(self, validated_data):
-
         # user = self.context["request"].user
         # individual_owner = validated_data.get("individual_owner")
 
@@ -229,8 +226,7 @@ class CarListingSerializer(serializers.ModelSerializer):
         individual_id = data.get("individual_owner")
 
         if company_id and individual_id:
-            raise serializers.ValidationError(
-                "Only one owner type allowed.")
+            raise serializers.ValidationError("Only one owner type allowed.")
         if not company_id and not individual_id:
             raise serializers.ValidationError("An owner is required.")
         return data
@@ -264,7 +260,8 @@ class CarListingSerializer(serializers.ModelSerializer):
 
         car_listing_instance = CarListing(
             # individual_owner=individual_owner,
-            **validated_data)
+            **validated_data
+        )
 
         car_listing_instance.save()
 
@@ -365,29 +362,23 @@ class BookingResponseSerializer(serializers.ModelSerializer):
         model = Booking
         fields = [
             "id",
-            "user"
-            "room",
+            "userroom",
             "units_booked",
             "check_in_date",
             "check_out_date",
             "total_price",
-            "status"
+            "status",
         ]
 
 
 class BookingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Booking
-        fields = [
-            "room",
-            "units_booked",
-            "check_in_date",
-            "check_out_date"
-        ]
+        fields = ["room", "units_booked", "check_in_date", "check_out_date"]
 
     def create(self, validated_data):
-        room_id = validated_data.get('room')
-        room_quantity = validated_data.get('units_booked')
+        room_id = validated_data.get("room")
+        room_quantity = validated_data.get("units_booked")
         room_obj = get_object_or_404(RoomListing, id=room_id)
 
         price = room_obj.base_price
@@ -402,7 +393,6 @@ class BookingSerializer(serializers.ModelSerializer):
         return booking
 
     def to_representation(self, instance):
-        return BookingResponseSerializer(
-            instance, self.context
-        ).to_representation(instance)
-
+        return BookingResponseSerializer(instance, self.context).to_representation(
+            instance
+        )
