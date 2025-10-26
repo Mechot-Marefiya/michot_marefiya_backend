@@ -1,14 +1,32 @@
+from django.db.models import Sum, Q
 from rest_framework.permissions import AllowAny
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from rest_framework import status
 from rest_framework_simplejwt.views import TokenObtainPairView
-
-# from rest_framework.parsers import MultiPartParser, JSONParser
-
-# from rest_framework.viewsets import ViewSet
-# from rest_framework.response import Response
-# from rest_framework.status import HTTP_201_CREATED
+from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.utils import extend_schema
+from apps.listing.models import Booking, RoomListing
+from apps.account.docs.schemas import HotelProfileDocSerializer
+from apps.account.filters import HotelFilter
 from apps.core.views import AbstractModelViewSet
-from apps.account.models import CompanyProfile, User
-from apps.account.serializers import CustomTokenObtainPairSerializer, UserSerializer, CompanyProfileSerializer
+from apps.account.docs.schemas import check__room_availability_schema
+from apps.account.models import (
+    CompanyProfile,
+    HotelProfile,
+    IndividualOwnerProfile,
+    User,
+)
+from apps.account.serializers import (
+    CompanyProfileResponseSerializer,
+    CustomTokenObtainPairSerializer,
+    HotelProfileSerializer,
+    HotelRoomAvailabilitySerializer,
+    IndividualOwnerProfileResponseSerializer,
+    IndividualOwnerProfileSerializer,
+    UserSerializer,
+    CompanyProfileSerializer,
+)
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -21,9 +39,89 @@ class UserViewSet(AbstractModelViewSet):
     queryset = User.objects.all()
 
 
+@extend_schema(responses=CompanyProfileResponseSerializer)
 class CompanyProfileViewSet(AbstractModelViewSet):
     permission_classes = [AllowAny]
-    # TODO: Verify the parsing is default or uncomment this
-    # parser_classes = [MultiPartParser, JSONParser]
     serializer_class = CompanyProfileSerializer
     queryset = CompanyProfile.objects.all()
+
+
+@extend_schema(responses=IndividualOwnerProfileResponseSerializer)
+class IndividualOwnerProfileViewSet(AbstractModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = IndividualOwnerProfileSerializer
+    queryset = IndividualOwnerProfile.objects.all()
+
+
+@extend_schema(responses=HotelProfileDocSerializer)
+class HotelProfileViewSet(AbstractModelViewSet):
+    permission_classes = [AllowAny]
+    serializer_class = HotelProfileSerializer
+    queryset = HotelProfile.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = HotelFilter
+
+    @check__room_availability_schema  # custom docs schema
+    @action(
+        detail=True, methods=["get"], serializer_class=HotelRoomAvailabilitySerializer
+    )
+    def check_availability(self, request, pk=None):
+        """
+        Check room availability for a hotel between check-in and check-out dates.
+        Expects check_in_date and check_out_date in the request params.
+        """
+        hotel = self.get_object()
+
+        check_in_date = request.query_params.get("check_in_date")
+        check_out_date = request.query_params.get("check_out_date")
+
+        if not check_in_date or not check_out_date:
+            return Response(
+                {"detail": "check_in_date and check_out_date are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        rooms = RoomListing.objects.filter(hotel=hotel)
+
+        results = []
+
+        for room in rooms:
+            # Find overlapping confirmed/pending bookings
+            booked_units = (
+                Booking.objects.filter(
+                    room=room,
+                    status__in=[
+                        Booking.BookingStatus.CONFIRMED,
+                        Booking.BookingStatus.PENDING,
+                    ],
+                )
+                .filter(
+                    Q(check_in_date__lt=check_out_date),
+                    Q(check_out_date__gt=check_in_date),
+                )
+                .aggregate(total=Sum("units_booked"))
+                .get("total")
+                or 0
+            )
+
+            available_units = max(room.total_units - booked_units, 0)
+
+            results.append(
+                {
+                    "room_id": room.id,
+                    "name": room.title,
+                    "available_units": available_units,
+                    # "total_units": room.total_units,
+                    # "price_per_night": room.base_price,
+                }
+            )
+        # TODO: Fix this from the backend response
+        # TODO: if we only need room_id, and available_units in the UI.
+        return Response(
+            {
+                "hotel_id": hotel.id,
+                "check_in": check_in_date,
+                "check_out": check_out_date,
+                "rooms": results,
+            }
+        )

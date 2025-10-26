@@ -46,6 +46,24 @@ class Address(AbstractBaseModel):
         return f"{self.city} - {self.street_line1}"
 
 
+class Facility(AbstractBaseModel):
+    """
+    Shared Hotel level things(pool, spa, gym, parking, etc.)
+    """
+
+    name = models.CharField(max_length=255, unique=True, verbose_name=_("Name"))
+
+    icon = models.CharField(max_length=100, blank=True, verbose_name=_("Icon"))
+
+    class Meta:
+        verbose_name = _("Facility")
+        verbose_name_plural = _("Facilities")
+        db_table = "facilities"
+
+    def __str__(self):
+        return self.name
+
+
 # class DataLookup(AbstractBaseModel):
 #     lookup_type = models.CharField(max_length=50)
 #     key = models.CharField(max_length=50)

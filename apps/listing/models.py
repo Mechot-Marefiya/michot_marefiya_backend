@@ -1,59 +1,21 @@
 from django.conf import settings
 from django.db import models
 from django.db.models import Q, F
-from django.contrib.contenttypes.models import ContentType
-from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.fields import GenericRelation
 from django.utils.translation import gettext_lazy as _
-
 from apps.core.models import AbstractBaseModel, Address
 from apps.account.models import (
     CompanyProfile,
     HotelProfile,
-    IndividualOwnerProfile
+    IndividualOwnerProfile,
+    ListingImage,
 )
 
 
-class ListingImage(AbstractBaseModel):
-    """
-    A generic image model for any listing type (hotel, car, property).
-    """
-
-    content_type = models.ForeignKey(
-        ContentType,
-        on_delete=models.CASCADE,
-        verbose_name="Content Type",
-    )
-    object_id = models.UUIDField(verbose_name="Object ID")
-    content_object = GenericForeignKey()
-
-    image = models.ImageField(
-        upload_to="listing_images/",
-        verbose_name="Image File",
-        help_text="Upload an image for the listing.",
-    )
-    alt_text = models.CharField(
-        max_length=255,
-        blank=True,
-        verbose_name="Alt Text",
-        help_text="Alternative text for the image.",
-    )
-    is_primary = models.BooleanField(
-        default=False,
-        verbose_name="Primary Image",
-        help_text="Marks the main image for the listing.",
-    )
-
-    class Meta:
-        verbose_name = "Listing Image"
-        verbose_name_plural = "Listing Images"
-        db_table = "listing_images"
-
-    def __str__(self):
-        return f"Image for {self.content_object} ({str(self.id)[:6]})"
-
-
 class BaseListing(AbstractBaseModel):
-    images = models.ManyToManyField(ListingImage)
+    # images = models.ManyToManyField(ListingImage)
+
+    images = GenericRelation(ListingImage, related_query_name="listings")
 
     title = models.CharField(
         max_length=255,
@@ -154,7 +116,7 @@ class CarListing(BaseListing):
         verbose_name=_("Company"),
         help_text=_("The company that owns this listing."),
         null=True,
-        blank=True
+        blank=True,
     )
 
     individual_owner = models.ForeignKey(
@@ -214,7 +176,7 @@ class CarListing(BaseListing):
         max_length=200,
         choices=CarClassChoices.choices,
         default=CarClassChoices.NORMAL,
-        verbose_name=_("Category")
+        verbose_name=_("Class Category"),
     )
 
     condition = models.CharField(
@@ -245,8 +207,6 @@ class PropertyListing(BaseListing):
         APARTMENT = "apartment", _("Apartment")
         CONDO = "condo", _("Condo")
         VILLA = "villa", _("Villa")
-        HOUSE = "house", _("House")
-        LAND = "land", _("Land")
 
     class ListingTypeChoices(models.TextChoices):
         SELL = "sale", _("For Sale")
@@ -415,13 +375,12 @@ class RoomListing(BaseListing):
         blank=True,
     )
 
-    address = models.OneToOneField(
+    # * This is needed here cause we might have hotels
+    # * with many branches in d/t location
+    address = models.ForeignKey(
         Address,
         on_delete=models.RESTRICT,
-        related_name="+",
-        # * Making only optional for validation cause either we use
-        # * from payload or reuse company HQ address
-        blank=True,
+        related_name="+"
     )
 
     amenities = models.ManyToManyField(

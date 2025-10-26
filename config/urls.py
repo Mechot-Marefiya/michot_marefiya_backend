@@ -17,8 +17,9 @@ Including another URLconf
 
 from django.contrib import admin
 from django.urls import include, path
+from django.conf import settings
+from django.conf.urls.static import static
 from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
     TokenRefreshView,
 )
 from drf_spectacular.views import (
@@ -32,9 +33,9 @@ from apps.account.views import CustomTokenObtainPairView
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/v1/account/", include("apps.account.urls")),
+    path("api/v1/core/", include("apps.core.urls")),
     path("api/v1/listing/", include("apps.listing.urls")),
-    path("auth/token/", CustomTokenObtainPairView.as_view(),
-         name="token_obtain_pair"),
+    path("auth/token/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
     path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path(
         "api/docs/",
@@ -48,3 +49,6 @@ urlpatterns = [
     ),
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

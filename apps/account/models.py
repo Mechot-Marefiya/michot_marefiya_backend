@@ -1,10 +1,11 @@
 from django.db import models
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
+from django.contrib.contenttypes.models import ContentType
 from django.utils.translation import gettext_lazy as _
-
+from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from apps.account.managers import CustomUserManager
-from apps.core.models import AbstractBaseModel, Address
+from apps.core.models import AbstractBaseModel, Address, Facility
 
 
 class Role(AbstractBaseModel):
@@ -51,14 +52,56 @@ class User(AbstractUser, AbstractBaseModel):
         return self.email
 
 
+class ListingImage(AbstractBaseModel):
+    """
+    A generic image model for any listing type (hotel, car, property).
+    """
+
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.CASCADE,
+        verbose_name="Content Type",
+    )
+    object_id = models.UUIDField(verbose_name="Object ID")
+    content_object = GenericForeignKey()
+
+    image = models.ImageField(
+        upload_to="listing_images/",
+        verbose_name="Image File",
+        help_text="Upload an image for the listing.",
+    )
+    alt_text = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name="Alt Text",
+        help_text="Alternative text for the image.",
+    )
+    is_primary = models.BooleanField(
+        default=False,
+        verbose_name="Primary Image",
+        help_text="Marks the main image for the listing.",
+    )
+
+    class Meta:
+        verbose_name = "Listing Image"
+        verbose_name_plural = "Listing Images"
+        db_table = "listing_images"
+
+    def __str__(self):
+        return f"Image for {self.content_object} ({str(self.id)[:6]})"
+
+
 class CompanyProfile(AbstractBaseModel):
     class CategoryChoice(models.TextChoices):
         HOTEL = "hotel", _("Hotel")
         PENSION = "pension", _("Pension")
-        GUEST_HOUSE = "guest_house", _("Guest House")
-        REALESTATE = "real_estate", _("Real Estate")
-        APARTMENT = "apartment", _("Apartment")
+        HOUSE = "house", _("House")
         VEHICLE = "vehicle", _("Vehicle")
+        # ? I don't see the point having each type than categorizing as House
+        # GUEST_HOUSE = "guest_house", _("Guest House")
+        # APARTMENT = "apartment", _("Apartment")
+        # VILLA = "villa", _("Villa")
+        # CONDO = "condo", _("Condominium")
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -78,7 +121,7 @@ class CompanyProfile(AbstractBaseModel):
     license = models.FileField(verbose_name=_("License"), upload_to="company_licenses/")
 
     category = models.CharField(
-        max_length=100, verbose_name=_("Category"), choices=CategoryChoice.choices
+        max_length=100, choices=CategoryChoice.choices, verbose_name=_("Category")
     )
 
     description = models.TextField(verbose_name=_("Description"), blank=True)
@@ -95,32 +138,35 @@ class CompanyProfile(AbstractBaseModel):
 
 
 class IndividualOwnerProfile(AbstractBaseModel):
-    """This Model is aimed only for handling individual property owners. We don't needed neither to give
-    individuals the ability to add properties through dashboard like companies. We need our admin to verify them in-person and
-    add their detail here than using the AUTH_USER_MODEL.
+    """This Model is aimed only for handling individual property owners.
+    We don't needed neither to give individuals the ability to add properties
+    through dashboard like companies. We need our admin to verify them
+    in-person and add their detail here than using the AUTH_USER_MODEL.
     """
 
-    class PropertyCategoryChoice(models.TextChoices):
-        CONDOMINIUM = "condominium", _("Condominium")
-        LAND = "land", _("Land")
-        APARTMENT = "apartment", _("Apartment")
-        VEHICLE = "vehicle", _("Vehicle")
+    # class PropertyCategoryChoice(models.TextChoices):
+    #     GUEST_HOUSE = "guest_house", _("Guest House")
+    #     APARTMENT = "apartment", _("Apartment")
+    #     CONDOMINIUM = "condominium", _("Condominium")
+    #     VILLA = "villa", _("Villa")
+    #     VEHICLE = "vehicle", _("Vehicle")
 
     first_name = models.CharField(max_length=255, verbose_name=_("First Name"))
 
-    last_name = models.CharField(max_length=255, verbose_name=_("LAst Name"))
+    last_name = models.CharField(max_length=255, verbose_name=_("Last Name"))
 
     address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
 
-    phone = models.CharField(max_length=15, verbose_name=("Phone Number"))
+    phone = models.CharField(max_length=15, unique=True, verbose_name=("Phone Number"))
 
-    category = models.CharField(
-        max_length=100,
-        verbose_name=_("Category"),
-        choices=PropertyCategoryChoice.choices,
-    )
+    # category = models.CharField(
+    #     max_length=100,
+    #     verbose_name=_("Category"),
+    #     choices=PropertyCategoryChoice.choices,
+    # )
 
-    national_id_number = models.SmallIntegerField(
+    # TODO: Make this unique once it's required in the future.
+    national_id_number = models.BigIntegerField(
         verbose_name=_("National Id Number"), blank=True, null=True
     )
 
@@ -133,30 +179,35 @@ class IndividualOwnerProfile(AbstractBaseModel):
         return f"{self.first_name} {self.last_name}"
 
 
-class Facility(AbstractBaseModel):
-    """
-    Shared Hotel level things(pool, spa, gym, parking, etc.)
-    """
-
-    name = models.CharField(max_length=255, unique=True, verbose_name=_("Name"))
-
-    icon = models.CharField(max_length=100, blank=True, verbose_name=_("Icon"))
-
-    class Meta:
-        verbose_name = _("Facility")
-        verbose_name_plural = _("Facilities")
-        db_table = "facilities"
-
-    def __str__(self):
-        return self.name
-
-
 class HotelProfile(AbstractBaseModel):
+    # class CategoryChoice(models.TextChoices):
+    #     HOTEL = "hotel", _("Hotel")
+    #     PENSION = "pension", _("Pension")
+
     company = models.OneToOneField(
-        CompanyProfile, on_delete=models.CASCADE, related_name="+"
+        CompanyProfile, on_delete=models.CASCADE, related_name="hotel"
     )
+
+    images = GenericRelation(ListingImage, related_query_name="listings")
+
+    # category = models.CharField(
+    #     max_length=100,
+    #     choices=CategoryChoice.choices,
+    #     default=CategoryChoice.HOTEL,
+    #     verbose_name=_("Category")
+    # )
+
     # * Making these two nullable cause pensions/some hotels might not have those.
     stars = models.PositiveSmallIntegerField(
         verbose_name=_("Stars"), null=True, blank=True
     )
+
     facilities = models.ManyToManyField(Facility, blank=True)
+
+    class Meta:
+        verbose_name = _("Hotel Profile")
+        verbose_name_plural = _("Hotel Profiles")
+        # db_table = "hotels"
+
+    def __str__(self) -> str:
+        return self.company.name

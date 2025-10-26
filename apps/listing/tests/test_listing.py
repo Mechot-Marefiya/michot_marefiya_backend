@@ -56,13 +56,14 @@ class TestRoomListingAPI:
         assert res.data["id"] == str(room.id)
         assert res.data["title"] == room.title
 
-    def test_room_listing_patch(self, authenticated_hotel_profile_client, address, hotel_profile):
+    def test_room_listing_patch(
+        self, authenticated_hotel_profile_client, address, hotel_profile
+    ):
         room = self._make_room(address=address, hotel=hotel_profile)
         url = reverse(self.endpoint) + f"{room.id}/"
         payload = {"title": "Updated Deluxe Room", "total_units": 15}
 
-        res = authenticated_hotel_profile_client.patch(
-            url, payload, format="json")
+        res = authenticated_hotel_profile_client.patch(url, payload, format="json")
 
         assert res.status_code == status.HTTP_200_OK
         assert res.data["title"] == "Updated Deluxe Room"
