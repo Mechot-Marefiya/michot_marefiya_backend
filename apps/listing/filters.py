@@ -11,16 +11,16 @@ class RoomFilter(filters.FilterSet):
         fields = ["hotel"]
 
 
-class CarFilter(filters.FilterSet):
-    class Meta:
-        model = CarListing
-        fields = ["listing_type", "car_class"]
+# class CarFilter(filters.FilterSet):
+#     class Meta:
+#         model = CarListing
+#         fields = ["listing_type", "car_class"]
 
 
 class PropertyFilter(filters.FilterSet):
     class Meta:
         model = PropertyListing
-        fields = ["property_type", "listing_type"]
+        fields = ["property_type"]
 
 
 class BookingFilter(filters.FilterSet):

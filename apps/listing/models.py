@@ -97,13 +97,13 @@ class CarListing(BaseListing):
         FIAT = "fiat", _("Fiat")
         PEUGEOT = "peugeot", _("Peugeot")
 
-    class ListingTypeChoices(models.TextChoices):
-        SELL = "sale", _("For Sale")
-        RENT = "rent", _("For Rent")
+    # class ListingTypeChoices(models.TextChoices):
+    #     SELL = "sale", _("For Sale")
+    #     RENT = "rent", _("For Rent")
 
-    class CarClassChoices(models.TextChoices):
-        LUXURY = "luxury", _("Luxury")
-        NORMAL = "normal", _("Normal")
+    # class CarClassChoices(models.TextChoices):
+    #     LUXURY = "luxury", _("Luxury")
+    #     NORMAL = "normal", _("Normal")
 
     class ConditionChoices(models.TextChoices):
         NEW = "new", _("Brand New")
@@ -164,20 +164,20 @@ class CarListing(BaseListing):
         verbose_name=_("Transmission"),
     )
 
-    listing_type = models.CharField(
-        max_length=200,
-        choices=ListingTypeChoices.choices,
-        default=ListingTypeChoices.RENT,
-        verbose_name=_("Listing Type"),
-        help_text=_("Whether the item is For sell or Rent."),
-    )
+    # listing_type = models.CharField(
+    #     max_length=200,
+    #     choices=ListingTypeChoices.choices,
+    #     default=ListingTypeChoices.RENT,
+    #     verbose_name=_("Listing Type"),
+    #     help_text=_("Whether the item is For sell or Rent."),
+    # )
 
-    car_class = models.CharField(
-        max_length=200,
-        choices=CarClassChoices.choices,
-        default=CarClassChoices.NORMAL,
-        verbose_name=_("Class Category"),
-    )
+    # car_class = models.CharField(
+    #     max_length=200,
+    #     choices=CarClassChoices.choices,
+    #     default=CarClassChoices.NORMAL,
+    #     verbose_name=_("Class Category"),
+    # )
 
     condition = models.CharField(
         max_length=200, choices=ConditionChoices.choices, verbose_name=_("Condition")
@@ -199,7 +199,7 @@ class CarListing(BaseListing):
         ]
 
     def __str__(self):
-        return f"{self.brand}::{self.model}::{self.car_class}"
+        return f"{self.brand}::{self.model}"
 
 
 class PropertyListing(BaseListing):
@@ -208,9 +208,9 @@ class PropertyListing(BaseListing):
         CONDO = "condo", _("Condo")
         VILLA = "villa", _("Villa")
 
-    class ListingTypeChoices(models.TextChoices):
-        SELL = "sale", _("For Sale")
-        RENT = "rent", _("For Rent")
+    # class ListingTypeChoices(models.TextChoices):
+    #     SELL = "sale", _("For Sale")
+    #     RENT = "rent", _("For Rent")
 
     company = models.ForeignKey(
         CompanyProfile,
@@ -260,13 +260,13 @@ class PropertyListing(BaseListing):
         verbose_name=_("Is Furnished"),
     )
 
-    listing_type = models.CharField(
-        max_length=200,
-        choices=ListingTypeChoices.choices,
-        default=ListingTypeChoices.RENT,
-        verbose_name=_("Listing Type"),
-        help_text=_("Whether the item is For sell or Rent."),
-    )
+    # listing_type = models.CharField(
+    #     max_length=200,
+    #     choices=ListingTypeChoices.choices,
+    #     default=ListingTypeChoices.RENT,
+    #     verbose_name=_("Listing Type"),
+    #     help_text=_("Whether the item is For sell or Rent."),
+    # )
 
     class Meta:
         verbose_name = _("Property Listing")

@@ -25,7 +25,7 @@ class PropertyListingAdmin(admin.ModelAdmin):
         "bathrooms",
         "square_meters",
         "is_furnished",
-        "listing_type",
+        # "listing_type",
     )
     inlines = [ListingImageInline]
 
