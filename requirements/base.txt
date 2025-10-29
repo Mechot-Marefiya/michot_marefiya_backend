@@ -9,3 +9,4 @@ psycopg2-binary==2.9.10
 drf-spectacular==0.28.0
 django-cors-headers==4.7.0
 pillow==11.3.0
+requests==2.32.5
