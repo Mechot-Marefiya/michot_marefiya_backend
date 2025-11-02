@@ -114,3 +114,7 @@ class ListingService:
     @staticmethod
     def create_address(address_data) -> Address:
         return Address.objects.create(**address_data)
+
+
+class StayAvailabilityCheckService:
+    def 
