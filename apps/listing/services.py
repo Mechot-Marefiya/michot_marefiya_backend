@@ -1,6 +1,5 @@
 from django.db import transaction
 from django.shortcuts import get_object_or_404
-
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.account.services import ImageCreationService
 from apps.core.models import Address
@@ -115,3 +114,7 @@ class ListingService:
     @staticmethod
     def create_address(address_data) -> Address:
         return Address.objects.create(**address_data)
+
+
+class StayAvailabilityCheckService:
+    def 

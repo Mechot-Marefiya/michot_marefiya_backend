@@ -81,10 +81,6 @@ class RoomListingSerializer(serializers.ModelSerializer):
 
     @transaction.atomic()
     def create(self, validated_data):
-        # hotel_id = validated_data.get('hotel_id', None)
-        # if not hotel_id:
-        #     validated_data["user"] = self.context["request"].user
-        # validated_data['hotel_id'] = hotel_id
         # TODO: Proper Error handling
         return ListingService.create_room_listing(validated_data)
 
@@ -192,8 +188,6 @@ class CarListingResponseSerializer(serializers.ModelSerializer):
             "mileage",
             "fuel_type",
             "transmission",
-            "listing_type",
-            "car_class",
             "condition",
         ]
 
@@ -216,8 +210,6 @@ class CarListingSerializer(serializers.ModelSerializer):
             "mileage",
             "fuel_type",
             "transmission",
-            "listing_type",
-            "car_class",
             "condition",
         ]
 
@@ -292,8 +284,7 @@ class PropertyListingResponseSerializer(serializers.ModelSerializer):
             "bedrooms",
             "bathrooms",
             "square_meters",
-            "is_furnished",
-            "listing_type",
+            "is_furnished"
         ]
 
 
@@ -315,8 +306,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "bedrooms",
             "bathrooms",
             "square_meters",
-            "is_furnished",
-            "listing_type",
+            "is_furnished"
         ]
 
         def validate(self, data):
