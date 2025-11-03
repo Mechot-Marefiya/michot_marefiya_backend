@@ -4,7 +4,8 @@ on:
     push:
         branches:
             - ref/requirement-changes
-
+            - development
+    
 jobs:
     deploy:
         runs-on: ubuntu-latest
