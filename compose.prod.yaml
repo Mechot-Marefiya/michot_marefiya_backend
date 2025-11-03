@@ -26,7 +26,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: ./docker/dev/Dockerfile
+      dockerfile: ./docker/prod/Dockerfile
       args:
         USER_ID: ${UID}
         GROUP_ID: ${GID}
@@ -36,7 +36,8 @@ services:
     volumes:
       - ./:/usr/src/app
     user: "${UID}:${GID}"
-    command: python manage.py runserver 0.0.0.0:8000
+    command: gunicorn michot_marefiya_backend.config.wsgi:application --bind 0.0.0.0:8000
+
     restart: unless-stopped
     env_file:
       - .env
