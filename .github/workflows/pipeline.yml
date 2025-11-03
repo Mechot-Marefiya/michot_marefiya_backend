@@ -23,4 +23,5 @@ jobs:
                       cd ./michot_marefiya_backend
                       git pull origin development
                       docker compose down
-                      docker compose up -f compose.prod.yaml -d --build
+                      docker compose -f compose.prod.yaml up -d --build
+
