@@ -117,4 +117,4 @@ class ListingService:
 
 
 class StayAvailabilityCheckService:
-    def 
+    pass
