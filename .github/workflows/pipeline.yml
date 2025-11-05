@@ -75,4 +75,4 @@ jobs:
                       docker compose -f compose.prod.yaml up -d --build
                       docker compose exec api python manage.py migrate --noinput
                       sleep 10
-                      curl -f https://${{ github.ref == 'refs/heads/main' && 'michotmarefia.com'}}/health || (echo "Deployment failed!" && exit 1)
+                      curl -f http://michotmarefia.com/health || (echo "Deployment failed!" && exit 1)
