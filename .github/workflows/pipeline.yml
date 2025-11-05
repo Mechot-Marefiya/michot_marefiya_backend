@@ -20,18 +20,20 @@ jobs:
               with:
                   python-version: "3.13"
 
-            - name: Install dependencies with uv
+            - name: Install dependencies via uv
               run: |
-                  python -m pip install --upgrade pip
-                  pip install uv
+                  python -m pip install --upgrade pip uv
                   uv sync
-            - name: Lint & format with ruff
+                  source .venv/bin/activate
+            - name: Lint & format
               run: |
+                  source .venv/bin/activate
                   ruff check .
-                  ruff format --check .   # optionally check formatting without modifying
+                  ruff format --check .
 
             - name: Run tests
               run: |
+                  source .venv/bin/activate
                   pytest --disable-warnings --maxfail=1
 
     #   docker_build:
