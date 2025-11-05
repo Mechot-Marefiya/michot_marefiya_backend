@@ -27,7 +27,6 @@ jobs:
                   uv sync
             - name: Lint & format with ruff
               run: |
-                  pip install ruff
                   ruff check .
                   ruff format --check .   # optionally check formatting without modifying
 
