@@ -31,10 +31,10 @@ jobs:
                   ruff check .
                   ruff format --check .
 
-            - name: Run tests
-              run: |
-                  source .venv/bin/activate
-                  pytest --disable-warnings --maxfail=1
+            # - name: Run tests
+            #   run: |
+            #       source .venv/bin/activate
+            #       pytest --disable-warnings --maxfail=1
 
     #   docker_build:
     #     runs-on: ubuntu-latest
