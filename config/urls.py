@@ -31,7 +31,7 @@ from drf_spectacular.views import (
 from apps.account.views import CustomTokenObtainPairView
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
+    path("api/admin/", admin.site.urls),
     path("api/v1/account/", include("apps.account.urls")),
     path("api/v1/core/", include("apps.core.urls")),
     path("api/v1/listing/", include("apps.listing.urls")),
