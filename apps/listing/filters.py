@@ -1,6 +1,6 @@
 from django_filters import rest_framework as filters
 
-from apps.listing.models import Booking, CarListing, PropertyListing, RoomListing
+from apps.listing.models import Booking, PropertyListing, RoomListing
 
 
 class RoomFilter(filters.FilterSet):

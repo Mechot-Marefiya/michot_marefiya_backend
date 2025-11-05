@@ -20,8 +20,7 @@ class BaseListing(AbstractBaseModel):
     title = models.CharField(
         max_length=255,
         verbose_name=_("Title"),
-        help_text=_(
-            "Title of the listing, e.g., 'Luxury Suite with Pool View'."),
+        help_text=_("Title of the listing, e.g., 'Luxury Suite with Pool View'."),
     )
 
     description = models.TextField(
@@ -50,8 +49,7 @@ class BaseListing(AbstractBaseModel):
 class Amenity(AbstractBaseModel):
     """Shared amenities for room-level (AC, balcony, kettle, TV, etc.)"""
 
-    name = models.CharField(max_length=255, unique=True,
-                            verbose_name=_("Name"))
+    name = models.CharField(max_length=255, unique=True, verbose_name=_("Name"))
 
     icon = models.CharField(max_length=100, blank=True, verbose_name=_("Icon"))
 
@@ -232,8 +230,7 @@ class PropertyListing(BaseListing):
         blank=True,
     )
 
-    address = models.OneToOneField(
-        Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
 
     property_type = models.CharField(
         max_length=50,
@@ -377,11 +374,7 @@ class RoomListing(BaseListing):
 
     # * This is needed here cause we might have hotels
     # * with many branches in d/t location
-    address = models.ForeignKey(
-        Address,
-        on_delete=models.RESTRICT,
-        related_name="+"
-    )
+    address = models.ForeignKey(Address, on_delete=models.RESTRICT, related_name="+")
 
     amenities = models.ManyToManyField(
         Amenity,
@@ -435,8 +428,7 @@ class RoomInventory(AbstractBaseModel):
     price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        help_text=_(
-            "Price for this date; falls back to room base price if null."),
+        help_text=_("Price for this date; falls back to room base price if null."),
         null=True,
         blank=True,
     )
@@ -511,8 +503,7 @@ class EventSpaceAvailability(AbstractBaseModel):
 
     date = models.DateField(db_index=True)
 
-    price = models.DecimalField(
-        max_digits=10, decimal_places=2, null=True, blank=True)
+    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
 
     class Meta:
         verbose_name = _("Event space Availability")
@@ -531,8 +522,7 @@ class Booking(AbstractBaseModel):
         CONFIRMED = "confirmed", _("Confirmed")
         CANCELLED = "cancelled", _("Cancelled")
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL,
-                             on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
 
     # Choose ONE of these (enforced by DB constraint below)
     room = models.ForeignKey(

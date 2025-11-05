@@ -284,7 +284,7 @@ class PropertyListingResponseSerializer(serializers.ModelSerializer):
             "bedrooms",
             "bathrooms",
             "square_meters",
-            "is_furnished"
+            "is_furnished",
         ]
 
 
@@ -306,7 +306,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "bedrooms",
             "bathrooms",
             "square_meters",
-            "is_furnished"
+            "is_furnished",
         ]
 
         def validate(self, data):
@@ -314,8 +314,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             individual_id = data.get("individual_owner")
 
             if company_id and individual_id:
-                raise serializers.ValidationError(
-                    "Only one owner type allowed.")
+                raise serializers.ValidationError("Only one owner type allowed.")
             if not company_id and not individual_id:
                 raise serializers.ValidationError("An owner is required.")
             return data
@@ -377,8 +376,7 @@ class BookingSerializer(serializers.ModelSerializer):
 
         # pass status as default PENDING
 
-        booking = Booking.objects.create(
-            total_price=total_price, **validated_data)
+        booking = Booking.objects.create(total_price=total_price, **validated_data)
 
         return booking
 

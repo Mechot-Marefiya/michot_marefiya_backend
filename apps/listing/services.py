@@ -82,8 +82,7 @@ class ListingService:
         # M2M to amenities
         guest_house_listing_instance.amenities.set(amenities)
 
-        ImageCreationService.create_images(
-            guest_house_listing_instance, images)
+        ImageCreationService.create_images(guest_house_listing_instance, images)
 
         return guest_house_listing_instance
 

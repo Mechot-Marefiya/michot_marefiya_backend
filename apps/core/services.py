@@ -28,11 +28,7 @@ class CurrencyService:
         params: dict = {"app_id": cls.APP_ID}
 
         try:
-            res = requests.get(
-                url,
-                params=params,
-                timeout=10
-            )
+            res = requests.get(url, params=params, timeout=10)
             res.raise_for_status()
             return res.json()
             # pprint(data)
@@ -64,8 +60,8 @@ class CurrencyService:
 
     @staticmethod
     def store_exchange_rates(json_res: dict):
-        base = json_res.get('base')
-        rates: dict = json_res.get('rates', {})
+        base = json_res.get("base")
+        rates: dict = json_res.get("rates", {})
 
         rate_objs = [
             CurrencyRate(base=base, target=target, rate=rate)

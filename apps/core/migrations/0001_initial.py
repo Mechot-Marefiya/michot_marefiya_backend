@@ -5,66 +5,173 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='Address',
+            name="Address",
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False, verbose_name='Id')),
-                ('created_at', models.DateTimeField(auto_now_add=True, verbose_name='Created At')),
-                ('updated_at', models.DateTimeField(auto_now=True, verbose_name='Updated_at')),
-                ('street_line1', models.CharField(max_length=255)),
-                ('country', models.TextField(default='Ethiopia', max_length=100, verbose_name='Country')),
-                ('city', models.CharField(max_length=100, verbose_name='City')),
-                ('sub_city', models.CharField(blank=True, max_length=100, verbose_name='Sub City')),
-                ('state', models.CharField(blank=True, max_length=100)),
-                ('postal_code', models.CharField(blank=True, max_length=20)),
-                ('latitude', models.DecimalField(blank=True, decimal_places=6, max_digits=9, null=True)),
-                ('longitude', models.DecimalField(blank=True, decimal_places=6, max_digits=9, null=True)),
+                (
+                    "id",
+                    models.UUIDField(
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="Id",
+                    ),
+                ),
+                (
+                    "created_at",
+                    models.DateTimeField(auto_now_add=True, verbose_name="Created At"),
+                ),
+                (
+                    "updated_at",
+                    models.DateTimeField(auto_now=True, verbose_name="Updated_at"),
+                ),
+                ("street_line1", models.CharField(max_length=255)),
+                (
+                    "country",
+                    models.TextField(
+                        default="Ethiopia", max_length=100, verbose_name="Country"
+                    ),
+                ),
+                ("city", models.CharField(max_length=100, verbose_name="City")),
+                (
+                    "sub_city",
+                    models.CharField(
+                        blank=True, max_length=100, verbose_name="Sub City"
+                    ),
+                ),
+                ("state", models.CharField(blank=True, max_length=100)),
+                ("postal_code", models.CharField(blank=True, max_length=20)),
+                (
+                    "latitude",
+                    models.DecimalField(
+                        blank=True, decimal_places=6, max_digits=9, null=True
+                    ),
+                ),
+                (
+                    "longitude",
+                    models.DecimalField(
+                        blank=True, decimal_places=6, max_digits=9, null=True
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'Address',
-                'verbose_name_plural': 'Addresses',
-                'db_table': 'addresses',
+                "verbose_name": "Address",
+                "verbose_name_plural": "Addresses",
+                "db_table": "addresses",
             },
         ),
         migrations.CreateModel(
-            name='Facility',
+            name="Facility",
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False, verbose_name='Id')),
-                ('created_at', models.DateTimeField(auto_now_add=True, verbose_name='Created At')),
-                ('updated_at', models.DateTimeField(auto_now=True, verbose_name='Updated_at')),
-                ('name', models.CharField(max_length=255, unique=True, verbose_name='Name')),
-                ('icon', models.CharField(blank=True, max_length=100, verbose_name='Icon')),
+                (
+                    "id",
+                    models.UUIDField(
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="Id",
+                    ),
+                ),
+                (
+                    "created_at",
+                    models.DateTimeField(auto_now_add=True, verbose_name="Created At"),
+                ),
+                (
+                    "updated_at",
+                    models.DateTimeField(auto_now=True, verbose_name="Updated_at"),
+                ),
+                (
+                    "name",
+                    models.CharField(max_length=255, unique=True, verbose_name="Name"),
+                ),
+                (
+                    "icon",
+                    models.CharField(blank=True, max_length=100, verbose_name="Icon"),
+                ),
             ],
             options={
-                'verbose_name': 'Facility',
-                'verbose_name_plural': 'Facilities',
-                'db_table': 'facilities',
+                "verbose_name": "Facility",
+                "verbose_name_plural": "Facilities",
+                "db_table": "facilities",
             },
         ),
         migrations.CreateModel(
-            name='CurrencyRate',
+            name="CurrencyRate",
             fields=[
-                ('id', models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False, verbose_name='Id')),
-                ('created_at', models.DateTimeField(auto_now_add=True, verbose_name='Created At')),
-                ('updated_at', models.DateTimeField(auto_now=True, verbose_name='Updated_at')),
-                ('base', models.CharField(help_text="The ISO 4217 currency code from which conversion starts, e.g., 'USD'.", max_length=3, verbose_name='base currency')),
-                ('target', models.CharField(help_text="The ISO 4217 currency code to which conversion applies, e.g., 'ETB'.", max_length=3, verbose_name='target currency')),
-                ('rate', models.DecimalField(decimal_places=6, help_text='Exchange rate value for converting 1 unit of base currency into target currency.', max_digits=12, verbose_name='exchange rate')),
-                ('date', models.DateField(auto_now_add=True, help_text='The date when this rate was recorded.', verbose_name='rate date')),
+                (
+                    "id",
+                    models.UUIDField(
+                        default=uuid.uuid4,
+                        editable=False,
+                        primary_key=True,
+                        serialize=False,
+                        verbose_name="Id",
+                    ),
+                ),
+                (
+                    "created_at",
+                    models.DateTimeField(auto_now_add=True, verbose_name="Created At"),
+                ),
+                (
+                    "updated_at",
+                    models.DateTimeField(auto_now=True, verbose_name="Updated_at"),
+                ),
+                (
+                    "base",
+                    models.CharField(
+                        help_text="The ISO 4217 currency code from which conversion starts, e.g., 'USD'.",
+                        max_length=3,
+                        verbose_name="base currency",
+                    ),
+                ),
+                (
+                    "target",
+                    models.CharField(
+                        help_text="The ISO 4217 currency code to which conversion applies, e.g., 'ETB'.",
+                        max_length=3,
+                        verbose_name="target currency",
+                    ),
+                ),
+                (
+                    "rate",
+                    models.DecimalField(
+                        decimal_places=6,
+                        help_text="Exchange rate value for converting 1 unit of base currency into target currency.",
+                        max_digits=12,
+                        verbose_name="exchange rate",
+                    ),
+                ),
+                (
+                    "date",
+                    models.DateField(
+                        auto_now_add=True,
+                        help_text="The date when this rate was recorded.",
+                        verbose_name="rate date",
+                    ),
+                ),
             ],
             options={
-                'verbose_name': 'Currency Rate',
-                'verbose_name_plural': 'Currency Rates',
-                'ordering': ['-date', 'base', 'target'],
-                'indexes': [models.Index(fields=['base', 'target', 'date'], name='core_curren_base_f42b37_idx')],
-                'constraints': [models.UniqueConstraint(fields=('base', 'target', 'date'), name='base_target_date_idx')],
+                "verbose_name": "Currency Rate",
+                "verbose_name_plural": "Currency Rates",
+                "ordering": ["-date", "base", "target"],
+                "indexes": [
+                    models.Index(
+                        fields=["base", "target", "date"],
+                        name="core_curren_base_f42b37_idx",
+                    )
+                ],
+                "constraints": [
+                    models.UniqueConstraint(
+                        fields=("base", "target", "date"), name="base_target_date_idx"
+                    )
+                ],
             },
         ),
     ]
