@@ -35,8 +35,8 @@ urlpatterns = [
     path("api/v1/account/", include("apps.account.urls")),
     path("api/v1/core/", include("apps.core.urls")),
     path("api/v1/listing/", include("apps.listing.urls")),
-    path("auth/token/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
-    path("auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+    path("api/v1/auth/token/", CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("api/v1/auth/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
     path(
         "api/docs/",
         SpectacularSwaggerView.as_view(url_name="schema"),
