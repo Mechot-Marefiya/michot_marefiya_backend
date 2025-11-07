@@ -1,13 +1,17 @@
+from datetime import date, timedelta
 from django.db import transaction
+from django.db.models import Count, F
 from django.shortcuts import get_object_or_404
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.account.services import ImageCreationService
 from apps.core.models import Address
 from apps.listing.models import (
     Amenity,
+    Booking,
     GuestHouseListing,
     PropertyListing,
     RoomListing,
+    StayAvailability,
 )
 
 
@@ -115,5 +119,91 @@ class ListingService:
         return Address.objects.create(**address_data)
 
 
-class StayAvailabilityCheckService:
-    pass
+class StayAvailabilityService:
+    @staticmethod
+    def create_availability(hotel, room, room_quantity, days=90):
+        today = date.today()
+        # rooms = RoomListing.objects.filter(hotel=hotel)
+
+        objs = []
+        for i in range(days):
+            objs.append(
+                StayAvailability(
+                    hotel=hotel,
+                    room=room,
+                    available_rooms=room_quantity,
+                    date=today + timedelta(days=i),
+                    is_available=True,
+                )
+            )
+
+        StayAvailability.objects.bulk_create(objs, batch_size=1000)
+
+    # * This get_available_rooms method will be used to render our room list table.
+
+    @staticmethod
+    def get_available_rooms(hotel, check_in_date, checkout_in_date):
+        """
+        Return all rooms in this hotel that are fully
+        available between check_in_date–checkout_in_date.
+        """
+        days = (checkout_in_date - check_in_date).days
+
+        # Get all room IDs that are available for *every* day in range
+        available_rooms = (
+            StayAvailability.objects.filter(
+                hotel=hotel,
+                date__gte=check_in_date,
+                date__lt=checkout_in_date,
+                is_available=True,
+            )
+            .values("room")
+            .annotate(count_days=Count("id"))
+            .filter(count_days=days)
+            .values_list("room", flat=True)
+        )
+
+        return RoomListing.objects.filter(id__in=available_rooms)
+
+    @staticmethod
+    def update_availability(
+        hotel,
+        room,
+        check_in_date,
+        check_out_date,
+        quantity: int,
+        increment: bool = False,
+    ):
+        date_cursor = check_in_date
+        while date_cursor < check_out_date:
+            obj = StayAvailability.objects.filter(
+                hotel=hotel, room=room, date=date_cursor
+            )
+            if increment:
+                obj.update(available_rooms=F("available_rooms") + 1)
+            else:
+                obj.update(available_rooms=F("available_rooms") - 1)
+
+        date_cursor += timedelta(days=1)
+
+
+class BookingService:
+    @transaction.atomic()
+    @staticmethod
+    def create_booking(validated_data):
+        room_id = validated_data.get("room")
+        room_quantity = validated_data.get("units_booked")
+        room_obj = get_object_or_404(RoomListing, id=room_id)
+
+        price = room_obj.base_price
+
+        total_price = room_quantity * price
+
+        # pass status as default PENDING
+
+        booking = Booking.objects.create(total_price=total_price, **validated_data)
+
+        return booking
+
+    def cancel_booking():
+        pass

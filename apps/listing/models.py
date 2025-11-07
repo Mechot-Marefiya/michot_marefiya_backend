@@ -606,3 +606,31 @@ class Payment(AbstractBaseModel):
 
     def __str__(self):
         return f"Payment for Booking #{self.booking.id} - {self.status}"
+
+
+class StayAvailability(AbstractBaseModel):
+    hotel = models.ForeignKey(HotelProfile, on_delete=models.CASCADE)
+    room = models.ForeignKey(RoomListing, on_delete=models.CASCADE)
+    date = models.DateField()
+    available_rooms = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["date", "hotel"], name="hotel_date_idx"),
+        ]
+        indexes = [models.Index(fields=["hotel", "date"])]
+
+
+# ! Here is how to search a hotel
+
+# * available_hotels = (
+# *     StayAvailability.objects
+# *     .filter(
+# *         date__gte=check_in_date,
+# *         date__lt=check_out_date,
+# *         available_rooms__gt=0
+# *     )
+# *     .values('hotel')
+# *     .annotate(days=Count('date'))
+# *     .filter(days=(checkout - checkin).days)
+# * )
