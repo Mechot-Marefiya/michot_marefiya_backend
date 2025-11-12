@@ -8,6 +8,7 @@ from apps.core.models import Address
 from apps.listing.models import (
     Amenity,
     Booking,
+    BookingItem,
     GuestHouseListing,
     PropertyListing,
     RoomListing,
@@ -86,7 +87,8 @@ class ListingService:
         # M2M to amenities
         guest_house_listing_instance.amenities.set(amenities)
 
-        ImageCreationService.create_images(guest_house_listing_instance, images)
+        ImageCreationService.create_images(
+            guest_house_listing_instance, images)
 
         return guest_house_listing_instance
 
@@ -168,42 +170,67 @@ class StayAvailabilityService:
     @staticmethod
     def update_availability(
         hotel,
-        room,
+        rooms_info,  # expect a list of objs [{room: room_obj, quantity: int}]
         check_in_date,
         check_out_date,
-        quantity: int,
         increment: bool = False,
     ):
         date_cursor = check_in_date
         while date_cursor < check_out_date:
-            obj = StayAvailability.objects.filter(
-                hotel=hotel, room=room, date=date_cursor
-            )
-            if increment:
-                obj.update(available_rooms=F("available_rooms") + 1)
-            else:
-                obj.update(available_rooms=F("available_rooms") - 1)
-
-        date_cursor += timedelta(days=1)
+            for room_info in rooms_info:
+                obj = StayAvailability.objects.filter(
+                    hotel=hotel, room=room_info["room"], date=date_cursor
+                )
+                if increment:
+                    obj.update(available_rooms=F(
+                        "available_rooms") + room_info["quantity"])
+                else:
+                    obj.update(available_rooms=F(
+                        "available_rooms") - room_info["quantity"])
+            date_cursor += timedelta(days=1)
 
 
 class BookingService:
     @transaction.atomic()
     @staticmethod
     def create_booking(validated_data):
-        room_id = validated_data.get("room")
-        room_quantity = validated_data.get("units_booked")
-        room_obj = get_object_or_404(RoomListing, id=room_id)
+        items_data = validated_data.pop("items")
+        booking = Booking.objects.create(**validated_data)
 
-        price = room_obj.base_price
+        for item in items_data:
+            room = item["room"]
+            units = item["units_booked"]
 
-        total_price = room_quantity * price
+            BookingItem.objects.create(
+                booking=booking,
+                room=room,
+                units_booked=units,
+                price_per_unit=room.base_price,
+            )
 
-        # pass status as default PENDING
+            StayAvailabilityService.update_availability(
+                hotel=room.hotel,
+                rooms_info=[{"room": room, "quantity": units}],
+                check_in_date=booking.check_in_date,
+                check_out_date=booking.check_out_date,
+                increment=False,
+            )
 
-        booking = Booking.objects.create(total_price=total_price, **validated_data)
-
+        booking.total_price = sum(i.subtotal() for i in booking.items.all())
+        booking.save()
         return booking
 
-    def cancel_booking():
-        pass
+    @staticmethod
+    def cancel_booking(booking: Booking):
+        for item in booking.items.all():
+            StayAvailabilityService.update_availability(
+                hotel=item.room.hotel,
+                rooms_info=[
+                    {"room": item.room, "quantity": item.units_booked}],
+                check_in_date=booking.check_in_date,
+                check_out_date=booking.check_out_date,
+                increment=True,
+            )
+        booking.status = booking.BookingStatus.CANCELLED
+        booking.save()
+        return booking

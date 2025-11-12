@@ -7,6 +7,7 @@ from apps.listing.services import BookingService, ListingService
 from apps.listing.models import (
     Amenity,
     Booking,
+    BookingItem,
     CarListing,
     GuestHouseListing,
     PropertyListing,
@@ -313,7 +314,8 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             individual_id = data.get("individual_owner")
 
             if company_id and individual_id:
-                raise serializers.ValidationError("Only one owner type allowed.")
+                raise serializers.ValidationError(
+                    "Only one owner type allowed.")
             if not company_id and not individual_id:
                 raise serializers.ValidationError("An owner is required.")
             return data
@@ -359,27 +361,19 @@ class BookingResponseSerializer(serializers.ModelSerializer):
         ]
 
 
+class BookingItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BookingItem
+        fields = ["room", "units_booked"]
+
+
 class BookingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Booking
-        fields = ["room", "units_booked", "check_in_date", "check_out_date"]
+        fields = ["items", "check_in_date", "check_out_date"]
 
     def create(self, validated_data):
         BookingService.create_booking(validated_data)
-        # room_id = validated_data.get("room")
-        # room_quantity = validated_data.get("units_booked")
-        # room_obj = get_object_or_404(RoomListing, id=room_id)
-
-        # price = room_obj.base_price
-
-        # total_price = room_quantity * price
-
-        # # pass status as default PENDING
-
-        # booking = Booking.objects.create(
-        #     total_price=total_price, **validated_data)
-
-        # return booking
 
     def to_representation(self, instance):
         return BookingResponseSerializer(instance, self.context).to_representation(

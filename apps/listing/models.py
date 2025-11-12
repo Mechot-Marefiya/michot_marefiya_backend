@@ -20,7 +20,8 @@ class BaseListing(AbstractBaseModel):
     title = models.CharField(
         max_length=255,
         verbose_name=_("Title"),
-        help_text=_("Title of the listing, e.g., 'Luxury Suite with Pool View'."),
+        help_text=_(
+            "Title of the listing, e.g., 'Luxury Suite with Pool View'."),
     )
 
     description = models.TextField(
@@ -49,7 +50,8 @@ class BaseListing(AbstractBaseModel):
 class Amenity(AbstractBaseModel):
     """Shared amenities for room-level (AC, balcony, kettle, TV, etc.)"""
 
-    name = models.CharField(max_length=255, unique=True, verbose_name=_("Name"))
+    name = models.CharField(max_length=255, unique=True,
+                            verbose_name=_("Name"))
 
     icon = models.CharField(max_length=100, blank=True, verbose_name=_("Icon"))
 
@@ -230,7 +232,8 @@ class PropertyListing(BaseListing):
         blank=True,
     )
 
-    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(
+        Address, on_delete=models.RESTRICT, related_name="+")
 
     property_type = models.CharField(
         max_length=50,
@@ -374,7 +377,8 @@ class RoomListing(BaseListing):
 
     # * This is needed here cause we might have hotels
     # * with many branches in d/t location
-    address = models.ForeignKey(Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.ForeignKey(
+        Address, on_delete=models.RESTRICT, related_name="+")
 
     amenities = models.ManyToManyField(
         Amenity,
@@ -428,7 +432,8 @@ class RoomInventory(AbstractBaseModel):
     price = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        help_text=_("Price for this date; falls back to room base price if null."),
+        help_text=_(
+            "Price for this date; falls back to room base price if null."),
         null=True,
         blank=True,
     )
@@ -444,76 +449,77 @@ class RoomInventory(AbstractBaseModel):
         return f"{self.room_listing} — {self.date}"
 
 
-class EventSpaceListing(BaseListing):
-    class SpaceType(models.TextChoices):
-        AUDITORIUM = "auditorium", _("Auditorium")
-        CONFERENCE_HALL = "conference_hall", _("Conference Hall")
-        MEETING_ROOM = "meeting_room", _("Meeting Room")
+# class EventSpaceListing(BaseListing):
+#     class SpaceType(models.TextChoices):
+#         AUDITORIUM = "auditorium", _("Auditorium")
+#         CONFERENCE_HALL = "conference_hall", _("Conference Hall")
+#         MEETING_ROOM = "meeting_room", _("Meeting Room")
 
-    hotel = models.ForeignKey(
-        HotelProfile,
-        on_delete=models.CASCADE,
-        related_name="event_space_listings",
-        verbose_name=_("Company"),
-        help_text=_("The company that owns this listing."),
-        null=True,
-        blank=True,
-    )
+#     hotel = models.ForeignKey(
+#         HotelProfile,
+#         on_delete=models.CASCADE,
+#         related_name="event_space_listings",
+#         verbose_name=_("Company"),
+#         help_text=_("The company that owns this listing."),
+#         null=True,
+#         blank=True,
+#     )
 
-    address = models.OneToOneField(
-        Address,
-        on_delete=models.RESTRICT,
-        related_name="+",
-        # * Making only optional for validation cause either we use
-        # * from payload or reuse company HQ address
-        blank=True,
-    )
+#     address = models.OneToOneField(
+#         Address,
+#         on_delete=models.RESTRICT,
+#         related_name="+",
+#         # * Making only optional for validation cause either we use
+#         # * from payload or reuse company HQ address
+#         blank=True,
+#     )
 
-    amenities = models.ManyToManyField(
-        Amenity,
-        blank=True,
-        related_name="event_space_listings",
-        verbose_name=_("Amenities"),
-    )
+#     amenities = models.ManyToManyField(
+#         Amenity,
+#         blank=True,
+#         related_name="event_space_listings",
+#         verbose_name=_("Amenities"),
+#     )
 
-    number_of_guests = models.PositiveIntegerField(default=1)
+#     number_of_guests = models.PositiveIntegerField(default=1)
 
-    space_type = models.CharField(max_length=50, choices=SpaceType.choices)
+#     space_type = models.CharField(max_length=50, choices=SpaceType.choices)
 
-    floor_area_sqm = models.PositiveIntegerField(blank=True, null=True)
+#     floor_area_sqm = models.PositiveIntegerField(blank=True, null=True)
 
-    class Meta:
-        verbose_name = _("Event space")
-        verbose_name_plural = _("Event Spaces")
-        db_table = "event_spaces"
+#     class Meta:
+#         verbose_name = _("Event space")
+#         verbose_name_plural = _("Event Spaces")
+#         db_table = "event_spaces"
 
-    def __str__(self):
-        return f"{self.title}"
+#     def __str__(self):
+#         return f"{self.title}"
 
 
-class EventSpaceAvailability(AbstractBaseModel):
-    """
-    Simplified per-day availability for event spaces (MVP).
-    Later you can add time-slot granularity.
-    """
+# class EventSpaceAvailability(AbstractBaseModel):
+#     """
+#     Simplified per-day availability for event spaces (MVP).
+#     Later you can add time-slot granularity.
+#     """
 
-    space_listing = models.ForeignKey(
-        EventSpaceListing, on_delete=models.CASCADE, related_name="availability"
-    )
+#     space_listing = models.ForeignKey(
+#         EventSpaceListing, on_delete=models.CASCADE, related_name="availability"
+#     )
 
-    date = models.DateField(db_index=True)
+#     date = models.DateField(db_index=True)
 
-    price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+#     price = models.DecimalField(
+#         max_digits=10, decimal_places=2, null=True, blank=True)
 
-    class Meta:
-        verbose_name = _("Event space Availability")
-        verbose_name_plural = _("Event Space Availabilities")
-        db_table = "event_space_availabilities"
-        unique_together = ("space_listing", "date")
-        ordering = ["date"]
+#     class Meta:
+#         verbose_name = _("Event space Availability")
+#         verbose_name_plural = _("Event Space Availabilities")
+#         db_table = "event_space_availabilities"
+#         unique_together = ("space_listing", "date")
+#         ordering = ["date"]
 
-    def __str__(self):
-        return f"{self.space_listing} — {self.date}"
+#     def __str__(self):
+#         return f"{self.space_listing} — {self.date}"
 
 
 class Booking(AbstractBaseModel):
@@ -522,26 +528,10 @@ class Booking(AbstractBaseModel):
         CONFIRMED = "confirmed", _("Confirmed")
         CANCELLED = "cancelled", _("Cancelled")
 
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-
-    # Choose ONE of these (enforced by DB constraint below)
-    room = models.ForeignKey(
-        RoomListing,
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="bookings",
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE
     )
-
-    event_space = models.ForeignKey(
-        EventSpaceListing,
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="bookings",
-    )
-
-    units_booked = models.PositiveIntegerField(default=1)
 
     # for rooms: first night; for halls: event start date
     check_in_date = models.DateField()
@@ -549,7 +539,7 @@ class Booking(AbstractBaseModel):
     # for rooms: last night (exclusive); for halls: event end date (MVP: same day)
     check_out_date = models.DateField()
 
-    total_price = models.DecimalField(max_digits=10, decimal_places=2)
+    total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     status = models.CharField(
         max_length=20, choices=BookingStatus.choices, default=BookingStatus.PENDING
@@ -560,14 +550,6 @@ class Booking(AbstractBaseModel):
         verbose_name_plural = _("Bookings")
         db_table = "bookings"
         constraints = [
-            # Exactly one target must be set
-            models.CheckConstraint(
-                check=(
-                    (Q(room__isnull=False) & Q(event_space__isnull=True))
-                    | (Q(room__isnull=True) & Q(event_space__isnull=False))
-                ),
-                name="booking_exactly_one_target",
-            ),
             # Valid date range
             models.CheckConstraint(
                 check=Q(check_in_date__lt=F("check_out_date")),
@@ -576,8 +558,38 @@ class Booking(AbstractBaseModel):
         ]
 
     def __str__(self):
-        target = self.room or self.event_space
-        return f"Booking #{self.id} - {self.user} @ {target}"
+        return f"Booking #{self.id} by {self.user}"
+
+
+class BookingItem(AbstractBaseModel):
+    booking = models.ForeignKey(
+        Booking,
+        on_delete=models.CASCADE,
+        related_name="items",
+        verbose_name=_("Booking")
+    )
+
+    room = models.ForeignKey(
+        RoomListing,
+        on_delete=models.CASCADE,
+        related_name="booking_items",
+        verbose_name=_("Room")
+    )
+
+    units_booked = models.PositiveIntegerField(default=1)
+
+    price_per_unit = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        verbose_name = _("Booking Item")
+        verbose_name_plural = _("Booking Items")
+        db_table = "booking_items"
+
+    def subtotal(self):
+        return self.units_booked * self.price_per_unit
+
+    def __str__(self) -> str:
+        return f"Room {self.room} booked for {self.booking.check_in_date}"
 
 
 class Payment(AbstractBaseModel):
@@ -616,7 +628,8 @@ class StayAvailability(AbstractBaseModel):
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["date", "hotel"], name="hotel_date_idx"),
+            models.UniqueConstraint(
+                fields=["date", "hotel"], name="hotel_date_idx"),
         ]
         indexes = [models.Index(fields=["hotel", "date"])]
 
