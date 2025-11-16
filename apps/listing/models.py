@@ -539,7 +539,8 @@ class Booking(AbstractBaseModel):
     # for rooms: last night (exclusive); for halls: event end date (MVP: same day)
     check_out_date = models.DateField()
 
-    total_price = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    total_price = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0)
 
     status = models.CharField(
         max_length=20, choices=BookingStatus.choices, default=BookingStatus.PENDING
@@ -592,7 +593,7 @@ class BookingItem(AbstractBaseModel):
         return f"Room {self.room} booked for {self.booking.check_in_date}"
 
 
-class Payment(AbstractBaseModel):
+class Transaction(AbstractBaseModel):
     class PaymentStatus(models.TextChoices):
         PENDING = "pending", _("Pending")
         PAID = "paid", _("Paid")
@@ -600,24 +601,34 @@ class Payment(AbstractBaseModel):
         REFUND = "refund", _("Refund")
 
     booking = models.OneToOneField(
-        Booking, on_delete=models.CASCADE, related_name="payment"
+        Booking,
+        on_delete=models.CASCADE,
+        related_name="transaction"
     )
+
+    # Stripe, PayPal, etc.
+    provider = models.CharField(max_length=50)
+
+    # Actual transaction id returned from the provider
+    provider_payment_id = models.CharField(max_length=100)
 
     amount = models.DecimalField(max_digits=10, decimal_places=2)
 
+    currency = models.CharField(max_length=10)
+
     status = models.CharField(
-        max_length=20, choices=PaymentStatus.choices, default=PaymentStatus.PENDING
+        max_length=20,
+        choices=PaymentStatus.choices,
+        default=PaymentStatus.PENDING
     )
 
-    transaction_id = models.CharField(max_length=100, blank=True, null=True)
-
     class Meta:
-        verbose_name = _("Payment")
-        verbose_name_plural = _("Payments")
-        db_table = "payments"
+        verbose_name = _("Transaction")
+        verbose_name_plural = _("Transactions")
+        db_table = "transactions"
 
     def __str__(self):
-        return f"Payment for Booking #{self.booking.id} - {self.status}"
+        return f"Transaction for Booking #{self.booking.id} - {self.status}"
 
 
 class StayAvailability(AbstractBaseModel):
@@ -627,12 +638,16 @@ class StayAvailability(AbstractBaseModel):
     available_rooms = models.PositiveIntegerField(default=0)
 
     class Meta:
+        verbose_name = _("Stay Availability")
+        verbose_name_plural = _("Stay Availabilities")
         constraints = [
             models.UniqueConstraint(
                 fields=["date", "hotel"], name="hotel_date_idx"),
         ]
         indexes = [models.Index(fields=["hotel", "date"])]
 
+    def __str__(self) -> str:
+        return f"{self.room.title} for {self.date}"
 
 # ! Here is how to search a hotel
 

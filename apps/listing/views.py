@@ -89,4 +89,4 @@ class BookingViewSet(AbstractModelViewSet):
     filterset_class = BookingFilter
 
     def perform_create(self, serializer):
-        serializer.save(self.request.user)
+        serializer.save(user=self.request.user)
