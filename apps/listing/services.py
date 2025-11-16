@@ -5,6 +5,7 @@ from django.shortcuts import get_object_or_404
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.account.services import ImageCreationService
 from apps.core.models import Address
+from apps.listing.exceptions import BookingConflict
 from apps.listing.models import (
     Amenity,
     Booking,
@@ -13,6 +14,7 @@ from apps.listing.models import (
     PropertyListing,
     RoomListing,
     StayAvailability,
+    Transaction,
 )
 
 
@@ -59,6 +61,13 @@ class ListingService:
         room_listing_instance.amenities.set(amenities)
 
         ImageCreationService.create_images(room_listing_instance, images)
+
+        # creating availability for the room created
+        StayAvailabilityService.create_availability(
+            hotel_profile,
+            room_listing_instance,
+            room_listing_instance.total_units
+        )
 
         return room_listing_instance
 
@@ -135,7 +144,7 @@ class StayAvailabilityService:
                     room=room,
                     available_rooms=room_quantity,
                     date=today + timedelta(days=i),
-                    is_available=True,
+                    # is_available=True,
                 )
             )
 
@@ -222,6 +231,21 @@ class BookingService:
 
     @staticmethod
     def cancel_booking(booking: Booking):
+        """Called when the user cancel their booking.
+
+        Args:
+            booking (Booking): Booking instance.
+
+        Returns:
+            Booking: Cancelled Booking instance.
+        """
+        if booking.status in [
+            Booking.BookingStatus.CANCELLED,
+            Booking.BookingStatus.CONFIRMED
+        ]:
+            raise BookingConflict(
+                "Booking is already finalized and cannot be changed."
+            )
         for item in booking.items.all():
             StayAvailabilityService.update_availability(
                 hotel=item.room.hotel,
@@ -234,3 +258,77 @@ class BookingService:
         booking.status = booking.BookingStatus.CANCELLED
         booking.save()
         return booking
+
+    @staticmethod
+    def confirm_booking(booking: Booking):
+        """Called when the user complete payment.
+
+        Args:
+            booking (Booking): Booking instance.
+
+        Returns:
+            Booking: Confirmed Booking instance.
+        """
+        if booking.status in [
+            Booking.BookingStatus.CANCELLED,
+            Booking.BookingStatus.CONFIRMED
+        ]:
+            raise BookingConflict(
+                "Booking is already finalized and cannot be changed."
+            )
+
+        booking.status = booking.BookingStatus.CONFIRMED
+        booking.save()
+
+        return booking
+
+
+class PaymentService:
+    """
+    Handles payment initiation, verification, and transaction recording
+    """
+
+    @staticmethod
+    def initiate_payment(booking: Booking, amount: float, provider: str):
+        """
+        Trigger the payment gateway
+        Returns payment session info (URL / token)
+        """
+        # pseudo-code; replace with actual SDK/API
+        payment_session_id = f"{booking.id}-{int(time.time())}"
+        return {
+            "provider": provider,
+            "session_id": payment_session_id,
+            "amount": amount,
+            "currency": "USD",
+            "checkout_url": f"https://fakepayment.com/pay/{payment_session_id}"
+        }
+
+    @staticmethod
+    def handle_webhook(provider: str, payload: dict):
+        """
+        Called by payment provider asynchronously
+        payload must include provider_payment_id, booking_id, status, amount, etc.
+        """
+        booking_id = payload.get("booking_id")
+        payment_status = payload.get("status")
+        provider_payment_id = payload.get("provider_payment_id")
+        amount = payload.get("amount")
+        currency = payload.get("currency")
+
+        booking = Booking.objects.get(id=booking_id)
+
+        Transaction.objects.create(
+            booking=booking,
+            provider=provider,
+            provider_payment_id=provider_payment_id,
+            amount=amount,
+            currency=currency,
+            status=payment_status
+        )
+
+        if payment_status == "success":
+            BookingService.confirm_booking(booking)
+        else:
+            # TODO: Find a way to handle retry logic
+            BookingService.cancel_booking(booking)
