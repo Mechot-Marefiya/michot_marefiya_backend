@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 from django.db import transaction
-from django.db.models import Count, F
+from django.db.models import Count, F, Min
 from django.shortcuts import get_object_or_404
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.account.services import ImageCreationService
@@ -151,30 +151,34 @@ class StayAvailabilityService:
         StayAvailability.objects.bulk_create(objs, batch_size=1000)
 
     # * This get_available_rooms method will be used to render our room list table.
-
     @staticmethod
-    def get_available_rooms(hotel, check_in_date, checkout_in_date):
-        """
-        Return all rooms in this hotel that are fully
-        available between check_in_date–checkout_in_date.
-        """
-        days = (checkout_in_date - check_in_date).days
+    def get_available_rooms(hotel, check_in_date, check_out_date):
+        required_days = (check_out_date - check_in_date).days
 
-        # Get all room IDs that are available for *every* day in range
-        available_rooms = (
-            StayAvailability.objects.filter(
+        qs = (
+            StayAvailability.objects
+            .filter(
                 hotel=hotel,
                 date__gte=check_in_date,
-                date__lt=checkout_in_date,
-                is_available=True,
+                date__lt=check_out_date,
+                available_rooms__gt=0
             )
             .values("room")
-            .annotate(count_days=Count("id"))
-            .filter(count_days=days)
-            .values_list("room", flat=True)
+            .annotate(
+                total_days=Count("date", distinct=True),
+                min_available=Min("available_rooms")
+            )
+            .filter(total_days=required_days)  # available every day
         )
 
-        return RoomListing.objects.filter(id__in=available_rooms)
+        # extract room IDs
+        room_ids = [row["room"] for row in qs]
+
+        rooms = RoomListing.objects.filter(id__in=room_ids)
+
+        # TODO: attach min_available to room instance to return to frontend
+
+        return rooms, qs
 
     @staticmethod
     def update_availability(
@@ -197,6 +201,29 @@ class StayAvailabilityService:
                     obj.update(available_rooms=F(
                         "available_rooms") - room_info["quantity"])
             date_cursor += timedelta(days=1)
+
+    @staticmethod
+    def search_stays(city, check_in_date, check_out_date, number_of_guests):
+
+        # required_days = (check_out_date - check_in_date).days
+
+        qs = (
+            StayAvailability.objects
+            .filter(
+                hotel__company__address__city=city,
+                room__number_of_guests__gte=number_of_guests,
+                date__gte=check_in_date,
+                date__lt=check_out_date,
+                available_rooms__gt=0
+            ).distinct('date')
+            # .values('hotel')
+            # .annotate(days=Count('date', distinct=True))
+            # .filter(days=required_days)
+        )
+
+        hotel_ids = qs.values_list("hotel", flat=True)
+        hotels = HotelProfile.objects.filter(id__in=hotel_ids)
+        return hotels
 
 
 class BookingService:

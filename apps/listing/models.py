@@ -648,17 +648,3 @@ class StayAvailability(AbstractBaseModel):
 
     def __str__(self) -> str:
         return f"{self.room.title} for {self.date}"
-
-# ! Here is how to search a hotel
-
-# * available_hotels = (
-# *     StayAvailability.objects
-# *     .filter(
-# *         date__gte=check_in_date,
-# *         date__lt=check_out_date,
-# *         available_rooms__gt=0
-# *     )
-# *     .values('hotel')
-# *     .annotate(days=Count('date'))
-# *     .filter(days=(checkout - checkin).days)
-# * )
