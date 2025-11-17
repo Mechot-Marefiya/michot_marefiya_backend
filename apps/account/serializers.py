@@ -29,15 +29,19 @@ User = get_user_model()
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         data = super().validate(attrs)
-        data["role"] = self.user.role.code
+        
+        if self.user.role:
+            data["role"] = self.user.role.code
 
-        if self.user.role.code == RoleCode.COMPANY.value and hasattr(
-            self.user, "company_profile"
-        ):
-            data["company"] = {
-                "id": self.user.company_profile.id,
-                "name": self.user.company_profile.company_name,
-            }
+            if self.user.role.code == RoleCode.COMPANY.value and hasattr(
+                self.user, "profile"
+            ):
+                data["company"] = {
+                    "id": self.user.profile.id,
+                    "name": self.user.profile.name,
+                }
+        else:
+            data["role"] = None
 
         return data
 
@@ -62,7 +66,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ["email", "password", "confirm_password", "first_name", "last_name"]
 
     def validate(self, attrs):
-        # TODO: Add password strength validtion here
+        # TODO: Add password strength validation here
 
         confirm_password = attrs.pop("confirm_password")
         if confirm_password != attrs["password"]:
@@ -71,10 +75,15 @@ class UserSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         password = validated_data.pop("password")
-        role = Role.objects.get(code=RoleCode.USER.value)
+        try:
+            role = Role.objects.get(code=RoleCode.USER.value)
+        except Role.DoesNotExist:
+            raise serializers.ValidationError(
+                {"error": "User role does not exist in the system"}
+            )
+        
         user = User(**validated_data, role=role)
         user.set_password(password)
-
         user.save()
 
         return user
@@ -139,7 +148,13 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         email = validated_data.pop("email")
         address_data = validated_data.pop("address")
-        role = Role.objects.get(code=RoleCode.COMPANY.value)
+        
+        try:
+            role = Role.objects.get(code=RoleCode.COMPANY.value)
+        except Role.DoesNotExist:
+            raise serializers.ValidationError(
+                {"error": "Company role does not exist in the system"}
+            )
 
         password = generate_password(email)
 
@@ -250,7 +265,14 @@ class HotelProfileSerializer(serializers.Serializer):
         logo = validated_data.pop("logo")
         facilities = validated_data.pop("facilities")
         images = validated_data.pop("images")
-        role = Role.objects.get(code=RoleCode.COMPANY.value)
+        
+        try:
+            role = Role.objects.get(code=RoleCode.COMPANY.value)
+        except Role.DoesNotExist:
+            raise serializers.ValidationError(
+                {"error": "Company role does not exist in the system"}
+            )
+            
         password = generate_password(email)
         user = User(email=email, role=role)
         user.set_password(password)
