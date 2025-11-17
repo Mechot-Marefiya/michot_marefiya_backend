@@ -1,12 +1,15 @@
 from django.contrib import admin
 from django.contrib.contenttypes.admin import GenericTabularInline
 from apps.listing.models import (
+    BookingItem,
     CarListing,
     # EventSpaceListing,
     GuestHouseListing,
     ListingImage,
     PropertyListing,
     RoomListing,
+    Booking,
+    StayAvailability
 )
 from apps.listing.models import Amenity
 
@@ -32,7 +35,16 @@ class PropertyListingAdmin(admin.ModelAdmin):
 
 admin.site.register(RoomListing)
 # admin.site.register(EventSpaceListing)
+admin.site.register(Booking)
+admin.site.register(BookingItem)
+# admin.site.register(StayAvailability)
 admin.site.register(CarListing)
 # admin.site.register(PropertyListing)
 admin.site.register(GuestHouseListing)
 admin.site.register(Amenity)
+
+
+@admin.register(StayAvailability)
+class StayAvailabilityAdmin(admin.ModelAdmin):
+    # list_display = ["hotel", "room"]
+    ordering = ["date"]

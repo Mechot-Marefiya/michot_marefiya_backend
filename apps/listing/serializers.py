@@ -3,6 +3,7 @@ from rest_framework import serializers
 from apps.account.services import ImageCreationService
 from apps.account.serializers import AddressSerializer, ListingImageSerializer
 from apps.core.serializers import JsonSerializerField
+from apps.listing.exceptions import BookingConflict
 from apps.listing.services import BookingService, ListingService
 from apps.listing.models import (
     Amenity,
@@ -352,8 +353,7 @@ class BookingResponseSerializer(serializers.ModelSerializer):
         model = Booking
         fields = [
             "id",
-            "userroom",
-            "units_booked",
+            "user",
             "check_in_date",
             "check_out_date",
             "total_price",
@@ -368,12 +368,14 @@ class BookingItemSerializer(serializers.ModelSerializer):
 
 
 class BookingSerializer(serializers.ModelSerializer):
+    items = BookingItemSerializer(many=True)
+
     class Meta:
         model = Booking
         fields = ["items", "check_in_date", "check_out_date"]
 
     def create(self, validated_data):
-        BookingService.create_booking(validated_data)
+        return BookingService.create_booking(validated_data)
 
     def to_representation(self, instance):
         return BookingResponseSerializer(instance, self.context).to_representation(
