@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.contrib.contenttypes.admin import GenericTabularInline
 from apps.listing.models import (
     CarListing,
-    EventSpaceListing,
+    # EventSpaceListing,
     GuestHouseListing,
     ListingImage,
     PropertyListing,
@@ -31,7 +31,7 @@ class PropertyListingAdmin(admin.ModelAdmin):
 
 
 admin.site.register(RoomListing)
-admin.site.register(EventSpaceListing)
+# admin.site.register(EventSpaceListing)
 admin.site.register(CarListing)
 # admin.site.register(PropertyListing)
 admin.site.register(GuestHouseListing)
