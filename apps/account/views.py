@@ -1,5 +1,5 @@
 from django.db.models import Sum, Q
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status
@@ -27,39 +27,61 @@ from apps.account.serializers import (
     UserSerializer,
     CompanyProfileSerializer,
 )
+from apps.account.permissions import IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
+    permission_classes = [AllowAny]
     serializer_class = CustomTokenObtainPairSerializer
 
 
 class UserViewSet(AbstractModelViewSet):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = UserSerializer
     queryset = User.objects.all()
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return [AllowAny()]
+        return super().get_permissions()
 
 
 @extend_schema(responses=CompanyProfileResponseSerializer)
 class CompanyProfileViewSet(AbstractModelViewSet):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = CompanyProfileSerializer
     queryset = CompanyProfile.objects.all()
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return [AllowAny()]
+        return super().get_permissions()
 
 
 @extend_schema(responses=IndividualOwnerProfileResponseSerializer)
 class IndividualOwnerProfileViewSet(AbstractModelViewSet):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = IndividualOwnerProfileSerializer
     queryset = IndividualOwnerProfile.objects.all()
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return [AllowAny()]
+        return super().get_permissions()
 
 
 @extend_schema(responses=HotelProfileDocSerializer)
 class HotelProfileViewSet(AbstractModelViewSet):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = HotelProfileSerializer
     queryset = HotelProfile.objects.all()
     filter_backends = [DjangoFilterBackend]
     filterset_class = HotelFilter
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return [AllowAny()]
+        return super().get_permissions()
 
     @check__room_availability_schema  # custom docs schema
     @action(

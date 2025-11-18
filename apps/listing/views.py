@@ -1,6 +1,6 @@
 
 from django.utils.dateparse import parse_date
-from rest_framework.permissions import AllowAny
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework import status
 from rest_framework.response import Response
@@ -10,6 +10,7 @@ from apps.account.serializers import HotelProfileResponseSerializer
 from apps.listing.docs.schema import search_schema
 from apps.core.views import AbstractModelViewSet
 from apps.listing.filters import PropertyFilter, RoomFilter, BookingFilter
+from apps.account.permissions import IsAuthenticatedOrReadOnly
 from apps.listing.models import (
     Amenity,
     CarListing,
@@ -35,7 +36,7 @@ from apps.listing.services import StayAvailabilityService
 
 @extend_schema(responses=RoomListingResponseSerializer)
 class RoomListingViewSet(AbstractModelViewSet):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = RoomListingSerializer
     queryset = RoomListing.objects.all()
     filter_backends = [DjangoFilterBackend]
@@ -51,7 +52,7 @@ class RoomListingViewSet(AbstractModelViewSet):
 
 @extend_schema(responses=GuestHouseListingResponseSerializer)
 class GuestHouseListingViewSet(AbstractModelViewSet):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = GuestHouseListingSerializer
     queryset = GuestHouseListing.objects.all()
 
@@ -65,7 +66,7 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
 
 @extend_schema(responses=CarListingResponseSerializer)
 class CarListingViewSet(AbstractModelViewSet):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = CarListingSerializer
     queryset = CarListing.objects.all()
     # filter_backends = [DjangoFilterBackend]
@@ -74,7 +75,7 @@ class CarListingViewSet(AbstractModelViewSet):
 
 @extend_schema(responses=PropertyListingResponseSerializer)
 class PropertyListingViewSet(AbstractModelViewSet):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = PropertyListingSerializer
     queryset = PropertyListing.objects.all()
     filter_backends = [DjangoFilterBackend]
@@ -91,12 +92,30 @@ class AmenityViewSet(AbstractModelViewSet):
 class BookingViewSet(AbstractModelViewSet):
     http_method_names = ["get", "post"]
     serializer_class = BookingSerializer
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
     queryset = Booking.objects.all()
     filter_backends = [DjangoFilterBackend]
     filterset_class = BookingFilter
 
+    def get_queryset(self):
+        """
+        Users can only see their own bookings.
+        Returns empty queryset if user is not authenticated (shouldn't happen due to IsAuthenticated).
+        """
+        if self.request.user.is_authenticated:
+            return Booking.objects.filter(user=self.request.user)
+        return Booking.objects.none()
+
     def perform_create(self, serializer):
+        """
+        Automatically assign the booking to the authenticated user.
+        This ensures users can only create bookings for themselves.
+        """
+        if not self.request.user.is_authenticated:
+            from rest_framework import serializers as drf_serializers
+            raise drf_serializers.ValidationError(
+                "Authentication required to create a booking."
+            )
         serializer.save(user=self.request.user)
 
 
