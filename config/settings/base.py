@@ -169,7 +169,6 @@ SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": (timedelta(hours=1) if not DEBUG else timedelta(days=30)),
     "REFRESH_TOKEN_LIFETIME": (timedelta(days=1) if not DEBUG else timedelta(days=30)),
     "USER_ID_FIELD": "id",
-    "TOKEN_REFRESH_SERIALIZER": "authn.serializers.TokenRefreshSerializer",
     "ROTATE_REFRESH_TOKENS": True,
 }
 

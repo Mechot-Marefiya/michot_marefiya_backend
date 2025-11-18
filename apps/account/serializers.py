@@ -28,7 +28,13 @@ User = get_user_model()
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
+
         data = super().validate(attrs)
+        
+        if not self.user.is_active:
+            raise serializers.ValidationError(
+                "User account is disabled. Please contact the admin."
+            )
         
         if self.user.role:
             data["role"] = self.user.role.code
@@ -66,11 +72,28 @@ class UserSerializer(serializers.ModelSerializer):
         fields = ["email", "password", "confirm_password", "first_name", "last_name"]
 
     def validate(self, attrs):
-        # TODO: Add password strength validation here
-
+        password = attrs.get("password")
         confirm_password = attrs.pop("confirm_password")
-        if confirm_password != attrs["password"]:
+        
+        if password != confirm_password:
             raise serializers.ValidationError("Password does not match")
+        
+        # Password strength validation
+        if len(password) < 8:
+            raise serializers.ValidationError(
+                "Password must be at least 8 characters long."
+            )
+        
+        if not any(char.isdigit() for char in password):
+            raise serializers.ValidationError(
+                "Password must contain at least one digit."
+            )
+        
+        if not any(char.isalpha() for char in password):
+            raise serializers.ValidationError(
+                "Password must contain at least one letter."
+            )
+        
         return attrs
 
     def create(self, validated_data):
