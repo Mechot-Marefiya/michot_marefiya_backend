@@ -98,24 +98,14 @@ class BookingViewSet(AbstractModelViewSet):
     filterset_class = BookingFilter
 
     def get_queryset(self):
-        """
-        Users can only see their own bookings.
-        Returns empty queryset if user is not authenticated (shouldn't happen due to IsAuthenticated).
-        """
         if self.request.user.is_authenticated:
             return Booking.objects.filter(user=self.request.user)
         return Booking.objects.none()
 
     def perform_create(self, serializer):
-        """
-        Automatically assign the booking to the authenticated user.
-        This ensures users can only create bookings for themselves.
-        """
         if not self.request.user.is_authenticated:
-            from rest_framework import serializers as drf_serializers
-            raise drf_serializers.ValidationError(
-                "Authentication required to create a booking."
-            )
+            from rest_framework.exceptions import NotAuthenticated
+            raise NotAuthenticated("Authentication required to create a booking.")
         serializer.save(user=self.request.user)
 
 

@@ -34,6 +34,17 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     permission_classes = [AllowAny]
     serializer_class = CustomTokenObtainPairSerializer
 
+    def post(self, request, *args, **kwargs):
+        try:
+            return super().post(request, *args, **kwargs)
+        except Exception:
+            from rest_framework.response import Response
+            from rest_framework import status
+            return Response(
+                {"detail": "Invalid email or password."},
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+
 
 class UserViewSet(AbstractModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]

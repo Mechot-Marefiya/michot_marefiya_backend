@@ -65,33 +65,40 @@ class RoleSerializer(serializers.ModelSerializer):
 
 
 class UserSerializer(serializers.ModelSerializer):
-    confirm_password = serializers.CharField()
+    confirm_password = serializers.CharField(write_only=True)
 
     class Meta:
         model = User
         fields = ["email", "password", "confirm_password", "first_name", "last_name"]
+        extra_kwargs = {
+            "password": {"write_only": True},
+        }
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value
 
     def validate(self, attrs):
         password = attrs.get("password")
         confirm_password = attrs.pop("confirm_password")
         
         if password != confirm_password:
-            raise serializers.ValidationError("Password does not match")
+            raise serializers.ValidationError({"password": "Passwords do not match"})
         
-        # Password strength validation
         if len(password) < 8:
             raise serializers.ValidationError(
-                "Password must be at least 8 characters long."
+                {"password": "Password must be at least 8 characters long."}
             )
         
         if not any(char.isdigit() for char in password):
             raise serializers.ValidationError(
-                "Password must contain at least one digit."
+                {"password": "Password must contain at least one digit."}
             )
         
         if not any(char.isalpha() for char in password):
             raise serializers.ValidationError(
-                "Password must contain at least one letter."
+                {"password": "Password must contain at least one letter."}
             )
         
         return attrs
@@ -158,6 +165,11 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
             "category",
             "description",
         ]
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        return value
 
     def validate_address(self, attr):
         serializer = AddressSerializer(data=attr)
@@ -267,11 +279,30 @@ class HotelProfileSerializer(serializers.Serializer):
     logo = serializers.ImageField()
     license = serializers.FileField()
     facilities = JsonSerializerField()
-    stars = serializers.IntegerField()
+    stars = serializers.IntegerField(required=False, allow_null=True)
     images = serializers.ListField(child=serializers.ImageField())
+
+    def validate_company(self, value):
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Company must be a valid object.")
+        if "email" not in value:
+            raise serializers.ValidationError("Company email is required.")
+        return value
+
+    def validate_stars(self, value):
+        if value is not None and (value < 1 or value > 5):
+            raise serializers.ValidationError("Stars must be between 1 and 5.")
+        return value
 
     def validate(self, attrs):
         company_data = attrs.pop("company")
+        email = company_data.get("email")
+        
+        if User.objects.filter(email=email).exists():
+            raise serializers.ValidationError(
+                {"company": {"email": "A user with this email already exists."}}
+            )
+        
         address_data = company_data.pop("address")
         serializer = AddressSerializer(data=address_data)
         serializer.is_valid(raise_exception=True)

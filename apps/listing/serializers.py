@@ -310,16 +310,19 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "is_furnished",
         ]
 
-        def validate(self, data):
-            company_id = data.get("company")
-            individual_id = data.get("individual_owner")
+    def validate(self, data):
+        company_id = data.get("company")
+        individual_id = data.get("individual_owner")
 
-            if company_id and individual_id:
-                raise serializers.ValidationError(
-                    "Only one owner type allowed.")
-            if not company_id and not individual_id:
-                raise serializers.ValidationError("An owner is required.")
-            return data
+        if company_id and individual_id:
+            raise serializers.ValidationError(
+                {"owner": "Only one owner type allowed."}
+            )
+        if not company_id and not individual_id:
+            raise serializers.ValidationError(
+                {"owner": "An owner is required."}
+            )
+        return data
 
     def create(self, validated_data):
         # user = self.context["request"].user
@@ -374,7 +377,29 @@ class BookingSerializer(serializers.ModelSerializer):
         model = Booking
         fields = ["items", "check_in_date", "check_out_date"]
 
+    def validate(self, data):
+        check_in = data.get("check_in_date")
+        check_out = data.get("check_out_date")
+        
+        if check_in and check_out:
+            if check_out <= check_in:
+                raise serializers.ValidationError(
+                    {"check_out_date": "Check-out date must be after check-in date."}
+                )
+        
+        items = data.get("items", [])
+        if not items:
+            raise serializers.ValidationError(
+                {"items": "At least one booking item is required."}
+            )
+        
+        return data
+
     def create(self, validated_data):
+        if not self.context.get("request") or not self.context["request"].user.is_authenticated:
+            raise serializers.ValidationError(
+                {"error": "Authentication required to create a booking."}
+            )
         return BookingService.create_booking(validated_data)
 
     def to_representation(self, instance):
