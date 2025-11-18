@@ -396,11 +396,10 @@ class BookingSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-        if not self.context.get("request") or not self.context["request"].user.is_authenticated:
-            raise serializers.ValidationError(
-                {"error": "Authentication required to create a booking."}
-            )
-        return BookingService.create_booking(validated_data)
+        user = validated_data.pop("user", None)
+        if not user and self.context.get("request"):
+            user = self.context["request"].user
+        return BookingService.create_booking(validated_data, user=user)
 
     def to_representation(self, instance):
         return BookingResponseSerializer(instance, self.context).to_representation(

@@ -2,7 +2,7 @@ from django.db.models import Sum, Q
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, serializers
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
@@ -37,6 +37,8 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     def post(self, request, *args, **kwargs):
         try:
             return super().post(request, *args, **kwargs)
+        except serializers.ValidationError:
+            raise
         except Exception:
             from rest_framework.response import Response
             from rest_framework import status

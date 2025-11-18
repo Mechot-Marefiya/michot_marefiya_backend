@@ -103,9 +103,6 @@ class BookingViewSet(AbstractModelViewSet):
         return Booking.objects.none()
 
     def perform_create(self, serializer):
-        if not self.request.user.is_authenticated:
-            from rest_framework.exceptions import NotAuthenticated
-            raise NotAuthenticated("Authentication required to create a booking.")
         serializer.save(user=self.request.user)
 
 

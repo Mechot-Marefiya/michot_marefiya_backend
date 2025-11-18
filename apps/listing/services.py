@@ -229,8 +229,10 @@ class StayAvailabilityService:
 class BookingService:
     @transaction.atomic()
     @staticmethod
-    def create_booking(validated_data):
+    def create_booking(validated_data, user=None):
         items_data = validated_data.pop("items")
+        if user:
+            validated_data["user"] = user
         booking = Booking.objects.create(**validated_data)
 
         for item in items_data:
