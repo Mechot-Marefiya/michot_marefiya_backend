@@ -181,9 +181,34 @@ class StayAvailabilityService:
         return rooms, qs
 
     @staticmethod
+    def validate_availability(hotel, rooms_info, check_in_date, check_out_date):
+        date_cursor = check_in_date
+        while date_cursor < check_out_date:
+            for room_info in rooms_info:
+                room = room_info["room"]
+                quantity = room_info["quantity"]
+                availability = StayAvailability.objects.filter(
+                    hotel=hotel,
+                    room=room,
+                    date=date_cursor
+                ).first()
+                
+                if not availability:
+                    raise BookingConflict(
+                        f"No availability data for room {room.title} on {date_cursor}"
+                    )
+                
+                if availability.available_rooms < quantity:
+                    raise BookingConflict(
+                        f"Not enough rooms available for {room.title} on {date_cursor}. "
+                        f"Available: {availability.available_rooms}, Requested: {quantity}"
+                    )
+            date_cursor += timedelta(days=1)
+
+    @staticmethod
     def update_availability(
         hotel,
-        rooms_info,  # expect a list of objs [{room: room_obj, quantity: int}]
+        rooms_info,
         check_in_date,
         check_out_date,
         increment: bool = False,
@@ -233,6 +258,22 @@ class BookingService:
         items_data = validated_data.pop("items")
         if user:
             validated_data["user"] = user
+        
+        check_in_date = validated_data.get("check_in_date")
+        check_out_date = validated_data.get("check_out_date")
+        
+        rooms_info = []
+        for item in items_data:
+            room = item["room"]
+            units = item["units_booked"]
+            rooms_info.append({"room": room, "quantity": units})
+        
+        if rooms_info:
+            hotel = rooms_info[0]["room"].hotel
+            StayAvailabilityService.validate_availability(
+                hotel, rooms_info, check_in_date, check_out_date
+            )
+        
         booking = Booking.objects.create(**validated_data)
 
         for item in items_data:

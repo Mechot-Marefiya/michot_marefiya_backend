@@ -1,4 +1,5 @@
 from django.db.models import Sum, Q
+from django.utils.dateparse import parse_date
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -13,6 +14,7 @@ from rest_framework_simplejwt.exceptions import TokenError
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from apps.listing.models import Booking, RoomListing
+from apps.listing.services import StayAvailabilityService
 from apps.account.docs.schemas import HotelProfileDocSerializer
 from apps.account.filters import HotelFilter
 from apps.core.views import AbstractModelViewSet
@@ -146,7 +148,7 @@ class HotelProfileViewSet(AbstractModelViewSet):
             return [AllowAny()]
         return super().get_permissions()
 
-    @check__room_availability_schema  # custom docs schema
+    @check__room_availability_schema
     @action(
         detail=True, methods=["get"], serializer_class=HotelRoomAvailabilitySerializer
     )
@@ -166,47 +168,43 @@ class HotelProfileViewSet(AbstractModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        rooms = RoomListing.objects.filter(hotel=hotel)
+        check_in_date = parse_date(check_in_date)
+        check_out_date = parse_date(check_out_date)
 
-        results = []
-
-        for room in rooms:
-            # Find overlapping confirmed/pending bookings
-            booked_units = (
-                Booking.objects.filter(
-                    room=room,
-                    status__in=[
-                        Booking.BookingStatus.CONFIRMED,
-                        Booking.BookingStatus.PENDING,
-                    ],
-                )
-                .filter(
-                    Q(check_in_date__lt=check_out_date),
-                    Q(check_out_date__gt=check_in_date),
-                )
-                .aggregate(total=Sum("units_booked"))
-                .get("total")
-                or 0
+        if not check_in_date or not check_out_date:
+            return Response(
+                {"detail": "Invalid date format."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-            available_units = max(room.total_units - booked_units, 0)
+        if check_out_date <= check_in_date:
+            return Response(
+                {"detail": "Check-out date must be after check-in date."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
+        rooms, availability_data = StayAvailabilityService.get_available_rooms(
+            hotel, check_in_date, check_out_date
+        )
+
+        availability_map = {row["room"]: row["min_available"] for row in availability_data}
+
+        results = []
+        for room in rooms:
+            available_units = availability_map.get(room.id, 0)
             results.append(
                 {
                     "room_id": room.id,
                     "name": room.title,
                     "available_units": available_units,
-                    # "total_units": room.total_units,
-                    # "price_per_night": room.base_price,
                 }
             )
-        # TODO: Fix this from the backend response
-        # TODO: if we only need room_id, and available_units in the UI.
+
         return Response(
             {
                 "hotel_id": hotel.id,
-                "check_in": check_in_date,
-                "check_out": check_out_date,
+                "check_in": check_in_date.isoformat(),
+                "check_out": check_out_date.isoformat(),
                 "rooms": results,
             }
         )
