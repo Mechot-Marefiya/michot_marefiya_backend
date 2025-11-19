@@ -103,7 +103,9 @@ class BookingViewSet(AbstractModelViewSet):
 
     def get_queryset(self):
         if self.request.user.is_authenticated:
-            return Booking.objects.filter(user=self.request.user)
+            return Booking.objects.filter(
+                user=self.request.user
+            ).prefetch_related("items", "items__room")
         return Booking.objects.none()
 
     def perform_create(self, serializer):

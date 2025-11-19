@@ -351,7 +351,31 @@ class PropertyListingSerializer(serializers.ModelSerializer):
         ).to_representation(instance)
 
 
+class BookingItemResponseSerializer(serializers.ModelSerializer):
+    room_id = serializers.UUIDField(source="room.id", read_only=True)
+    room_title = serializers.CharField(source="room.title", read_only=True)
+    room_description = serializers.CharField(source="room.description", read_only=True)
+    subtotal = serializers.SerializerMethodField()
+
+    class Meta:
+        model = BookingItem
+        fields = [
+            "id",
+            "room_id",
+            "room_title",
+            "room_description",
+            "units_booked",
+            "price_per_unit",
+            "subtotal",
+        ]
+
+    def get_subtotal(self, obj):
+        return obj.subtotal()
+
+
 class BookingResponseSerializer(serializers.ModelSerializer):
+    items = BookingItemResponseSerializer(many=True, read_only=True)
+
     class Meta:
         model = Booking
         fields = [
@@ -361,6 +385,7 @@ class BookingResponseSerializer(serializers.ModelSerializer):
             "check_out_date",
             "total_price",
             "status",
+            "items",
         ]
 
 
