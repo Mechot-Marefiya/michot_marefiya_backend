@@ -32,6 +32,7 @@ from apps.account.serializers import (
     IndividualOwnerProfileSerializer,
     UserSerializer,
     CompanyProfileSerializer,
+    UserResponseSerializer,
 )
 from apps.account.permissions import IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly
 
@@ -87,6 +88,14 @@ class LogoutView(APIView):
             return Response({"detail": "Failed to blacklist token."}, status=status.HTTP_400_BAD_REQUEST)
 
         return Response(status=status.HTTP_205_RESET_CONTENT)
+
+
+class MeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        serializer = UserResponseSerializer(request.user)
+        return Response(serializer.data)
 
 
 class UserViewSet(AbstractModelViewSet):
