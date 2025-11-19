@@ -49,6 +49,7 @@ ROOT_URLCONF = "config.urls"
 AUTH_USER_MODEL = "account.User"
 
 DJANGO_APPS = [
+    "jazzmin",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -140,6 +141,9 @@ USE_TZ = env("USE_TZ", cast=bool, default=True)
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Include the project's top-level `static/` directory when collecting static files
+STATICFILES_DIRS = [BASE_DIR / "static"]
+
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "mediafiles"
 
@@ -178,4 +182,29 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "Y",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+}
+
+JAZZMIN_SETTINGS = {
+    "site_title": "Marefiya Admin",
+    "site_header": "Michot Marefiya Admin",
+    "site_brand": "Marefiya Panel",
+    "welcome_sign": "Welcome to Michot Marefiya administration",
+    "search_model": "account.User",
+    "show_sidebar": True,
+    "navigation_expanded": True,
+    "icons": {
+        "auth": "fas fa-users-cog",
+        "account": "fas fa-user",
+        "listing": "fas fa-bed",
+        "core": "fas fa-cog",
+    },
+    "site_logo": "img/michotmarefiyalogo.png",
+    "site_logo_small": "img/michotmarefiyalogo.png",
+    "site_icon": "img/michotmarefiyalogo.png",
+}
+
+JAZZMIN_UI_TWEAKS = {
+    "theme": "flatly",
+    "dark_mode": False,
+    "sidebar_nav_small_text": False,
 }
