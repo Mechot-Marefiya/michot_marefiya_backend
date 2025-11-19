@@ -4,6 +4,12 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status, serializers
 from rest_framework_simplejwt.views import TokenObtainPairView
+from django.conf import settings
+import logging
+import traceback
+from rest_framework.views import APIView
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.exceptions import TokenError
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
 from apps.listing.models import Booking, RoomListing
@@ -39,13 +45,48 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             return super().post(request, *args, **kwargs)
         except serializers.ValidationError:
             raise
-        except Exception:
-            from rest_framework.response import Response
-            from rest_framework import status
+        except Exception as exc:
+            logging.exception("Error during token obtain")
+
+            if getattr(settings, "DEBUG", False):
+                return Response(
+                    {
+                        "detail": "Invalid email or password.",
+                        "error": str(exc),
+                        "trace": traceback.format_exc(),
+                    },
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+
+            return Response({"detail": "Invalid email or password."}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+class LogoutView(APIView):
+
+    permission_classes = [AllowAny]
+
+    def post(self, request, *args, **kwargs):
+        refresh_token = request.data.get("refresh")
+        if not refresh_token:
             return Response(
-                {"detail": "Invalid email or password."},
-                status=status.HTTP_401_UNAUTHORIZED
+                {"detail": "Refresh token is required."},
+                status=status.HTTP_400_BAD_REQUEST,
             )
+
+        try:
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+        except TokenError:
+            return Response({"detail": "Invalid token."}, status=status.HTTP_400_BAD_REQUEST)
+        except AttributeError:
+            return Response(
+                {"detail": "Token blacklisting not enabled on server."},
+                status=status.HTTP_501_NOT_IMPLEMENTED,
+            )
+        except Exception:
+            return Response({"detail": "Failed to blacklist token."}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(status=status.HTTP_205_RESET_CONTENT)
 
 
 class UserViewSet(AbstractModelViewSet):
