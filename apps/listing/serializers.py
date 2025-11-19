@@ -408,3 +408,22 @@ class BookingSerializer(serializers.ModelSerializer):
 class PartialCancelSerializer(serializers.Serializer):
     item_id = serializers.UUIDField()
     units_to_cancel = serializers.IntegerField(min_value=1)
+
+
+class SearchRoomSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    title = serializers.CharField()
+    description = serializers.CharField()
+    base_price = serializers.DecimalField(max_digits=10, decimal_places=2)
+    number_of_guests = serializers.IntegerField()
+    bed_type = serializers.CharField()
+    room_size_sqm = serializers.IntegerField()
+    available_units = serializers.IntegerField()
+
+
+class SearchResultSerializer(serializers.Serializer):
+    hotel_id = serializers.UUIDField()
+    hotel_name = serializers.CharField()
+    city = serializers.CharField()
+    stars = serializers.IntegerField(allow_null=True)
+    rooms = SearchRoomSerializer(many=True)

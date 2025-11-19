@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, timedelta, datetime
 from django.db import transaction
 from django.db.models import Count, F, Min
 from django.shortcuts import get_object_or_404
@@ -229,8 +229,7 @@ class StayAvailabilityService:
 
     @staticmethod
     def search_stays(city, check_in_date, check_out_date, number_of_guests):
-
-        # required_days = (check_out_date - check_in_date).days
+        required_days = (check_out_date - check_in_date).days
 
         qs = (
             StayAvailability.objects
@@ -240,15 +239,52 @@ class StayAvailabilityService:
                 date__gte=check_in_date,
                 date__lt=check_out_date,
                 available_rooms__gt=0
-            ).distinct('date')
-            # .values('hotel')
-            # .annotate(days=Count('date', distinct=True))
-            # .filter(days=required_days)
+            )
+            .values("hotel", "room")
+            .annotate(
+                total_days=Count("date", distinct=True),
+                min_available=Min("available_rooms")
+            )
+            .filter(total_days=required_days)
         )
 
-        hotel_ids = qs.values_list("hotel", flat=True)
-        hotels = HotelProfile.objects.filter(id__in=hotel_ids)
-        return hotels
+        hotel_ids = list(set([row["hotel"] for row in qs]))
+        hotels = HotelProfile.objects.filter(id__in=hotel_ids).select_related(
+            "company", "company__address"
+        ).prefetch_related("room_listings")
+
+        availability_data = list(qs)
+        
+        results = []
+        for hotel in hotels:
+            hotel_rooms_data = [row for row in availability_data if row["hotel"] == hotel.id]
+            room_ids = [row["room"] for row in hotel_rooms_data]
+            rooms = RoomListing.objects.filter(id__in=room_ids).select_related("hotel", "address")
+            
+            room_availability_map = {
+                row["room"]: {
+                    "min_available": row["min_available"],
+                    "total_days": row["total_days"]
+                }
+                for row in hotel_rooms_data
+            }
+            
+            hotel_data = {
+                "hotel": hotel,
+                "rooms": []
+            }
+            
+            for room in rooms:
+                availability_info = room_availability_map.get(room.id, {})
+                hotel_data["rooms"].append({
+                    "room": room,
+                    "available_units": availability_info.get("min_available", 0)
+                })
+            
+            if hotel_data["rooms"]:
+                results.append(hotel_data)
+        
+        return results
 
 
 class BookingService:
@@ -407,7 +443,7 @@ class PaymentService:
         Returns payment session info (URL / token)
         """
         # pseudo-code; replace with actual SDK/API
-        payment_session_id = f"{booking.id}-{int(time.time())}"
+        payment_session_id = f"{booking.id}-{int(datetime.now().timestamp())}"
         return {
             "provider": provider,
             "session_id": payment_session_id,

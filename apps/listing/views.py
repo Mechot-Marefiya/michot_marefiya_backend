@@ -33,6 +33,7 @@ from apps.listing.serializers import (
     PropertyListingSerializer,
     RoomListingResponseSerializer,
     RoomListingSerializer,PartialCancelSerializer,
+    SearchResultSerializer,
 )
 from apps.listing.services import StayAvailabilityService,BookingService
 
@@ -157,6 +158,12 @@ class StaySearchView(APIView):
             return Response({"detail": "Invalid date format."},
                             status=status.HTTP_400_BAD_REQUEST)
 
+        if check_out_date <= check_in_date:
+            return Response(
+                {"detail": "Check-out date must be after check-in date."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         stays = StayAvailabilityService.search_stays(
             city,
             check_in_date,
@@ -164,9 +171,32 @@ class StaySearchView(APIView):
             number_of_guests=int(guests),
         )
 
-        # TODO: If we also gonna handle guest houses here,
-        # TODO: this serialization will fail.
-        serializer = HotelProfileResponseSerializer(stays, many=True)
+        results = []
+        for stay_data in stays:
+            hotel = stay_data["hotel"]
+            hotel_result = {
+                "hotel_id": hotel.id,
+                "hotel_name": hotel.company.name,
+                "city": hotel.company.address.city,
+                "stars": hotel.stars,
+                "rooms": []
+            }
+            
+            for room_data in stay_data["rooms"]:
+                room = room_data["room"]
+                hotel_result["rooms"].append({
+                    "id": room.id,
+                    "title": room.title,
+                    "description": room.description or "",
+                    "base_price": str(room.base_price),
+                    "number_of_guests": room.number_of_guests,
+                    "bed_type": room.bed_type,
+                    "room_size_sqm": room.room_size_sqm,
+                    "available_units": room_data["available_units"]
+                })
+            
+            results.append(hotel_result)
 
+        serializer = SearchResultSerializer(results, many=True)
         return Response(serializer.data)
     
