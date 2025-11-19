@@ -287,6 +287,48 @@ class BookingService:
         booking.status = booking.BookingStatus.CANCELLED
         booking.save()
         return booking
+    #partial cancel
+    @staticmethod
+    @transaction.atomic
+    def partial_cancel_booking(booking_item: BookingItem, units_to_cancel: int):
+        booking = booking_item.booking
+        if booking.status in [
+            Booking.BookingStatus.CANCELLED,
+            Booking.BookingStatus.CONFIRMED,
+        ]:
+            raise BookingConflict("Booking is already finalized and cannot be changed.")
+        if units_to_cancel <= 0:
+            raise BookingConflict("Units to cancel must be greater than zero.")
+
+        if units_to_cancel > booking_item.units_booked:
+            raise BookingConflict(
+                f"You cannot cancel more units ({units_to_cancel}) "
+                f"than booked ({booking_item.units_booked})."
+            )
+
+        # Update availability (increment=True since we release rooms)
+        StayAvailabilityService.update_availability(
+            hotel=booking_item.room.hotel,
+            rooms_info=[
+                {"room": booking_item.room, "quantity": units_to_cancel}
+            ],
+            check_in_date=booking.check_in_date,
+            check_out_date=booking.check_out_date,
+            increment=True,
+        )
+        booking_item.units_booked -= units_to_cancel
+
+        # If zero, delete the booking item
+        if booking_item.units_booked == 0:
+            booking_item.delete()
+        else:
+            booking_item.save()
+
+        # Recalculate booking total
+        booking.total_price = sum(item.subtotal() for item in booking.items.all())
+        booking.save()
+
+        return booking
 
     @staticmethod
     def confirm_booking(booking: Booking):

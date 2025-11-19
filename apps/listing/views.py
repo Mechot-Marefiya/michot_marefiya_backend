@@ -3,6 +3,8 @@ from django.utils.dateparse import parse_date
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.exceptions import NotFound
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema
@@ -18,10 +20,11 @@ from apps.listing.models import (
     PropertyListing,
     RoomListing,
     Booking,
+    BookingItem
 )
 from apps.listing.serializers import (
     AmenityResponseSSerializer,
-    BookingSerializer,
+    BookingSerializer,BookingResponseSerializer,
     CarListingResponseSerializer,
     CarListingSerializer,
     GuestHouseListingResponseSerializer,
@@ -29,9 +32,9 @@ from apps.listing.serializers import (
     PropertyListingResponseSerializer,
     PropertyListingSerializer,
     RoomListingResponseSerializer,
-    RoomListingSerializer,
+    RoomListingSerializer,PartialCancelSerializer,
 )
-from apps.listing.services import StayAvailabilityService
+from apps.listing.services import StayAvailabilityService,BookingService
 
 
 @extend_schema(responses=RoomListingResponseSerializer)
@@ -104,6 +107,33 @@ class BookingViewSet(AbstractModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+    @action(detail=True, methods=["post"],serializer_class=PartialCancelSerializer, url_path="partial-cancel")
+    def partial_cancel(self, request, pk=None):
+        serializer = PartialCancelSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        item_id = serializer.validated_data["item_id"]
+        units_to_cancel = serializer.validated_data["units_to_cancel"]
+
+        booking = self.get_object()
+
+        try:
+            booking_item = booking.items.get(id=item_id)
+        except BookingItem.DoesNotExist:
+            raise NotFound("Booking item not found")
+
+        updated_booking = BookingService.partial_cancel_booking(
+            booking_item,
+            units_to_cancel
+        )
+
+        return Response(
+            BookingResponseSerializer(
+                updated_booking, context=self.get_serializer_context()
+            ).data,
+            status=status.HTTP_200_OK
+        )
+
 
 
 @search_schema
@@ -139,3 +169,4 @@ class StaySearchView(APIView):
         serializer = HotelProfileResponseSerializer(stays, many=True)
 
         return Response(serializer.data)
+    

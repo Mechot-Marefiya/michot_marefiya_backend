@@ -645,6 +645,7 @@ class StayAvailability(AbstractBaseModel):
                 fields=["date", "hotel"], name="hotel_date_idx"),
         ]
         indexes = [models.Index(fields=["hotel", "date"])]
+        
 
     def __str__(self) -> str:
         return f"{self.room.title} for {self.date}"

@@ -405,3 +405,6 @@ class BookingSerializer(serializers.ModelSerializer):
         return BookingResponseSerializer(instance, self.context).to_representation(
             instance
         )
+class PartialCancelSerializer(serializers.Serializer):
+    item_id = serializers.UUIDField()
+    units_to_cancel = serializers.IntegerField(min_value=1)
