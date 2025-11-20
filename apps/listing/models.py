@@ -592,6 +592,18 @@ class BookingItem(AbstractBaseModel):
     def __str__(self) -> str:
         return f"Room {self.room} booked for {self.booking.check_in_date}"
 
+class BookingRating(models.Model):
+    booking = models.OneToOneField(
+        Booking,
+        on_delete=models.CASCADE,
+        related_name="rating"
+    )
+    rating = models.PositiveSmallIntegerField()  # 1–5 stars
+    comment = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
 
 class Transaction(AbstractBaseModel):
     class PaymentStatus(models.TextChoices):
