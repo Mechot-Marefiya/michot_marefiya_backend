@@ -183,15 +183,29 @@ class StayAvailabilityService:
     @staticmethod
     def validate_availability(hotel, rooms_info, check_in_date, check_out_date):
         date_cursor = check_in_date
+        room_ids = [room_info["room"].id for room_info in rooms_info]
+        dates = []
         while date_cursor < check_out_date:
+            dates.append(date_cursor)
+            date_cursor += timedelta(days=1)
+        
+        availabilities = StayAvailability.objects.select_for_update().filter(
+            hotel=hotel,
+            room_id__in=room_ids,
+            date__in=dates
+        )
+        
+        availability_map = {}
+        for av in availabilities:
+            key = (av.room_id, av.date)
+            availability_map[key] = av
+        
+        for date_cursor in dates:
             for room_info in rooms_info:
                 room = room_info["room"]
                 quantity = room_info["quantity"]
-                availability = StayAvailability.objects.filter(
-                    hotel=hotel,
-                    room=room,
-                    date=date_cursor
-                ).first()
+                key = (room.id, date_cursor)
+                availability = availability_map.get(key)
                 
                 if not availability:
                     raise BookingConflict(
@@ -203,7 +217,6 @@ class StayAvailabilityService:
                         f"Not enough rooms available for {room.title} on {date_cursor}. "
                         f"Available: {availability.available_rooms}, Requested: {quantity}"
                     )
-            date_cursor += timedelta(days=1)
 
     @staticmethod
     def update_availability(
@@ -214,18 +227,25 @@ class StayAvailabilityService:
         increment: bool = False,
     ):
         date_cursor = check_in_date
+        room_ids = [room_info["room"].id for room_info in rooms_info]
+        dates = []
         while date_cursor < check_out_date:
+            dates.append(date_cursor)
+            date_cursor += timedelta(days=1)
+        
+        for date_cursor in dates:
             for room_info in rooms_info:
-                obj = StayAvailability.objects.filter(
-                    hotel=hotel, room=room_info["room"], date=date_cursor
+                room_id = room_info["room"].id
+                quantity = room_info["quantity"]
+                obj = StayAvailability.objects.select_for_update().filter(
+                    hotel=hotel, room_id=room_id, date=date_cursor
                 )
                 if increment:
                     obj.update(available_rooms=F(
-                        "available_rooms") + room_info["quantity"])
+                        "available_rooms") + quantity)
                 else:
                     obj.update(available_rooms=F(
-                        "available_rooms") - room_info["quantity"])
-            date_cursor += timedelta(days=1)
+                        "available_rooms") - quantity)
 
     @staticmethod
     def search_stays(city, check_in_date, check_out_date, number_of_guests):
