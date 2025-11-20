@@ -27,6 +27,7 @@ from apps.listing.serializers import (
     BookingSerializer,BookingResponseSerializer,
     CarListingResponseSerializer,
     CarListingSerializer,
+    BookingRatingSerializer,
     GuestHouseListingResponseSerializer,
     GuestHouseListingSerializer,
     PropertyListingResponseSerializer,
@@ -138,7 +139,22 @@ class BookingViewSet(AbstractModelViewSet):
         )
 
 
+    @action(detail=True, methods=["post"], url_path="rate",serializer_class=BookingRatingSerializer)
+    def rate_booking(self, request, pk=None):
+        booking = self.get_object()
 
+        serializer = BookingRatingSerializer(
+            data=request.data,
+            context={"booking": booking}
+        )
+        serializer.is_valid(raise_exception=True)
+
+        rating = serializer.save(booking=booking)
+
+        return Response(
+            BookingRatingSerializer(rating).data,
+            status=status.HTTP_201_CREATED
+        )
 @search_schema
 class StaySearchView(APIView):
     permission_classes = [AllowAny]

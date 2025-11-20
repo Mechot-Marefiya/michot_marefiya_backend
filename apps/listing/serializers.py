@@ -1,20 +1,24 @@
 from django.db import transaction
 from rest_framework import serializers
+from datetime import timedelta
+from django.utils.timezone import now
+from rest_framework.exceptions import ValidationError
 from apps.account.services import ImageCreationService
 from apps.account.serializers import AddressSerializer, ListingImageSerializer
 from apps.core.serializers import JsonSerializerField
 from apps.listing.exceptions import BookingConflict
 from apps.listing.services import BookingService, ListingService
+
 from apps.listing.models import (
     Amenity,
-    Booking,
+    Booking,BookingRating,
     BookingItem,
     CarListing,
     GuestHouseListing,
     PropertyListing,
     RoomListing,
 )
-
+from apps.listing.exceptions import RatingException
 
 class AmenityResponseSSerializer(serializers.ModelSerializer):
     class Meta:
@@ -387,7 +391,25 @@ class BookingResponseSerializer(serializers.ModelSerializer):
             "status",
             "items",
         ]
+class BookingRatingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = BookingRating
+        fields = ["rating", "comment"]
 
+    def validate(self, attrs):
+        booking = self.context["booking"]
+        today = now().date()
+
+        if today < booking.check_out_date:
+            raise RatingException({"detail": "You can only rate after your stay is completed."})
+
+        if today > booking.check_out_date + timedelta(days=15):
+            raise RatingException({"detail": "Rating period has expired (15 days limit)."})
+
+        if hasattr(booking, "rating"):
+            raise RatingException({"detail": "This booking already has a rating."})
+
+        return attrs
 
 class BookingItemSerializer(serializers.ModelSerializer):
     class Meta:
