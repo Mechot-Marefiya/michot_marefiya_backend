@@ -306,6 +306,44 @@ class StayAvailabilityService:
         
         return results
 
+    @staticmethod
+    def ensure_future_availability(days_ahead=180, start_date=None):
+        start = start_date or date.today()
+        end = start + timedelta(days=days_ahead)
+        rooms = RoomListing.objects.select_related("hotel")
+        created = 0
+        batch = []
+        for room in rooms:
+            if not room.hotel:
+                continue
+            existing_dates = set(
+                StayAvailability.objects.filter(
+                    room=room,
+                    date__gte=start,
+                    date__lt=end
+                ).values_list("date", flat=True)
+            )
+            cursor = start
+            while cursor < end:
+                if cursor not in existing_dates:
+                    batch.append(
+                        StayAvailability(
+                            hotel=room.hotel,
+                            room=room,
+                            date=cursor,
+                            available_rooms=room.total_units
+                        )
+                    )
+                    if len(batch) >= 1000:
+                        StayAvailability.objects.bulk_create(batch, batch_size=1000)
+                        created += len(batch)
+                        batch = []
+                cursor += timedelta(days=1)
+        if batch:
+            StayAvailability.objects.bulk_create(batch, batch_size=1000)
+            created += len(batch)
+        return created
+
 
 class BookingService:
     @transaction.atomic()
