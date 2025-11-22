@@ -487,6 +487,10 @@ class BookingService:
         booking.save()
 
         return booking
+    
+    @staticmethod
+    def get_booking_total(booking):
+        return sum(item.subtotal() for item in booking.items.all())
 
 
 class PaymentService:

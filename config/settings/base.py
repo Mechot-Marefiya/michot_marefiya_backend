@@ -33,7 +33,15 @@ SECRET_KEY = env("SECRET_KEY", cast=str)
 DEBUG = env("DEBUG", default=True, cast=bool)
 
 
-ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
+# ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
+
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    '0.0.0.0',
+    '4a74b1285b13.ngrok-free.app',  # Specific ngrok subdomain
+    '.ngrok-free.app',              # Allows all subdomains ending in .ngrok-free.app
+]
 
 # CORS_ALLOWED_ORIGINS = [
 #     "http://localhost:5173",
@@ -66,7 +74,7 @@ THIRD_PARTY_APPS = [
     "corsheaders",
 ]
 
-CUSTOM_APPS = ["apps.account", "apps.core", "apps.listing"]
+CUSTOM_APPS = ["apps.account", "apps.core", "apps.listing", "apps.payment"]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + CUSTOM_APPS
 
@@ -208,3 +216,11 @@ JAZZMIN_UI_TWEAKS = {
     "dark_mode": False,
     "sidebar_nav_small_text": False,
 }
+
+
+
+# config/settings/base.py (excerpt)
+CHAPA_SECRET_KEY = env("CHAPA_SECRET_KEY", default=None)
+CHAPA_WEBHOOK_SECRET = env("CHAPA_WEBHOOK_SECRET", default=None)
+CHAPA_CALLBACK_URL = env("CHAPA_CALLBACK_URL", default=None)
+FRONTEND_URL = env("FRONTEND_URL", default=None)
