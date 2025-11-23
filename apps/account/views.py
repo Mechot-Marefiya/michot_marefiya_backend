@@ -36,6 +36,9 @@ from apps.account.serializers import (
     CompanyProfileSerializer,
     UserResponseSerializer,
 )
+from apps.account.enums import RoleCode
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated
 from apps.account.permissions import IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly
 
 
@@ -109,6 +112,36 @@ class UserViewSet(AbstractModelViewSet):
         if self.action == 'create':
             return [AllowAny()]
         return super().get_permissions()
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+
+        if request.user == instance:
+            self.perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        try:
+            user_role_code = getattr(request.user.role, 'code', None)
+        except Exception:
+            user_role_code = None
+
+        if request.user and request.user.is_authenticated and (request.user.is_superuser or user_role_code == RoleCode.ADMIN.value):
+            self.perform_destroy(instance)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        return Response({"detail": "Not allowed to delete this user."}, status=status.HTTP_403_FORBIDDEN)
+
+
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def delete_me(request):
+    try:
+        user = request.user
+        user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+    except Exception as e:
+        return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @extend_schema(responses=CompanyProfileResponseSerializer)
