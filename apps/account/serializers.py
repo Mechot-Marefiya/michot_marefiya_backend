@@ -129,6 +129,8 @@ class UserResponseSerializer(serializers.ModelSerializer):
         model = User
         fields = ["id", "email", "first_name", "last_name", "is_active", "role"]
 
+    role = RoleSerializer(read_only=True)
+
 
 class CompanyProfileResponseSerializer(serializers.ModelSerializer):
     address = AddressSerializer()

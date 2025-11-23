@@ -9,6 +9,9 @@ from apps.listing.models import (
     PropertyListing,
     RoomListing,
     Booking,
+    RoomInventory,
+    BookingRating,
+    Transaction,
     StayAvailability
 )
 from apps.listing.models import Amenity
@@ -33,15 +36,33 @@ class PropertyListingAdmin(admin.ModelAdmin):
     inlines = [ListingImageInline]
 
 
-admin.site.register(RoomListing)
+@admin.register(RoomListing)
+class RoomListingAdmin(admin.ModelAdmin):
+    list_display = ("title", "hotel", "base_price", "is_active")
+    search_fields = ("title", "description")
+    list_filter = ("is_active", "hotel")
 # admin.site.register(EventSpaceListing)
 admin.site.register(Booking)
 admin.site.register(BookingItem)
-# admin.site.register(StayAvailability)
 admin.site.register(CarListing)
 # admin.site.register(PropertyListing)
 admin.site.register(GuestHouseListing)
 admin.site.register(Amenity)
+
+
+@admin.register(RoomInventory)
+class RoomInventoryAdmin(admin.ModelAdmin):
+    list_display = ("room_listing", "date", "price")
+
+
+@admin.register(BookingRating)
+class BookingRatingAdmin(admin.ModelAdmin):
+    list_display = ("booking", "rating", "created_at")
+
+
+@admin.register(Transaction)
+class TransactionAdmin(admin.ModelAdmin):
+    list_display = ("booking", "provider", "provider_payment_id", "amount", "currency", "status", "created_at")
 
 
 @admin.register(StayAvailability)

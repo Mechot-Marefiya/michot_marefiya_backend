@@ -26,3 +26,10 @@ admin.site.register(Role)
 admin.site.register(CompanyProfile)
 admin.site.register(IndividualOwnerProfile)
 admin.site.register(User)
+
+
+@admin.register(ListingImage)
+class ListingImageAdmin(admin.ModelAdmin):
+    list_display = ("content_type", "object_id", "alt_text", "is_primary", "created_at")
+    search_fields = ("alt_text",)
+    list_filter = ("is_primary", "content_type")
