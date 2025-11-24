@@ -41,7 +41,9 @@ ALLOWED_HOSTS = [
     '0.0.0.0',
     '4a74b1285b13.ngrok-free.app',  # Specific ngrok subdomain
     '.ngrok-free.app',              # Allows all subdomains ending in .ngrok-free.app
-]
+    'michotmarefia.com',
+    'www.michotmarefia.com',
+    ]
 
 # CORS_ALLOWED_ORIGINS = [
 #     "http://localhost:5173",
@@ -217,6 +219,8 @@ JAZZMIN_UI_TWEAKS = {
     "sidebar_nav_small_text": False,
 }
 
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+CSRF_TRUSTED_ORIGINS = ['https://michotmarefia.com', 'https://www.michotmarefia.com']
 
 
 # config/settings/base.py (excerpt)
