@@ -148,7 +148,7 @@ class StayAvailabilityService:
                 )
             )
 
-        StayAvailability.objects.bulk_create(objs, batch_size=1000)
+        StayAvailability.objects.bulk_create(objs, batch_size=1000,ignore_conflicts=True)
 
     # * This get_available_rooms method will be used to render our room list table.
     @staticmethod
@@ -335,12 +335,12 @@ class StayAvailabilityService:
                         )
                     )
                     if len(batch) >= 1000:
-                        StayAvailability.objects.bulk_create(batch, batch_size=1000)
+                        StayAvailability.objects.bulk_create(batch, batch_size=1000,ignore_conflicts=True)
                         created += len(batch)
                         batch = []
                 cursor += timedelta(days=1)
         if batch:
-            StayAvailability.objects.bulk_create(batch, batch_size=1000)
+            StayAvailability.objects.bulk_create(batch, batch_size=1000,ignore_conflicts=True)
             created += len(batch)
         return created
 
