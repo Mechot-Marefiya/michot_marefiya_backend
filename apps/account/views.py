@@ -208,3 +208,16 @@ class HotelProfileViewSet(AbstractModelViewSet):
                 "rooms": results,
             }
         )
+    @action(
+        detail=False,
+        methods=["get"],
+        serializer_class=HotelProfileSerializer,
+        url_path='featured',  # Custom endpoint path
+    )
+    def get_featured_hotels(self, request):
+        """
+        Get only featured hotel profiles.
+        """
+        featured_hotels = HotelProfile.objects.filter(featured=True)
+        serializer = self.get_serializer(featured_hotels, many=True)
+        return Response(serializer.data)

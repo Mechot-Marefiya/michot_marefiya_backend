@@ -264,7 +264,7 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = HotelProfile
-        fields = ["id", "company", "images", "stars", "facilities"]
+        fields = ["id", "company", "images", "stars", "featured","facilities"]
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
@@ -280,6 +280,7 @@ class HotelProfileSerializer(serializers.Serializer):
     license = serializers.FileField()
     facilities = JsonSerializerField()
     stars = serializers.IntegerField(required=False, allow_null=True)
+    featured=serializers.BooleanField(allow_null=True)
     images = serializers.ListField(child=serializers.ImageField())
 
     def validate_company(self, value):

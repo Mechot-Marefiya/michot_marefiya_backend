@@ -203,6 +203,7 @@ class HotelProfile(AbstractBaseModel):
     )
 
     facilities = models.ManyToManyField(Facility, blank=True)
+    featured=models.BooleanField(null=True,default=False)
 
     class Meta:
         verbose_name = _("Hotel Profile")
