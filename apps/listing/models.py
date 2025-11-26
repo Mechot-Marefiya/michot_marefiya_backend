@@ -776,7 +776,7 @@ class BookingRating(models.Model):
         on_delete=models.CASCADE,
         related_name="rating"
     )
-    rating = models.PositiveSmallIntegerField()  # 1–5 stars
+    rating = models.PositiveSmallIntegerField()
     comment = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
@@ -796,7 +796,6 @@ class Transaction(AbstractBaseModel):
         related_name="transaction"
     )
 
-    # Stripe, PayPal, etc.
     provider = models.CharField(max_length=50)
 
     # Actual transaction id returned from the provider
@@ -839,3 +838,57 @@ class StayAvailability(AbstractBaseModel):
 
     def __str__(self) -> str:
         return f"{self.room.title} for {self.date}"
+
+
+class Season(AbstractBaseModel):
+    name = models.CharField(max_length=100)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    recurring = models.BooleanField(default=False)
+    active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "seasons"
+
+    def __str__(self) -> str:
+        return f"{self.name} ({'recurring' if self.recurring else self.start_date})"
+
+
+class SeasonalRate(AbstractBaseModel):
+    season = models.ForeignKey(Season, on_delete=models.CASCADE, related_name="rates")
+    hotel = models.ForeignKey(HotelProfile, on_delete=models.CASCADE, null=True, blank=True)
+    company = models.ForeignKey(CompanyProfile, on_delete=models.CASCADE, null=True, blank=True)
+    room = models.ForeignKey(RoomListing, on_delete=models.CASCADE, null=True, blank=True)
+
+    price_override = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    multiplier = models.DecimalField(max_digits=6, decimal_places=4, null=True, blank=True)
+
+    priority = models.IntegerField(default=0)
+    active = models.BooleanField(default=True)
+    days_of_week = models.JSONField(default=list, blank=True)
+    min_stay = models.PositiveIntegerField(null=True, blank=True)
+
+    class Meta:
+        db_table = "seasonal_rates"
+
+    def __str__(self) -> str:
+        scope = self.room or self.hotel or self.company or "global"
+        return f"Rate {self.id} for {scope} ({self.season.name})"
+
+
+class BookingItemPrice(AbstractBaseModel):
+    booking_item = models.ForeignKey(BookingItem, on_delete=models.CASCADE, related_name="prices")
+    date = models.DateField(db_index=True)
+    price_per_unit = models.DecimalField(max_digits=10, decimal_places=2)
+    units = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        db_table = "booking_item_prices"
+        ordering = ["date"]
+
+    def subtotal(self):
+        return self.price_per_unit * self.units
+
+    def __str__(self) -> str:
+        return f"{self.booking_item} - {self.date}: {self.price_per_unit} x {self.units}"

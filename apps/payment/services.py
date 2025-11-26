@@ -50,7 +50,7 @@ class ChapaPaymentService:
             validate_email(email)
             user_email = email
         except Exception:
-            user_email = f"no-reply+{tx_ref[:8]}@michot.local"
+            user_email = f"no-reply+{tx_ref[:8]}@example.com"
 
         payload = {
             "amount": str(amount),
@@ -77,6 +77,7 @@ class ChapaPaymentService:
             )
 
             try:
+                logger.debug("Chapa initialize payload: %s", payload)
                 res = requests.post(
                     ChapaPaymentService.BASE_URL + "transaction/initialize",
                     headers=ChapaPaymentService._get_headers(),
@@ -84,6 +85,34 @@ class ChapaPaymentService:
                     timeout=15
                 )
                 response_data = res.json()
+                logger.debug("Chapa initialize response: %s", response_data)
+
+                msg = response_data.get("message") or {}
+                email_errors = None
+                try:
+                    if isinstance(msg, dict):
+                        email_errors = msg.get("email")
+                except Exception:
+                    email_errors = None
+
+                if email_errors and any("validation.email" in str(e) for e in email_errors):
+                    fallback = getattr(settings, "CHAPA_FALLBACK_EMAIL", None) or f"no-reply+{tx_ref[:8]}@gmail.com"
+                    logger.warning("Chapa rejected email %s, retrying initialize with fallback %s", user_email, fallback)
+                    payload["email"] = fallback
+                    try:
+                        res2 = requests.post(
+                            ChapaPaymentService.BASE_URL + "transaction/initialize",
+                            headers=ChapaPaymentService._get_headers(),
+                            data=json.dumps(payload),
+                            timeout=15,
+                        )
+                        response_data = res2.json()
+                        logger.debug("Chapa initialize response (retry): %s", response_data)
+                    except Exception as e2:
+                        payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
+                        payment_tx.metadata = {"error": str(e2)}
+                        payment_tx.save()
+                        return {"success": False, "error": str(e2), "tx_ref": tx_ref}
             except Exception as e:
                 payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
                 payment_tx.metadata = {"error": str(e)}

@@ -8,12 +8,27 @@ from apps.listing.views import (
     PropertyListingViewSet,
     AmenityViewSet,
     StaySearchView,
+<<<<<<< HEAD
     CarRentalViewSet,
     CarAvailabilityByCarAndDateView,
     CarAvailabilityByDateRangeView, 
     StayAvailabilityUpdateView
 )
 
+=======
+    PricePreviewView,
+)
+
+
+urlpatterns = [
+    path("stays/search/", StaySearchView.as_view(), name="stay-search")
+]
+
+urlpatterns += [
+    path("rooms/<uuid:pk>/price-preview/", PricePreviewView.as_view(), name="price-preview"),
+]
+
+>>>>>>> e22ab83f239a1015873c2fd69fa1ea72bf1ca62e
 router = DefaultRouter()
 
 router.register("rooms", RoomListingViewSet, basename="rooms")
