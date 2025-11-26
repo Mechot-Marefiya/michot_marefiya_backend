@@ -1,13 +1,8 @@
 
 from django.utils.dateparse import parse_date
-<<<<<<< HEAD
 from django.db.models import Q, Count, Avg, Sum
 from django.utils import timezone
 from datetime import datetime, timedelta
-=======
-from datetime import timedelta
-from django.conf import settings
->>>>>>> e22ab83f239a1015873c2fd69fa1ea72bf1ca62e
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework import status,filters
@@ -53,16 +48,7 @@ from apps.listing.serializers import (
     CarRentalSerializer,
     CarRental,
 )
-<<<<<<< HEAD
 from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService
-=======
-from apps.listing.services import StayAvailabilityService,BookingService
-from apps.listing.services import PriceService
-from apps.listing.serializers import PricePreviewResponseSerializer
-from apps.listing.models import RoomListing
-
-
->>>>>>> e22ab83f239a1015873c2fd69fa1ea72bf1ca62e
 @extend_schema(responses=RoomListingResponseSerializer)
 class RoomListingViewSet(AbstractModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
@@ -1109,7 +1095,6 @@ class StaySearchView(APIView):
 
         serializer = SearchResultSerializer(results, many=True)
         return Response(serializer.data)
-<<<<<<< HEAD
 class StayAvailabilityUpdateView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -1133,70 +1118,3 @@ class StayAvailabilityUpdateView(APIView):
             },
             status=status.HTTP_200_OK
         )
-=======
-
-
-class PricePreviewView(APIView):
-    permission_classes = [AllowAny]
-
-    def get(self, request, pk):
-        check_in = request.query_params.get("check_in")
-        check_out = request.query_params.get("check_out")
-
-        if not check_in or not check_out:
-            return Response({"detail": "Missing check_in or check_out."}, status=status.HTTP_400_BAD_REQUEST)
-
-        check_in_date = parse_date(check_in)
-        check_out_date = parse_date(check_out)
-
-        if not check_in_date or not check_out_date or check_out_date <= check_in_date:
-            return Response({"detail": "Invalid date range."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # fetch room
-        try:
-            room = RoomListing.objects.get(id=pk)
-        except RoomListing.DoesNotExist:
-            raise NotFound("Room not found")
-
-        # iterate dates and resolve price
-        lines = []
-        cursor = check_in_date
-        total = 0
-        base_price = room.base_price
-        has_discount = False
-
-        while cursor < check_out_date:
-            price = PriceService.resolve_price(room, cursor)
-            # determine source: inventory / seasonal / base
-            source = "base"
-            inv = None
-            try:
-                from apps.listing.models import RoomInventory
-                inv = RoomInventory.objects.filter(room_listing=room, date=cursor).first()
-            except Exception:
-                inv = None
-
-            if inv and inv.price is not None:
-                source = "inventory"
-            else:
-                # if different from base, assume seasonal
-                from decimal import Decimal
-                if Decimal(price) != Decimal(room.base_price):
-                    source = "seasonal"
-
-            lines.append({"date": cursor, "price": price, "source": source})
-            total += price
-            if price < room.base_price:
-                has_discount = True
-            cursor += timedelta(days=1)
-
-        serializer = PricePreviewResponseSerializer({
-            "lines": lines,
-            "total": total,
-            "has_discount": has_discount,
-            "base_price": base_price,
-        })
-
-        return Response(serializer.data)
-    
->>>>>>> e22ab83f239a1015873c2fd69fa1ea72bf1ca62e

@@ -825,7 +825,6 @@ class SearchResultSerializer(serializers.Serializer):
     city = serializers.CharField()
     stars = serializers.IntegerField(allow_null=True)
     rooms = SearchRoomSerializer(many=True)
-<<<<<<< HEAD
 class StayAvailabilityUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = StayAvailability
@@ -840,18 +839,3 @@ class StayAvailabilityUpdateSerializer(serializers.ModelSerializer):
          if value < date.today():
              raise serializers.ValidationError("Date cannot be in the past.")
          return value
-=======
-
-
-class PricePreviewLineSerializer(serializers.Serializer):
-    date = serializers.DateField()
-    price = serializers.DecimalField(max_digits=10, decimal_places=2)
-    source = serializers.CharField()
-
-
-class PricePreviewResponseSerializer(serializers.Serializer):
-    lines = PricePreviewLineSerializer(many=True)
-    total = serializers.DecimalField(max_digits=12, decimal_places=2)
-    has_discount = serializers.BooleanField()
-    base_price = serializers.DecimalField(max_digits=10, decimal_places=2)
->>>>>>> e22ab83f239a1015873c2fd69fa1ea72bf1ca62e

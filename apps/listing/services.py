@@ -2,17 +2,11 @@ from datetime import date, timedelta, datetime
 from django.db import transaction
 from django.db.models import Count, F, Min
 from django.shortcuts import get_object_or_404
-<<<<<<< HEAD
 from django.db import transaction
 from django.utils import timezone
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple,Any,List
 from decimal import Decimal
-=======
-from decimal import Decimal
-from django.db.models import Q
-from django.conf import settings
->>>>>>> e22ab83f239a1015873c2fd69fa1ea72bf1ca62e
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.account.services import ImageCreationService
 from apps.core.models import Address
@@ -25,19 +19,10 @@ from apps.listing.models import (
     PropertyListing,
     RoomListing,
     StayAvailability,
-<<<<<<< HEAD
     Transaction,CarAvailability,
     CarListing,
     CarRental,
     CarRentalItem,
-=======
-    RoomInventory,
-    SeasonalRate,
-    Season,
-    BookingItemPrice,
-    
-    Transaction,
->>>>>>> e22ab83f239a1015873c2fd69fa1ea72bf1ca62e
 )
 
 
