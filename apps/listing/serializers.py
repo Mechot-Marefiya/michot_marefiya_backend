@@ -466,6 +466,11 @@ class SearchRoomSerializer(serializers.Serializer):
     bed_type = serializers.CharField()
     room_size_sqm = serializers.IntegerField()
     available_units = serializers.IntegerField()
+    # Optional seasonal preview fields populated by StaySearchView when enabled
+    display_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
+    preview_min_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
+    preview_total = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    preview_has_discount = serializers.BooleanField(required=False)
 
 
 class SearchResultSerializer(serializers.Serializer):
@@ -474,3 +479,16 @@ class SearchResultSerializer(serializers.Serializer):
     city = serializers.CharField()
     stars = serializers.IntegerField(allow_null=True)
     rooms = SearchRoomSerializer(many=True)
+
+
+class PricePreviewLineSerializer(serializers.Serializer):
+    date = serializers.DateField()
+    price = serializers.DecimalField(max_digits=10, decimal_places=2)
+    source = serializers.CharField()
+
+
+class PricePreviewResponseSerializer(serializers.Serializer):
+    lines = PricePreviewLineSerializer(many=True)
+    total = serializers.DecimalField(max_digits=12, decimal_places=2)
+    has_discount = serializers.BooleanField()
+    base_price = serializers.DecimalField(max_digits=10, decimal_places=2)

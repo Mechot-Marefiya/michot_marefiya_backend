@@ -15,6 +15,7 @@ from apps.listing.models import (
     StayAvailability
 )
 from apps.listing.models import Amenity
+from apps.listing.models import Season, SeasonalRate, BookingItemPrice
 
 
 class ListingImageInline(GenericTabularInline):
@@ -53,6 +54,22 @@ admin.site.register(Amenity)
 @admin.register(RoomInventory)
 class RoomInventoryAdmin(admin.ModelAdmin):
     list_display = ("room_listing", "date", "price")
+
+
+@admin.register(Season)
+class SeasonAdmin(admin.ModelAdmin):
+    list_display = ("name", "start_date", "end_date", "recurring", "active")
+
+
+@admin.register(SeasonalRate)
+class SeasonalRateAdmin(admin.ModelAdmin):
+    list_display = ("season", "room", "hotel", "company", "price_override", "multiplier", "priority", "active")
+    list_filter = ("active", "priority")
+
+
+@admin.register(BookingItemPrice)
+class BookingItemPriceAdmin(admin.ModelAdmin):
+    list_display = ("booking_item", "date", "price_per_unit", "units")
 
 
 @admin.register(BookingRating)

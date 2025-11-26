@@ -9,11 +9,16 @@ from apps.listing.views import (
     PropertyListingViewSet,
     AmenityViewSet,
     StaySearchView,
+    PricePreviewView,
 )
 
 
 urlpatterns = [
     path("stays/search/", StaySearchView.as_view(), name="stay-search")
+]
+
+urlpatterns += [
+    path("rooms/<uuid:pk>/price-preview/", PricePreviewView.as_view(), name="price-preview"),
 ]
 
 router = DefaultRouter()

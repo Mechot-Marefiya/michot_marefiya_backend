@@ -2,6 +2,9 @@ from datetime import date, timedelta, datetime
 from django.db import transaction
 from django.db.models import Count, F, Min
 from django.shortcuts import get_object_or_404
+from decimal import Decimal
+from django.db.models import Q
+from django.conf import settings
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.account.services import ImageCreationService
 from apps.core.models import Address
@@ -14,6 +17,11 @@ from apps.listing.models import (
     PropertyListing,
     RoomListing,
     StayAvailability,
+    RoomInventory,
+    SeasonalRate,
+    Season,
+    BookingItemPrice,
+    
     Transaction,
 )
 
@@ -345,6 +353,76 @@ class StayAvailabilityService:
         return created
 
 
+class PriceService:
+    @staticmethod
+    def _season_matches(season: Season, when: date) -> bool:
+        if not season.active:
+            return False
+        if season.recurring:
+            start_md = (season.start_date.month, season.start_date.day)
+            end_md = (season.end_date.month, season.end_date.day)
+            md = (when.month, when.day)
+            if start_md <= end_md:
+                return start_md <= md <= end_md
+            return md >= start_md or md <= end_md
+        return season.start_date <= when <= season.end_date
+
+    @staticmethod
+    def resolve_price(room: RoomListing, when: date) -> Decimal:
+        # 1) RoomInventory override
+        inv = RoomInventory.objects.filter(room_listing=room, date=when).first()
+        if inv and inv.price is not None:
+            return Decimal(inv.price)
+
+        # 2) SeasonalRate candidates
+        hotel = room.hotel
+        company = getattr(hotel, 'company', None) if hotel else None
+
+        candidates = SeasonalRate.objects.filter(active=True).select_related('season')
+        # narrow to possible scopes to reduce in-memory checks
+        scope_q = Q(room=room) | Q(hotel=hotel)
+        if company:
+            scope_q |= Q(company=company)
+        scope_q |= Q(room__isnull=True, hotel__isnull=True, company__isnull=True)
+        candidates = candidates.filter(scope_q)
+
+        matched = []
+        for rate in candidates:
+            if not PriceService._season_matches(rate.season, when):
+                continue
+            # days_of_week optional filter
+            if rate.days_of_week:
+                try:
+                    if when.weekday() not in rate.days_of_week:
+                        continue
+                except Exception:
+                    pass
+            matched.append(rate)
+
+        if matched:
+            # sort by priority desc then specificity (room>hotel>company>global)
+            def score(r):
+                spec = 0
+                if r.room:
+                    spec = 3
+                elif r.hotel:
+                    spec = 2
+                elif r.company:
+                    spec = 1
+                return (r.priority, spec)
+
+            matched.sort(key=score, reverse=True)
+            chosen = matched[0]
+            if chosen.price_override is not None:
+                return Decimal(chosen.price_override)
+            if chosen.multiplier is not None:
+                base = Decimal(room.base_price)
+                return (base * Decimal(chosen.multiplier)).quantize(Decimal('0.01'))
+
+        # 3) fallback to base price
+        return Decimal(room.base_price)
+
+
 class BookingService:
     @transaction.atomic()
     @staticmethod
@@ -370,16 +448,31 @@ class BookingService:
         
         booking = Booking.objects.create(**validated_data)
 
+        use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
+
         for item in items_data:
             room = item["room"]
             units = item["units_booked"]
 
-            BookingItem.objects.create(
+            booking_item = BookingItem.objects.create(
                 booking=booking,
                 room=room,
                 units_booked=units,
                 price_per_unit=room.base_price,
             )
+
+            # create per-night price lines if feature enabled
+            if use_seasonal:
+                date_cursor = booking.check_in_date
+                while date_cursor < booking.check_out_date:
+                    price = PriceService.resolve_price(room, date_cursor)
+                    BookingItemPrice.objects.create(
+                        booking_item=booking_item,
+                        date=date_cursor,
+                        price_per_unit=price,
+                        units=units,
+                    )
+                    date_cursor += timedelta(days=1)
 
             StayAvailabilityService.update_availability(
                 hotel=room.hotel,
@@ -389,7 +482,19 @@ class BookingService:
                 increment=False,
             )
 
-        booking.total_price = sum(i.subtotal() for i in booking.items.all())
+        if use_seasonal:
+            # compute total from BookingItemPrice rows
+            total = BookingItemPrice.objects.filter(booking_item__booking=booking).aggregate(
+                total=Min('price_per_unit')  # placeholder to force a queryset evaluation
+            )
+            # compute properly in Python to avoid complex aggregation across units
+            total_price = Decimal('0.00')
+            for pip in BookingItemPrice.objects.filter(booking_item__booking=booking):
+                total_price += (pip.price_per_unit * pip.units)
+            booking.total_price = total_price
+        else:
+            booking.total_price = sum(i.subtotal() for i in booking.items.all())
+
         booking.save()
         return booking
 
