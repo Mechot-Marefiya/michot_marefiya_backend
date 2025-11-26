@@ -2,6 +2,8 @@ from django.db import transaction
 from rest_framework import serializers
 from datetime import timedelta
 from django.utils.timezone import now
+from datetime import datetime
+from datetime import date
 from rest_framework.exceptions import ValidationError
 from apps.account.services import ImageCreationService
 from apps.account.serializers import AddressSerializer, ListingImageSerializer
@@ -12,14 +14,15 @@ from apps.listing.services import BookingService, ListingService
 from apps.listing.models import (
     Amenity,
     Booking,BookingRating,
-    BookingItem,
-    CarListing,
+    BookingItem,StayAvailability,
+    CarListing,CarAvailability,
     GuestHouseListing,
     PropertyListing,
     RoomListing,
+    CarRental,CarRentalItem,
 )
 from apps.listing.exceptions import RatingException
-
+from .services import CarAvailabilityService
 class AmenityResponseSSerializer(serializers.ModelSerializer):
     class Meta:
         model = Amenity
@@ -176,9 +179,114 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
         ).to_representation(instance)
 
 
-class CarListingResponseSerializer(serializers.ModelSerializer):
-    images = ListingImageSerializer(many=True)
+# class CarListingResponseSerializer(serializers.ModelSerializer):
+#     images = ListingImageSerializer(many=True)
 
+#     class Meta:
+#         model = CarListing
+#         fields = [
+#             "id",
+#             "title",
+#             "description",
+#             "images",
+#             "base_price",
+#             "brand",
+#             "model",
+#             "year",
+#             "mileage",
+#             "fuel_type",
+#             "transmission",
+#             "condition",
+#         ]
+
+
+# class CarListingSerializer(serializers.ModelSerializer):
+#     images = serializers.ListField(child=serializers.ImageField())
+
+#     class Meta:
+#         model = CarListing
+#         fields = [
+#             "title",
+#             "description",
+#             "images",
+#             "base_price",
+#             "individual_owner",
+#             "company",
+#             "brand",
+#             "model",
+#             "year",
+#             "mileage",
+#             "fuel_type",
+#             "transmission",
+#             "condition",
+#         ]
+
+#     def validate(self, data):
+#         company_id = data.get("company")
+#         individual_id = data.get("individual_owner")
+
+#         if company_id and individual_id:
+#             raise serializers.ValidationError("Only one owner type allowed.")
+#         if not company_id and not individual_id:
+#             raise serializers.ValidationError("An owner is required.")
+#         return data
+
+#     @transaction.atomic()
+#     def create(self, validated_data):
+#         # user = self.context["request"].user
+#         # individual_owner = validated_data.get("individual_owner")
+#         # # ? Just for testing purpose
+#         # validated_data['individual_owner'] = "6ca9a7cf-44cc-4979-be3b-d49b8b484ef6"
+
+#         # if not individual_owner:
+#         #     # Checking if the company is not doing this but rather the Michot
+#         #     # admin doing this and in some case the individual owner is missed.
+#         #     # Which means the logged in user is Michot admin (not another vendor)
+#         #     if user.role and user.role.code == RoleCode.ADMIN.value:
+#         #         raise serializers.ValidationError(
+#         #             "Valid Company or individual owner must exist."
+#         #         )
+#         #     company = get_object_or_404(CompanyProfile, user=user)
+#         #     validated_data["company"] = company
+
+#         images = validated_data.pop("images")
+
+#         # individual_owner_id = validated_data.pop('individual_owner')
+
+#         # individual_owner = get_object_or_404(
+#         #     IndividualOwnerProfile,
+#         #     id=individual_owner_id
+#         # )
+
+#         car_listing_instance = CarListing(
+#             # individual_owner=individual_owner,
+#             **validated_data
+#         )
+
+#         car_listing_instance.save()
+
+#         ImageCreationService.create_images(car_listing_instance, images)
+
+#         return car_listing_instance
+
+#     def to_representation(self, instance):
+#         return CarListingResponseSerializer(instance, self.context).to_representation(
+#             instance
+        #)
+class CarAvailabilitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CarAvailability
+        fields = [
+            'id', 'availability_type', 'is_available', 'available_from', 
+            'available_to', 'quantity_available'
+        ]
+        read_only_fields = ['id']
+
+class CarListingResponseSerializer(serializers.ModelSerializer):
+    images = ListingImageSerializer(many=True, read_only=True)
+    availabilities = CarAvailabilitySerializer(many=True, read_only=True)
+    current_availability = serializers.SerializerMethodField()
+    
     class Meta:
         model = CarListing
         fields = [
@@ -187,6 +295,7 @@ class CarListingResponseSerializer(serializers.ModelSerializer):
             "description",
             "images",
             "base_price",
+            "is_active",
             "brand",
             "model",
             "year",
@@ -194,12 +303,40 @@ class CarListingResponseSerializer(serializers.ModelSerializer):
             "fuel_type",
             "transmission",
             "condition",
+            "listing_type",
+            "car_class",
+            "quantity",
+            "company",
+            "individual_owner",
+            "availabilities",
+            "current_availability",
+            "created_at",
+            "updated_at"
         ]
-
+    
+    def get_current_availability(self, obj):
+        """Get current availability status for the car listing"""
+        try:
+            availability = CarAvailability.objects.get(
+                car_listing=obj,
+                availability_type=CarAvailability.CarAvailabilityType.RENT
+            )
+            return {
+                'is_available': availability.is_available,
+                'quantity_available': availability.quantity_available,
+                'available_from': availability.available_from,
+                'available_to': availability.available_to
+            }
+        except CarAvailability.DoesNotExist:
+            return None
 
 class CarListingSerializer(serializers.ModelSerializer):
-    images = serializers.ListField(child=serializers.ImageField())
-
+    images = serializers.ListField(
+        child=serializers.ImageField(),
+        write_only=True,
+        required=False
+    )
+    
     class Meta:
         model = CarListing
         fields = [
@@ -216,62 +353,271 @@ class CarListingSerializer(serializers.ModelSerializer):
             "fuel_type",
             "transmission",
             "condition",
+            "listing_type",
+            "car_class",
+            "quantity"
         ]
-
+    
     def validate(self, data):
-        company_id = data.get("company")
-        individual_id = data.get("individual_owner")
+        company = data.get("company")
+        individual_owner = data.get("individual_owner")
 
-        if company_id and individual_id:
+        if company and individual_owner:
             raise serializers.ValidationError("Only one owner type allowed.")
-        if not company_id and not individual_id:
+        if not company and not individual_owner:
             raise serializers.ValidationError("An owner is required.")
+        
+        # Validate quantity for rental listings
+        listing_type = data.get('listing_type', CarListing.ListingTypeChoices.RENT)
+        quantity = data.get('quantity', 1)
+        
+        if listing_type == CarListing.ListingTypeChoices.RENT and quantity < 1:
+            raise serializers.ValidationError("Quantity must be at least 1 for rental listings.")
+        
+        # Validate base_price
+        base_price = data.get('base_price')
+        if base_price and base_price <= 0:
+            raise serializers.ValidationError("Base price must be greater than 0.")
+        
         return data
 
-    @transaction.atomic()
+    @transaction.atomic
     def create(self, validated_data):
-        # user = self.context["request"].user
-        # individual_owner = validated_data.get("individual_owner")
-        # # ? Just for testing purpose
-        # validated_data['individual_owner'] = "6ca9a7cf-44cc-4979-be3b-d49b8b484ef6"
-
-        # if not individual_owner:
-        #     # Checking if the company is not doing this but rather the Michot
-        #     # admin doing this and in some case the individual owner is missed.
-        #     # Which means the logged in user is Michot admin (not another vendor)
-        #     if user.role and user.role.code == RoleCode.ADMIN.value:
-        #         raise serializers.ValidationError(
-        #             "Valid Company or individual owner must exist."
-        #         )
-        #     company = get_object_or_404(CompanyProfile, user=user)
-        #     validated_data["company"] = company
-
-        images = validated_data.pop("images")
-
-        # individual_owner_id = validated_data.pop('individual_owner')
-
-        # individual_owner = get_object_or_404(
-        #     IndividualOwnerProfile,
-        #     id=individual_owner_id
-        # )
-
-        car_listing_instance = CarListing(
-            # individual_owner=individual_owner,
-            **validated_data
-        )
-
-        car_listing_instance.save()
-
-        ImageCreationService.create_images(car_listing_instance, images)
-
+        images = validated_data.pop("images", [])
+        
+        car_listing_instance = CarListing.objects.create(**validated_data)
+        
+        # Create images if provided
+        if images:
+            ImageCreationService.create_images(car_listing_instance, images)
+        
+        # Create availability record
+        CarAvailabilityService.create_availability_for_car_listing(car_listing_instance)
+        
         return car_listing_instance
 
     def to_representation(self, instance):
-        return CarListingResponseSerializer(instance, self.context).to_representation(
-            instance
+        return CarListingResponseSerializer(instance, context=self.context).data
+
+class CarRentalItemSerializer(serializers.ModelSerializer):
+    car_listing_details = serializers.SerializerMethodField()
+    subtotal = serializers.ReadOnlyField()
+    
+    class Meta:
+        model = CarRentalItem
+        fields = [
+            'id', 'car_listing', 'car_listing_details', 'units_rent', 
+            'price_per_unit', 'subtotal', 'created_at'
+        ]
+        read_only_fields = ['id', 'subtotal', 'created_at']
+    
+    def get_car_listing_details(self, obj):
+        return {
+            'id': obj.car_listing.id,
+            'title': obj.car_listing.title,
+            'brand': obj.car_listing.brand,
+            'model': obj.car_listing.model,
+            'year': obj.car_listing.year,
+            'base_price': obj.car_listing.base_price  # Include base price for reference
+        }
+
+class CarRentalSerializer(serializers.ModelSerializer):
+    rental_items = CarRentalItemSerializer(many=True, write_only=True)
+    items_details = CarRentalItemSerializer(
+        source='rental_items', 
+        many=True, 
+        read_only=True
+    )
+    renter_name = serializers.CharField(source='renter.get_full_name', read_only=True)
+    
+    class Meta:
+        model = CarRental
+        fields = [
+            'id', 'renter', 'renter_name', 'start_date', 'end_date', 
+            'total_price', 'status', 'rental_items', 'items_details',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'status', 'created_at', 'updated_at']
+    
+    def validate(self, data):
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        rental_items = data.get('rental_items', [])
+        
+        if start_date and end_date:
+            if start_date >= end_date:
+                raise serializers.ValidationError({
+                    "end_date": "End date must be after start date."
+                })
+            
+            if start_date < datetime.now().date():
+                raise serializers.ValidationError({
+                    "start_date": "Start date cannot be in the past."
+                })
+        
+        if not rental_items:
+            raise serializers.ValidationError({
+                "rental_items": "At least one rental item is required."
+            })
+        
+        # Validate each rental item
+        for item in rental_items:
+            car_listing = item.get('car_listing')
+            units_rent = item.get('units_rent', 1)
+            price_per_unit = item.get('price_per_unit')
+            
+            if not car_listing:
+                raise serializers.ValidationError({
+                    "rental_items": "Car listing is required for each item."
+                })
+            
+            if car_listing.listing_type != CarListing.ListingTypeChoices.RENT:
+                raise serializers.ValidationError({
+                    "rental_items": f"Car {car_listing} is not available for rent."
+                })
+            
+            # Check availability
+            availability_check = CarAvailabilityService.check_availability_for_rent(
+                car_listing=car_listing,
+                start_date=start_date,
+                end_date=end_date,
+                quantity=units_rent
+            )
+            
+            if not availability_check.get('available'):
+                raise serializers.ValidationError({
+                    "rental_items": f"Car {car_listing} is not available: {availability_check.get('reason')}"
+                })
+            
+            if not price_per_unit or price_per_unit <= 0:
+                raise serializers.ValidationError({
+                    "rental_items": "Price per unit must be greater than 0."
+                })
+            
+            # You can add validation to ensure price_per_unit is reasonable
+            # compared to the car's base_price if needed
+            base_price = car_listing.base_price
+            if price_per_unit > base_price * 2:  # Example: prevent overcharging
+                raise serializers.ValidationError({
+                    "rental_items": f"Rental price seems too high compared to the car's base price."
+                })
+        
+        return data
+    
+    @transaction.atomic
+    def create(self, validated_data):
+        rental_items_data = validated_data.pop('rental_items')
+        renter = self.context['request'].user
+        
+        # Calculate total price
+        total_price = sum(
+            item['units_rent'] * item['price_per_unit'] 
+            for item in rental_items_data
         )
+        
+        # Create rental
+        rental = CarRental.objects.create(
+            renter=renter,
+            total_price=total_price,
+            **validated_data
+        )
+        
+        # Create rental items and update availability
+        for item_data in rental_items_data:
+            car_listing = item_data['car_listing']
+            units_rent = item_data['units_rent']
+            
+            CarRentalItem.objects.create(
+                car_rental=rental,
+                **item_data
+            )
+            
+            # Update availability
+            CarAvailabilityService.update_availability_after_rental(
+                car_listing=car_listing,
+                quantity=units_rent,
+                action="decrement"
+            )
+        
+        return rental
+    
+    def update(self, instance, validated_data):
+        # Handle rental updates (like cancellation)
+        if 'status' in validated_data:
+            old_status = instance.status
+            new_status = validated_data['status']
+            
+            # If cancelling a confirmed rental, return units to availability
+            if (old_status == CarRental.RentStatus.CONFIRMED and 
+                new_status == CarRental.RentStatus.CANCELLED):
+                
+                for rental_item in instance.rental_items.all():
+                    CarAvailabilityService.update_availability_after_rental(
+                        car_listing=rental_item.car_listing,
+                        quantity=rental_item.units_rent,
+                        action="increment"
+                    )
+            
+            # If confirming a pending rental, ensure availability still exists
+            elif (old_status == CarRental.RentStatus.PENDING and 
+                  new_status == CarRental.RentStatus.CONFIRMED):
+                
+                for rental_item in instance.rental_items.all():
+                    availability_check = CarAvailabilityService.check_availability_for_rent(
+                        car_listing=rental_item.car_listing,
+                        start_date=instance.start_date,
+                        end_date=instance.end_date,
+                        quantity=rental_item.units_rent
+                    )
+                    
+                    if not availability_check.get('available'):
+                        raise serializers.ValidationError({
+                            "status": f"Cannot confirm rental: {availability_check.get('reason')}"
+                        })
+        
+        return super().update(instance, validated_data)
 
+class AvailabilityCheckSerializer(serializers.Serializer):
+    start_date = serializers.DateField(required=True)
+    end_date = serializers.DateField(required=True)
+    quantity = serializers.IntegerField(min_value=1, default=1)
+    
+    def validate(self, data):
+        start_date = data['start_date']
+        end_date = data['end_date']
+        
+        if start_date >= end_date:
+            raise serializers.ValidationError({
+                "end_date": "End date must be after start date."
+            })
+        
+        if start_date < datetime.now().date():
+            raise serializers.ValidationError({
+                "start_date": "Start date cannot be in the past."
+            })
+        
+        return data
 
+class CarSearchSerializer(serializers.Serializer):
+    start_date = serializers.DateField(required=True)
+    end_date = serializers.DateField(required=True)
+    brand = serializers.CharField(required=False, allow_blank=True)
+    car_class = serializers.CharField(required=False, allow_blank=True)
+    max_daily_price = serializers.DecimalField(
+        max_digits=10, decimal_places=2, required=False, min_value=0
+    )
+    
+    def validate(self, data):
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        
+        if start_date and end_date:
+            if start_date >= end_date:
+                raise serializers.ValidationError({
+                    "end_date": "End date must be after start date."
+                })
+        
+        return data
 class PropertyListingResponseSerializer(serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     address = AddressSerializer()
@@ -474,3 +820,17 @@ class SearchResultSerializer(serializers.Serializer):
     city = serializers.CharField()
     stars = serializers.IntegerField(allow_null=True)
     rooms = SearchRoomSerializer(many=True)
+class StayAvailabilityUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StayAvailability
+        fields = ["hotel_id", "room_id", "date", "available_rooms"]
+
+    def validate_available_rooms(self, value):
+        if value < 0:
+            raise serializers.ValidationError("available_rooms must be non-negative.")
+        return value
+
+    def validate_date(self, value):
+         if value < date.today():
+             raise serializers.ValidationError("Date cannot be in the past.")
+         return value

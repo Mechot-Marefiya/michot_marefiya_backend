@@ -3,6 +3,7 @@ from django.contrib.contenttypes.admin import GenericTabularInline
 from apps.listing.models import (
     BookingItem,
     CarListing,
+    CarAvailability,CarRental,CarRentalItem,
     # EventSpaceListing,
     GuestHouseListing,
     ListingImage,
@@ -22,7 +23,9 @@ class ListingImageInline(GenericTabularInline):
     extra = 1  # how many empty slots to show
     fields = ("image", "alt_text", "is_primary")
 
-
+admin.site.register(CarAvailability)
+admin.site.register(CarRental)
+admin.site.register(CarRentalItem)
 @admin.register(PropertyListing)
 class PropertyListingAdmin(admin.ModelAdmin):
     list_display = (

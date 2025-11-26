@@ -182,7 +182,7 @@ class CarListing(BaseListing):
     condition = models.CharField(
         max_length=200, choices=ConditionChoices.choices, verbose_name=_("Condition")
     )
-
+    quantity=models.PositiveSmallIntegerField(default=1,null=False)
     class Meta:
         verbose_name = _("Car Listing")
         verbose_name_plural = _("Car Listings")
@@ -264,65 +264,122 @@ class CarRentalItem(AbstractBaseModel):
 
     def __str__(self) -> str:
         return f"Car {self.car_listing} rent for {self.car_rental.check_in_date}"
-class CarSale(AbstractBaseModel):
-    class SaleStatus(models.TextChoices):
-        PENDING = "pending", _("Pending")
-        CONFIRMED = "confirmed", _("Confirmed")
-        CANCELLED = "cancelled", _("Cancelled")
-    buyer = models.ForeignKey(
-       settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE
-    )
+# class CarSale(AbstractBaseModel):
+#     class SaleStatus(models.TextChoices):
+#         PENDING = "pending", _("Pending")
+#         CONFIRMED = "confirmed", _("Confirmed")
+#         CANCELLED = "cancelled", _("Cancelled")
+#     buyer = models.ForeignKey(
+#        settings.AUTH_USER_MODEL,
+#         on_delete=models.CASCADE
+#     )
 
-    sale_date = models.DateField(
-        auto_now_add=True,
-        verbose_name=_("Sale Date"),
-    )
+#     sale_date = models.DateField(
+#         auto_now_add=True,
+#         verbose_name=_("Sale Date"),
+#     )
 
-    total_price = models.DecimalField(
-        max_digits=12,
-        decimal_places=2,
-        verbose_name=_("Total Sale Price"),
-    )
+#     total_price = models.DecimalField(
+#         max_digits=12,
+#         decimal_places=2,
+#         verbose_name=_("Total Sale Price"),
+#     )
 
-    status = models.CharField(
-        max_length=20, choices=SaleStatus.choices, default=SaleStatus.PENDING
-    )
+#     status = models.CharField(
+#         max_length=20, choices=SaleStatus.choices, default=SaleStatus.PENDING
+#     )
 
-    class Meta:
-        verbose_name = _("Car Sale")
-        verbose_name_plural = _("Car Sales")
+#     class Meta:
+#         verbose_name = _("Car Sale")
+#         verbose_name_plural = _("Car Sales")
     
-    def __str__(self):
-        return f"Sale to {self.buyer} on {self.sale_date}"
-class CarSaleItem(AbstractBaseModel):
-    car_sale = models.ForeignKey(
-        CarSale,
-        on_delete=models.CASCADE,
-        related_name="sale_items",
-        verbose_name=_("Car Sale"),
-    )
+#     def __str__(self):
+#         return f"Sale to {self.buyer} on {self.sale_date}"
+# class CarSaleItem(AbstractBaseModel):
+#     car_sale = models.ForeignKey(
+#         CarSale,
+#         on_delete=models.CASCADE,
+#         related_name="sale_items",
+#         verbose_name=_("Car Sale"),
+#     )
 
+#     car_listing = models.ForeignKey(
+#         CarListing,
+#         on_delete=models.CASCADE,
+#         related_name="sale_items",
+#         verbose_name=_("Car Listing"),
+#     )
+#     units_sale = models.PositiveIntegerField(
+#         default=1,
+#         verbose_name=_("Quantity"),
+#         help_text=_("Number of cars being sold.")
+#     )
+#     price_per_unit=models.DecimalField(max_digits=10, decimal_places=2)
+#     class Meta:
+#         verbose_name = _("Car Sale Item")
+#         verbose_name_plural = _("Car Sale Items")
+#     def subtotal(self):
+#         return self.units_sale * self.price_per_unit
+
+#     def __str__(self) -> str:
+#         return f"Car {self.car_listing} sell for {self.car_sale.sale_date}"
+# models.py
+class CarAvailability(AbstractBaseModel):
+    class CarAvailabilityType(models.TextChoices):
+        RENT = "rent", _("For Rent")
+        SALE = "sale", _("For Sale")
+    
     car_listing = models.ForeignKey(
         CarListing,
         on_delete=models.CASCADE,
-        related_name="sale_items",
+        related_name="availabilities",
         verbose_name=_("Car Listing"),
     )
-    units_sale = models.PositiveIntegerField(
-        default=1,
-        verbose_name=_("Quantity"),
-        help_text=_("Number of cars being sold.")
+    
+    availability_type = models.CharField(
+        max_length=20,
+        choices=CarAvailabilityType.choices,
+        verbose_name=_("Availability Type"),
+        default=CarAvailabilityType.RENT
     )
-    price_per_unit=models.DecimalField(max_digits=10, decimal_places=2)
+    
+    is_available = models.BooleanField(
+        default=True,
+        verbose_name=_("Is Available"),
+        help_text=_("Whether the car is currently available for booking/purchase"),
+    )
+    
+    available_from = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Available From"),
+        help_text=_("Date from which the car is available (for rentals)"),
+    )
+    
+    available_to = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Available To"),
+        help_text=_("Date until which the car is available (for rentals)"),
+    )
+    
+    quantity_available = models.PositiveIntegerField(
+        default=1,
+        verbose_name=_("Quantity Available"),
+        help_text=_("Number of units available for sale/rent"),
+    )
+    
     class Meta:
-        verbose_name = _("Car Sale Item")
-        verbose_name_plural = _("Car Sale Items")
-    def subtotal(self):
-        return self.units_sale * self.price_per_unit
-
-    def __str__(self) -> str:
-        return f"Car {self.car_listing} sell for {self.car_sale.sale_date}"
+        verbose_name = _("Availability")
+        verbose_name_plural = _("Availabilities")
+        db_table = "availabilities"
+        indexes = [
+            models.Index(fields=['car_listing', 'availability_type', 'is_available']),
+            models.Index(fields=['available_from', 'available_to']),
+        ]
+    
+    def __str__(self):
+        return f"{self.car_listing} - {self.availability_type} - {'Available' if self.is_available else 'Not Available'}"
 class PropertyListing(BaseListing):
     class PropertyTypeChoices(models.TextChoices):
         APARTMENT = "apartment", _("Apartment")

@@ -2,6 +2,11 @@ from datetime import date, timedelta, datetime
 from django.db import transaction
 from django.db.models import Count, F, Min
 from django.shortcuts import get_object_or_404
+from django.db import transaction
+from django.utils import timezone
+from datetime import datetime, timedelta
+from typing import Dict, Optional, Tuple,Any,List
+from decimal import Decimal
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.account.services import ImageCreationService
 from apps.core.models import Address
@@ -14,7 +19,10 @@ from apps.listing.models import (
     PropertyListing,
     RoomListing,
     StayAvailability,
-    Transaction,
+    Transaction,CarAvailability,
+    CarListing,
+    CarRental,
+    CarRentalItem,
 )
 
 
@@ -542,3 +550,230 @@ class PaymentService:
         else:
             # TODO: Find a way to handle retry logic
             BookingService.cancel_booking(booking)
+class CarAvailabilityService:
+    @staticmethod
+    def create_availability_for_car_listing(car_listing: 'CarListing') -> 'CarAvailability':
+        """
+        Create availability record when a CarListing is created
+        """
+        with transaction.atomic():
+            availability_type = (
+                CarAvailability.CarAvailabilityType.RENT  
+                if car_listing.listing_type == CarListing.ListingTypeChoices.RENT
+                else CarAvailability.CarAvailabilityType.SALE
+            )
+            
+            availability = CarAvailability.objects.create(
+                car_listing=car_listing,
+                availability_type=availability_type,
+                is_available=True,
+                quantity_available=car_listing.quantity 
+            )
+            if availability_type == CarAvailability.CarAvailabilityType.RENT:
+                availability.available_from = timezone.now()
+                availability.available_to = timezone.now() + timedelta(days=30)
+                availability.save()
+            
+            return availability
+
+    @staticmethod
+    def check_availability_for_rent(
+        car_listing: 'CarListing',
+        start_date: datetime.date, 
+        end_date: datetime.date,   
+        quantity: int,
+    ) -> Dict[str, Any]:
+        """
+        Check if a car is available for rent during the specified period.
+        Returns a dictionary for JSON response compatibility.
+        """
+        try:
+            availability = CarAvailability.objects.get(
+                car_listing=car_listing,
+                availability_type=CarAvailability.CarAvailabilityType.RENT,
+                is_available=True
+            )
+            
+            # Check if the requested period is within availability period
+            if availability.available_from and availability.available_to:
+                if start_date < availability.available_from.date() or end_date > availability.available_to.date():
+                    return {"available": False, "reason": "Requested period is outside the listing's defined availability range."}
+            
+            # Check quantity
+            if availability.quantity_available < quantity:
+                return {"available": False, "reason": f"Only {availability.quantity_available} units available for this listing.", "available_units": availability.quantity_available}
+            
+            # Check for existing rentals that overlap with requested period
+            overlapping_rentals = CarRentalItem.objects.filter(
+                car_listing=car_listing,
+                car_rental__start_date__lte=end_date,
+                car_rental__end_date__gte=start_date,
+                car_rental__status__in=[CarRental.RentStatus.PENDING, CarRental.RentStatus.CONFIRMED]
+            )
+            
+            total_rented_units = sum(rental.units_rent for rental in overlapping_rentals)
+            available_units = availability.quantity_available - total_rented_units
+            
+            if available_units < quantity:
+                return {"available": False, "reason": f"Not enough units available for the requested period. Only {available_units} units are free due to existing bookings.", "available_units_on_period": available_units}
+            
+            return {"available": True, "reason": "Available", "available_units_on_period": available_units}
+            
+        except CarAvailability.DoesNotExist:
+            return {"available": False, "reason": "Car is not available for rent (no availability record found)."}
+
+    @staticmethod
+    def update_availability_after_rental(
+        car_listing: 'CarListing',
+        rental: 'CarRental' = None,
+        rental_item: 'CarRentalItem' = None,
+        action: str = "create"  # "create", "confirm", "cancel"
+    ) -> Dict[str, Any]:
+        """
+        Update availability after a rental operation (create, confirm, cancel).
+        Automatically manages availability dates and status.
+        """
+        try:
+            with transaction.atomic():
+                availability = CarAvailability.objects.select_for_update().get(
+                    car_listing=car_listing,
+                    availability_type=CarAvailability.CarAvailabilityType.RENT
+                )
+                
+                if action == "create" or action == "confirm":
+                    # When a rental is created or confirmed
+                    if rental_item:
+                        # Decrement available quantity
+                        if availability.quantity_available >= rental_item.units_rent:
+                            availability.quantity_available = F('quantity_available') - rental_item.units_rent
+                            
+                            # Update availability dates to extend the availability window
+                            # Make car available again after the rental ends + buffer period
+                            if rental:
+                                new_available_from = rental.end_date + timedelta(days=1)  # Available from day after rental ends
+                                new_available_to = new_available_from + timedelta(days=30)  # Available for next 30 days
+                                
+                                # Only update if the new dates are in the future or extend the current window
+                                if not availability.available_to or new_available_from > availability.available_to:
+                                    availability.available_from = new_available_from
+                                    availability.available_to = new_available_to
+                            
+                            # If no units left, mark as unavailable temporarily
+                            if availability.quantity_available - rental_item.units_rent <= 0:
+                                availability.is_available = False
+                            
+                            availability.save()
+                            availability.refresh_from_db()
+                            
+                            return {
+                                "success": True, 
+                                "action": "availability_updated",
+                                "new_quantity": availability.quantity_available,
+                                "available_from": availability.available_from,
+                                "available_to": availability.available_to,
+                                "is_available": availability.is_available,
+                                "message": "Availability updated for new rental"
+                            }
+                        else:
+                            return {
+                                "success": False, 
+                                "action": action, 
+                                "error": f"Failed to update availability. Requested units ({rental_item.units_rent}) exceed current available quantity ({availability.quantity_available})."
+                            }
+
+                elif action == "cancel":
+                    # When a rental is cancelled
+                    if rental_item:
+                        # Increment available quantity
+                        max_quantity = car_listing.quantity
+                        
+                        if availability.quantity_available + rental_item.units_rent <= max_quantity:
+                            availability.quantity_available = F('quantity_available') + rental_item.units_rent
+                            
+                            # If units become available again, mark as available
+                            if availability.quantity_available + rental_item.units_rent > 0:
+                                availability.is_available = True
+                            
+                            # Recalculate availability dates based on remaining rentals
+                            CarAvailabilityService._recalculate_availability_dates(availability, car_listing)
+                            
+                            availability.save()
+                            availability.refresh_from_db()
+                            
+                            return {
+                                "success": True, 
+                                "action": "availability_restored",
+                                "new_quantity": availability.quantity_available,
+                                "available_from": availability.available_from,
+                                "available_to": availability.available_to,
+                                "is_available": availability.is_available,
+                                "message": "Availability restored after rental cancellation"
+                            }
+                        else:
+                            return {
+                                "success": False, 
+                                "action": "cancel", 
+                                "error": f"Failed to restore availability. New quantity would exceed maximum inventory ({max_quantity})."
+                            }
+                
+                return {"success": False, "action": action, "error": "Invalid action specified."}
+
+        except CarAvailability.DoesNotExist:
+            return {"success": False, "action": action, "error": f"CarAvailability record not found for CarListing ID: {car_listing.id}."}
+
+    @staticmethod
+    def _recalculate_availability_dates(availability: 'CarAvailability', car_listing: 'CarListing'):
+        """
+        Recalculate availability dates based on current and future rentals
+        """
+        # Get all confirmed and pending rentals for this car
+        active_rentals = CarRental.objects.filter(
+            rental_items__car_listing=car_listing,
+            status__in=[CarRental.RentStatus.CONFIRMED, CarRental.RentStatus.PENDING]
+        ).order_by('end_date')
+        
+        if active_rentals.exists():
+            # Find the latest rental end date
+            latest_rental_end = active_rentals.last().end_date
+            
+            # Set availability to start from day after the latest rental ends
+            availability.available_from = latest_rental_end + timedelta(days=1)
+            availability.available_to = availability.available_from + timedelta(days=30)
+        else:
+            # No active rentals, make available immediately
+            availability.available_from = timezone.now()
+            availability.available_to = timezone.now() + timedelta(days=30)
+
+    @staticmethod
+    def get_available_cars_for_rent(
+        start_date: datetime.date,
+        end_date: datetime.date,
+        brand: Optional[str] = None,
+        car_class: Optional[str] = None
+    ) -> List['CarListing']:
+        """
+        Get all cars available for rent in the specified period.
+        """
+        available_cars = []
+        
+        car_listings = CarListing.objects.filter(
+            listing_type=CarListing.ListingTypeChoices.RENT,
+        )
+        
+        if brand:
+            car_listings = car_listings.filter(brand=brand)
+        if car_class:
+            car_listings = car_listings.filter(car_class=car_class)
+        
+        for car in car_listings:
+            availability_check = CarAvailabilityService.check_availability_for_rent(
+                car_listing=car, 
+                start_date=start_date, 
+                end_date=end_date,
+                quantity=1
+            )
+            
+            if availability_check.get("available"):
+                available_cars.append(car)
+        
+        return available_cars
