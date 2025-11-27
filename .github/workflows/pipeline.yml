@@ -25,11 +25,26 @@ jobs:
                   python -m pip install --upgrade pip uv
                   uv sync
                   source .venv/bin/activate
-            - name: Lint & format
+            - name: Install Ruff
+              run: python -m pip install ruff
+
+            - name: Apply Linting Fixes
+              id: lint_fix
               run: |
-                  source .venv/bin/activate
-                  ruff check .
-                  ruff format --check .
+                  # Running ruff check with --fix-only to apply fixes for all fixable rules
+                  # The output shows the number of fixes applied
+                  FIXES_APPLIED=$(ruff check . --fix-only --exit-code 0 | wc -l)
+                  echo "fixes_applied=$FIXES_APPLIED" >> $GITHUB_OUTPUT
+
+            - name: Check Formatting
+              run: ruff format --check .
+
+            - name: Commit Linting Fixes
+              if: steps.lint_fix.outputs.fixes_applied > 0
+              uses: stefanprodan/git-ensure-up-to-date@v1
+              with:
+                token: ${{ secrets.GITHUB_TOKEN }}
+                commit_message: "style: Apply automated linting fixes from CI"
 
             # - name: Run tests
             #   run: |

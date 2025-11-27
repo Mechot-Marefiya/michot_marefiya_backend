@@ -10,6 +10,7 @@ from rest_framework import status,filters
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
+from rest_framework import serializers
 from rest_framework.response import Response
 from django.db import transaction
 from django_filters.rest_framework import DjangoFilterBackend
@@ -27,6 +28,7 @@ from apps.listing.models import (
     RoomListing,
     Booking,StayAvailability,
     BookingItem,
+    CarRentalItem,
     CarAvailability
 )
 from apps.account.models import(CompanyProfile,IndividualOwnerProfile)
@@ -49,7 +51,7 @@ from apps.listing.serializers import (
     CarRentalSerializer,
     CarRental,
 )
-from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService
+from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService,PriceService
 @extend_schema(responses=RoomListingResponseSerializer)
 class RoomListingViewSet(AbstractModelViewSet):
     permission_classes = [IsAuthenticatedOrReadOnly]
