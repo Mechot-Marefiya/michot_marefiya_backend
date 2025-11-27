@@ -828,14 +828,10 @@ class SearchResultSerializer(serializers.Serializer):
 class StayAvailabilityUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = StayAvailability
-        fields = ["hotel_id", "room_id", "date", "available_rooms"]
+        fields = [ "available_rooms"]
 
     def validate_available_rooms(self, value):
         if value < 0:
             raise serializers.ValidationError("available_rooms must be non-negative.")
         return value
 
-    def validate_date(self, value):
-         if value < date.today():
-             raise serializers.ValidationError("Date cannot be in the past.")
-         return value
