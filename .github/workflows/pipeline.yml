@@ -31,8 +31,7 @@ jobs:
             - name: Apply Linting Fixes
               id: lint_fix
               run: |
-                  # Running ruff check with --fix-only to apply fixes for all fixable rules
-                  # The output shows the number of fixes applied
+                  # ... (Ruff fix logic remains the same)
                   FIXES_APPLIED=$(ruff check . --fix-only --exit-code 0 | wc -l)
                   echo "fixes_applied=$FIXES_APPLIED" >> $GITHUB_OUTPUT
 
@@ -41,9 +40,9 @@ jobs:
 
             - name: Commit Linting Fixes
               if: steps.lint_fix.outputs.fixes_applied > 0
-              uses: stefanprodan/git-ensure-up-to-date@v1
+              # 🚨 CHANGE THE ACTION NAME HERE 🚨
+              uses: stefanzweifel/git-auto-commit-action@v5
               with:
-                token: ${{ secrets.GITHUB_TOKEN }}
                 commit_message: "style: Apply automated linting fixes from CI"
 
             # - name: Run tests
