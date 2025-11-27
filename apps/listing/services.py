@@ -1,6 +1,7 @@
 from datetime import date, timedelta, datetime
+from django.conf import settings
 from django.db import transaction
-from django.db.models import Count, F, Min
+from django.db.models import Count, F, Min, Q
 from django.shortcuts import get_object_or_404
 from django.db import transaction
 from django.utils import timezone
@@ -20,6 +21,7 @@ from apps.listing.models import (
     RoomListing,
     StayAvailability,
     Transaction,CarAvailability,
+    Season, SeasonalRate, BookingItemPrice, RoomInventory,
     CarListing,
     CarRental,
     CarRentalItem,

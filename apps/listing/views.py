@@ -1,5 +1,6 @@
 
 from django.utils.dateparse import parse_date
+from django.conf import settings
 from django.db.models import Q, Count, Avg, Sum
 from django.utils import timezone
 from datetime import datetime, timedelta
