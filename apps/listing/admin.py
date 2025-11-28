@@ -48,7 +48,10 @@ class RoomListingAdmin(admin.ModelAdmin):
 # admin.site.register(EventSpaceListing)
 admin.site.register(Booking)
 admin.site.register(BookingItem)
-admin.site.register(CarListing)
+@admin.register(CarListing)
+class CarListingModelAdmin(admin.ModelAdmin):
+    list_display = ["brand", "company"]
+    inlines = [ListingImageInline]
 # admin.site.register(PropertyListing)
 admin.site.register(GuestHouseListing)
 admin.site.register(Amenity)
