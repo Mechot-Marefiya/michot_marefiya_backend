@@ -35,6 +35,8 @@ from apps.account.serializers import (
     UserSerializer,
     CompanyProfileSerializer,
     UserResponseSerializer,
+    UserUpdateSerializer,
+    ChangePasswordSerializer,
 )
 from apps.account.enums import RoleCode
 from rest_framework.decorators import api_view, permission_classes
@@ -110,23 +112,28 @@ class MeView(APIView):
 
 
 class UserViewSet(AbstractModelViewSet):
-    serializer_class = UserSerializer
     queryset = User.objects.all()
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return UserSerializer
+        elif self.action in ['update', 'partial_update']:
+            return UserUpdateSerializer
+        elif self.action == 'change_password':
+            return ChangePasswordSerializer
+        return UserResponseSerializer
 
     def get_permissions(self):
         if self.action == 'create':
             return [AllowAny()]
         elif self.action in ['list', 'retrieve']:
             return [IsAuthenticated()]
+        elif self.action in ['me', 'change_password']:
+            return [IsAuthenticated()]
         else:
             return [IsOwnerOrReadOnly()]
 
     def get_queryset(self):
-        """
-        This is for Filtering queryset based on the user's role:
-        - Regular & Company users: See only their own profile
-        - Admin: See all users
-        """
         queryset = super().get_queryset()
         
         if not self.request.user or not self.request.user.is_authenticated:
@@ -158,17 +165,69 @@ class UserViewSet(AbstractModelViewSet):
 
         return Response({"detail": "Not allowed to delete this user."}, status=status.HTTP_403_FORBIDDEN)
 
+    @action(detail=False, methods=['get', 'patch', 'put', 'delete'], url_path='me')
+    def me(self, request):
+        if request.method == 'GET':
+            serializer = UserResponseSerializer(request.user, context=self.get_serializer_context())
+            return Response(serializer.data)
+        
+        if request.method == 'DELETE':
+            try:
+                request.user.delete()
+                return Response(status=status.HTTP_204_NO_CONTENT)
+            except Exception as e:
+                return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        
+        serializer = UserUpdateSerializer(
+            request.user,
+            data=request.data,
+            partial=request.method == 'PATCH',
+            context=self.get_serializer_context()
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
+    @action(detail=False, methods=['post'], url_path='me/change-password')
+    def change_password(self, request):
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={'user': request.user, 'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"detail": "Password changed successfully."}, status=status.HTTP_200_OK)
 
-@api_view(['DELETE'])
-@permission_classes([IsAuthenticated])
-def delete_me(request):
-    try:
-        user = request.user
-        user.delete()
-        return Response(status=status.HTTP_204_NO_CONTENT)
-    except Exception as e:
-        return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    @action(detail=True, methods=['post'], url_path='change-password')
+    def change_password_for_user(self, request, pk=None):
+        instance = self.get_object()
+        
+        is_admin = request.user.is_superuser or (
+            hasattr(request.user, 'role') and
+            request.user.role and
+            request.user.role.code == RoleCode.ADMIN.value
+        )
+        
+        if not is_admin:
+            if request.user != instance:
+                return Response(
+                    {"detail": "You can only change your own password."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
+        skip_current_check = is_admin and request.user != instance
+        
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={
+                'user': instance,
+                'request': request,
+                'skip_current_password_check': skip_current_check
+            }
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"detail": "Password changed successfully."}, status=status.HTTP_200_OK)
 
 
 @extend_schema(responses=CompanyProfileResponseSerializer)
@@ -185,7 +244,6 @@ class CompanyProfileViewSet(AbstractModelViewSet):
             return [IsCompanyOwner()]
 
     def get_queryset(self):
-        # Everyone can see all company profiles (public data)
         return super().get_queryset()
 
 
@@ -203,7 +261,6 @@ class IndividualOwnerProfileViewSet(AbstractModelViewSet):
             return [IsAdmin()]
 
     def get_queryset(self):
-        # Everyone can see all individual owner profiles (public data)
         return super().get_queryset()
 
 
@@ -223,7 +280,6 @@ class HotelProfileViewSet(AbstractModelViewSet):
             return [IsCompanyOwner()]
 
     def get_queryset(self):
-        # Everyone can see all hotel profiles (public data)
         return super().get_queryset()
 
     @check__room_availability_schema

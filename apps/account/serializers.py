@@ -132,6 +132,99 @@ class UserResponseSerializer(serializers.ModelSerializer):
     role = RoleSerializer(read_only=True)
 
 
+class UserUpdateSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ["email", "first_name", "last_name"]
+        extra_kwargs = {
+            "email": {"required": False},
+            "first_name": {"required": False},
+            "last_name": {"required": False},
+        }
+
+    def validate_email(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("Email cannot be empty.")
+        
+        value = value.strip().lower()
+        
+        if self.instance:
+            if User.objects.filter(email=value).exclude(id=self.instance.id).exists():
+                raise serializers.ValidationError("A user with this email already exists.")
+        else:
+            if User.objects.filter(email=value).exists():
+                raise serializers.ValidationError("A user with this email already exists.")
+        return value
+
+    def update(self, instance, validated_data):
+        if 'email' in validated_data:
+            validated_data['email'] = validated_data['email'].strip().lower()
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        return instance
+
+    def to_representation(self, instance):
+        return UserResponseSerializer(instance, self.context).to_representation(instance)
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    current_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    new_password = serializers.CharField(write_only=True, required=True)
+    confirm_password = serializers.CharField(write_only=True, required=True)
+
+    def validate_current_password(self, value):
+        user = self.context.get("user")
+        request = self.context.get("request")
+        skip_verification = self.context.get("skip_current_password_check", False)
+        
+        if skip_verification:
+            return value
+        
+        if not value:
+            raise serializers.ValidationError("Current password is required.")
+        
+        if user and not user.check_password(value):
+            raise serializers.ValidationError("Current password is incorrect.")
+        return value
+
+    def validate(self, attrs):
+        new_password = attrs.get("new_password")
+        confirm_password = attrs.get("confirm_password")
+        current_password = attrs.get("current_password")
+
+        if new_password != confirm_password:
+            raise serializers.ValidationError({"new_password": "New passwords do not match."})
+
+        if current_password and new_password == current_password:
+            raise serializers.ValidationError(
+                {"new_password": "New password must be different from current password."}
+            )
+
+        if len(new_password) < 8:
+            raise serializers.ValidationError(
+                {"new_password": "Password must be at least 8 characters long."}
+            )
+
+        if not any(char.isdigit() for char in new_password):
+            raise serializers.ValidationError(
+                {"new_password": "Password must contain at least one digit."}
+            )
+
+        if not any(char.isalpha() for char in new_password):
+            raise serializers.ValidationError(
+                {"new_password": "Password must contain at least one letter."}
+            )
+
+        return attrs
+
+    def save(self):
+        user = self.context.get("user")
+        user.set_password(self.validated_data["new_password"])
+        user.save()
+        return user
+
+
 class CompanyProfileResponseSerializer(serializers.ModelSerializer):
     address = AddressSerializer()
 

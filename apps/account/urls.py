@@ -3,10 +3,8 @@ from apps.account.views import (
     HotelProfileViewSet,
     IndividualOwnerProfileViewSet,
     UserViewSet,
-    delete_me,
     CompanyProfileViewSet,
 )
-from django.urls import path
 
 router = DefaultRouter()
 
@@ -16,6 +14,4 @@ router.register("hotels", HotelProfileViewSet, basename="hotels")
 router.register("individual-owners", IndividualOwnerProfileViewSet, "individual_owners")
 
 
-urlpatterns = router.urls + [
-    path('users/me/', delete_me, name='user-delete-me'),
-]
+urlpatterns = router.urls
