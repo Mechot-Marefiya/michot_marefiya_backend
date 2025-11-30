@@ -38,8 +38,14 @@ from apps.account.serializers import (
 )
 from apps.account.enums import RoleCode
 from rest_framework.decorators import api_view, permission_classes
-from rest_framework.permissions import IsAuthenticated
-from apps.account.permissions import IsAuthenticatedOrReadOnly, IsOwnerOrReadOnly
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from apps.account.permissions import (
+    IsAuthenticatedOrReadOnly,
+    IsOwnerOrReadOnly,
+    IsAdmin,
+    IsCompanyOwner,
+    IsPublicReadOnly,
+)
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -104,14 +110,36 @@ class MeView(APIView):
 
 
 class UserViewSet(AbstractModelViewSet):
-    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = UserSerializer
     queryset = User.objects.all()
 
     def get_permissions(self):
         if self.action == 'create':
             return [AllowAny()]
-        return super().get_permissions()
+        elif self.action in ['list', 'retrieve']:
+            return [IsAuthenticated()]
+        else:
+            return [IsOwnerOrReadOnly()]
+
+    def get_queryset(self):
+        """
+        This is for Filtering queryset based on the user's role:
+        - Regular & Company users: See only their own profile
+        - Admin: See all users
+        """
+        queryset = super().get_queryset()
+        
+        if not self.request.user or not self.request.user.is_authenticated:
+            return queryset.none()
+        
+        if self.request.user.is_superuser or (
+            hasattr(self.request.user, 'role') and
+            self.request.user.role and
+            self.request.user.role.code == RoleCode.ADMIN.value
+        ):
+            return queryset
+        
+        return queryset.filter(id=self.request.user.id)
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -120,12 +148,11 @@ class UserViewSet(AbstractModelViewSet):
             self.perform_destroy(instance)
             return Response(status=status.HTTP_204_NO_CONTENT)
 
-        try:
-            user_role_code = getattr(request.user.role, 'code', None)
-        except Exception:
-            user_role_code = None
-
-        if request.user and request.user.is_authenticated and (request.user.is_superuser or user_role_code == RoleCode.ADMIN.value):
+        if request.user.is_superuser or (
+            hasattr(request.user, 'role') and
+            request.user.role and
+            request.user.role.code == RoleCode.ADMIN.value
+        ):
             self.perform_destroy(instance)
             return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -146,31 +173,42 @@ def delete_me(request):
 
 @extend_schema(responses=CompanyProfileResponseSerializer)
 class CompanyProfileViewSet(AbstractModelViewSet):
-    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = CompanyProfileSerializer
     queryset = CompanyProfile.objects.all()
 
     def get_permissions(self):
         if self.action == 'create':
             return [AllowAny()]
-        return super().get_permissions()
+        elif self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        else:
+            return [IsCompanyOwner()]
+
+    def get_queryset(self):
+        # Everyone can see all company profiles (public data)
+        return super().get_queryset()
 
 
 @extend_schema(responses=IndividualOwnerProfileResponseSerializer)
 class IndividualOwnerProfileViewSet(AbstractModelViewSet):
-    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = IndividualOwnerProfileSerializer
     queryset = IndividualOwnerProfile.objects.all()
 
     def get_permissions(self):
         if self.action == 'create':
+            return [IsAdmin()]
+        elif self.action in ['list', 'retrieve']:
             return [AllowAny()]
-        return super().get_permissions()
+        else:
+            return [IsAdmin()]
+
+    def get_queryset(self):
+        # Everyone can see all individual owner profiles (public data)
+        return super().get_queryset()
 
 
 @extend_schema(responses=HotelProfileDocSerializer)
 class HotelProfileViewSet(AbstractModelViewSet):
-    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = HotelProfileSerializer
     queryset = HotelProfile.objects.all()
     filter_backends = [DjangoFilterBackend]
@@ -179,7 +217,14 @@ class HotelProfileViewSet(AbstractModelViewSet):
     def get_permissions(self):
         if self.action == 'create':
             return [AllowAny()]
-        return super().get_permissions()
+        elif self.action in ['list', 'retrieve', 'check_availability', 'get_featured_hotels']:
+            return [AllowAny()]
+        else:
+            return [IsCompanyOwner()]
+
+    def get_queryset(self):
+        # Everyone can see all hotel profiles (public data)
+        return super().get_queryset()
 
     @check__room_availability_schema
     @action(
@@ -245,12 +290,9 @@ class HotelProfileViewSet(AbstractModelViewSet):
         detail=False,
         methods=["get"],
         serializer_class=HotelProfileSerializer,
-        url_path='featured',  # Custom endpoint path
+        url_path='featured',
     )
     def get_featured_hotels(self, request):
-        """
-        Get only featured hotel profiles.
-        """
         featured_hotels = HotelProfile.objects.filter(featured=True)
         serializer = self.get_serializer(featured_hotels, many=True)
         return Response(serializer.data)

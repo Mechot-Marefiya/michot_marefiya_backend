@@ -10,6 +10,7 @@ from rest_framework import status,filters
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import action
 from rest_framework.exceptions import NotFound
+from rest_framework import serializers
 from rest_framework.response import Response
 from django.db import transaction
 from django_filters.rest_framework import DjangoFilterBackend
@@ -18,7 +19,16 @@ from apps.account.serializers import HotelProfileResponseSerializer
 from apps.listing.docs.schema import search_schema
 from apps.core.views import AbstractModelViewSet
 from apps.listing.filters import PropertyFilter, RoomFilter, BookingFilter
-from apps.account.permissions import IsAuthenticatedOrReadOnly, IsAuthenticatedOrReadOnly
+from apps.account.permissions import (
+    IsAuthenticatedOrReadOnly,
+    IsPublicReadOnly,
+    IsAdmin,
+    IsListingOwner,
+    IsBookingOwner,
+    IsCarRentalOwner,
+    CanModifyBooking,
+)
+from apps.account.enums import RoleCode
 from apps.listing.models import (
     Amenity,
     CarListing,
@@ -27,6 +37,7 @@ from apps.listing.models import (
     RoomListing,
     Booking,StayAvailability,
     BookingItem,
+    CarRentalItem,
     CarAvailability
 )
 from apps.account.models import(CompanyProfile,IndividualOwnerProfile)
@@ -49,14 +60,57 @@ from apps.listing.serializers import (
     CarRentalSerializer,
     CarRental,
 )
-from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService
+from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService,PriceService
 @extend_schema(responses=RoomListingResponseSerializer)
 class RoomListingViewSet(AbstractModelViewSet):
-    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = RoomListingSerializer
     queryset = RoomListing.objects.all()
     filter_backends = [DjangoFilterBackend]
     filterset_class = RoomFilter
+
+    def get_permissions(self):
+        """
+        - CREATE: Company users can create rooms for their hotels, admin can create all
+        - READ: Public (all can read)
+        - UPDATE/DELETE: Company can modify own rooms, admin can modify all
+        """
+        if self.action == 'create':
+            return [IsAuthenticated()]
+        elif self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        else:
+            return [IsListingOwner()]
+
+    def get_queryset(self):
+        """
+        Filter queryset based on user role:
+        - Public/Users: See all active rooms
+        - Company users: See all rooms (for their own, can modify)
+        - Admin: See all rooms
+        """
+        queryset = super().get_queryset()
+        
+        # If user is not authenticated, show only active listings
+        if not self.request.user or not self.request.user.is_authenticated:
+            return queryset.filter(is_active=True)
+        
+        # Admin sees all
+        if self.request.user.is_superuser or (
+            hasattr(self.request.user, 'role') and
+            self.request.user.role and
+            self.request.user.role.code == RoleCode.ADMIN.value
+        ):
+            return queryset
+        
+        # For companies, show all but they can only modify their own (enforced by permission)
+        # For regular users, show only active
+        if hasattr(self.request.user, 'role') and self.request.user.role:
+            if self.request.user.role.code == RoleCode.COMPANY.value:
+                return queryset  # Companies see all for reference
+            else:
+                return queryset.filter(is_active=True)
+        
+        return queryset.filter(is_active=True)
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -158,9 +212,41 @@ class RoomListingViewSet(AbstractModelViewSet):
 
 @extend_schema(responses=GuestHouseListingResponseSerializer)
 class GuestHouseListingViewSet(AbstractModelViewSet):
-    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = GuestHouseListingSerializer
     queryset = GuestHouseListing.objects.all()
+
+    def get_permissions(self):
+        """
+        - CREATE: Company users can create guest houses, admin can create all
+        - READ: Public (all can read)
+        - UPDATE/DELETE: Company can modify own guest houses, admin can modify all
+        """
+        if self.action == 'create':
+            return [IsAuthenticated()]
+        elif self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        else:
+            return [IsListingOwner()]
+
+    def get_queryset(self):
+        """Filter queryset - show all active to public, all to companies/admin."""
+        queryset = super().get_queryset()
+        
+        if not self.request.user or not self.request.user.is_authenticated:
+            return queryset.filter(is_active=True)
+        
+        if self.request.user.is_superuser or (
+            hasattr(self.request.user, 'role') and
+            self.request.user.role and
+            self.request.user.role.code == RoleCode.ADMIN.value
+        ):
+            return queryset
+        
+        if hasattr(self.request.user, 'role') and self.request.user.role:
+            if self.request.user.role.code == RoleCode.COMPANY.value:
+                return queryset
+        
+        return queryset.filter(is_active=True)
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -181,7 +267,6 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
 # views.py
 @extend_schema(responses=CarListingResponseSerializer)
 class CarListingViewSet(AbstractModelViewSet):
-    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = CarListingSerializer
     queryset = CarListing.objects.all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
@@ -193,6 +278,22 @@ class CarListingViewSet(AbstractModelViewSet):
     ordering_fields = ['base_price', 'year', 'mileage', 'created_at']
     ordering = ['-created_at']
     
+    def get_permissions(self):
+        """
+        - CREATE: Company users can create cars for their company, admin can create all
+        - READ: Public (all can read)
+        - UPDATE/DELETE: Company can modify own cars, admin can modify all
+        - Special actions: check_availability, available_for_rent, search, my_listings are public read
+        """
+        if self.action == 'create':
+            return [IsAuthenticated()]
+        elif self.action in ['list', 'retrieve', 'check_availability', 'available_for_rent', 'search']:
+            return [AllowAny()]
+        elif self.action == 'my_listings':
+            return [IsAuthenticated()]
+        else:
+            return [IsListingOwner()]
+    
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
             return CarListingSerializer
@@ -201,9 +302,25 @@ class CarListingViewSet(AbstractModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         
-        # Filter by active listings for non-staff users
-        if not self.request.user.is_staff:
-            queryset = queryset.filter(is_active=True)
+        # If not authenticated, show only active listings
+        if not self.request.user or not self.request.user.is_authenticated:
+            return queryset.filter(is_active=True)
+        
+        # Admin sees all
+        if self.request.user.is_superuser or (
+            hasattr(self.request.user, 'role') and
+            self.request.user.role and
+            self.request.user.role.code == RoleCode.ADMIN.value
+        ):
+            return queryset
+        
+        # For companies, show all (they can only modify their own via permission)
+        if hasattr(self.request.user, 'role') and self.request.user.role:
+            if self.request.user.role.code == RoleCode.COMPANY.value:
+                return queryset
+        
+        # Regular users see only active
+        return queryset.filter(is_active=True)
         
         # Additional filters
         min_year = self.request.query_params.get('min_year')
@@ -418,7 +535,9 @@ class CarListingViewSet(AbstractModelViewSet):
     @action(detail=False, methods=['get'])
     def my_listings(self, request):
         """
-        Get current user's car listings
+        Get current user's car listings.
+        Companies see their own car listings.
+        Admin sees all (will be filtered by get_queryset).
         """
         if not request.user.is_authenticated:
             return Response(
@@ -428,18 +547,21 @@ class CarListingViewSet(AbstractModelViewSet):
         
         user = request.user
         
-        # Get listings where user is individual owner
-        individual_listings = CarListing.objects.filter(
-            individual_owner__user=user
-        )
+        # Admin sees all (will be filtered by get_queryset)
+        if user.is_superuser or (
+            hasattr(user, 'role') and
+            user.role and
+            user.role.code == RoleCode.ADMIN.value
+        ):
+            queryset = self.get_queryset()
+        else:
+            # Get listings where user is company owner
+            # Individual owners don't have user accounts, only admin can manage them
+            company_listings = CarListing.objects.filter(
+                company__user=user
+            )
+            queryset = company_listings
         
-        # Get listings where user is company owner
-        company_listings = CarListing.objects.filter(
-            company__user=user
-        )
-        
-        # Combine querysets
-        queryset = individual_listings | company_listings
         queryset = queryset.distinct()
         
         page = self.paginate_queryset(queryset)
@@ -451,20 +573,69 @@ class CarListingViewSet(AbstractModelViewSet):
         return Response(serializer.data)
 @extend_schema(responses=CarRentalSerializer)
 class CarRentalViewSet(AbstractModelViewSet):
-    permission_classes = [IsAuthenticated]
     serializer_class = CarRentalSerializer
     queryset = CarRental.objects.all()
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['status']
     ordering_fields = ['start_date', 'end_date', 'total_price', 'created_at']
     ordering = ['-created_at']
+
+    def get_permissions(self):
+        """
+        - CREATE: Authenticated users can create rentals
+        - READ: Users see own rentals, companies see rentals for their cars, admin sees all
+        - UPDATE/DELETE/ACTIONS: Only owner or admin can modify
+        """
+        if self.action == 'create':
+            return [IsAuthenticated()]
+        elif self.action in ['list', 'retrieve', 'my_rentals', 'rental_stats']:
+            return [IsAuthenticated()]
+        elif self.action in ['confirm', 'cancel']:
+            return [IsCarRentalOwner()]
+        else:
+            return [IsAuthenticated()]
     
     def get_queryset(self):
+        """
+        Filter rentals based on user role:
+        - Users: See only their own rentals
+        - Companies: See rentals for their cars + own rentals (as customers)
+        - Admin: See all rentals
+        """
+        if not self.request.user or not self.request.user.is_authenticated:
+            return CarRental.objects.none()
+        
         queryset = super().get_queryset()
         
-        if not self.request.user.is_staff:
-            queryset = queryset.filter(renter=self.request.user)
+        # Admin sees all
+        if self.request.user.is_superuser or (
+            hasattr(self.request.user, 'role') and
+            self.request.user.role and
+            self.request.user.role.code == RoleCode.ADMIN.value
+        ):
+            # Apply filters but don't restrict by owner
+            return self._apply_filters(queryset)
         
+        # Users see only their own rentals
+        user_rentals = queryset.filter(renter=self.request.user)
+        
+        # Companies see rentals for their cars + own rentals
+        if hasattr(self.request.user, 'role') and self.request.user.role:
+            if self.request.user.role.code == RoleCode.COMPANY.value:
+                if hasattr(self.request.user, 'profile') and self.request.user.profile:
+                    company = self.request.user.profile
+                    # Get rentals for cars owned by this company
+                    company_rentals = queryset.filter(
+                        rental_items__car_listing__company=company
+                    ).distinct()
+                    # Combine with user's own rentals
+                    combined = (user_rentals | company_rentals).distinct()
+                    return self._apply_filters(combined)
+        
+        return self._apply_filters(user_rentals)
+    
+    def _apply_filters(self, queryset):
+        """Apply common filters to queryset."""
         status_filter = self.request.query_params.get('status')
         if status_filter:
             queryset = queryset.filter(status=status_filter)
@@ -561,15 +732,10 @@ class CarRentalViewSet(AbstractModelViewSet):
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):
         """
-        Confirm a pending rental and finalize availability updates
+        Confirm a pending rental and finalize availability updates.
+        Permission is checked by IsCarRentalOwner permission class.
         """
         rental = self.get_object()
-        
-        if not request.user.is_staff and rental.renter != request.user:
-            return Response(
-                {"error": "You do not have permission to confirm this rental."},
-                status=status.HTTP_403_FORBIDDEN
-            )
         
         if rental.status != CarRental.RentStatus.PENDING:
             return Response(
@@ -612,15 +778,10 @@ class CarRentalViewSet(AbstractModelViewSet):
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
         """
-        Cancel a rental and restore availability
+        Cancel a rental and restore availability.
+        Permission is checked by IsCarRentalOwner permission class.
         """
         rental = self.get_object()
-        
-        if not request.user.is_staff and rental.renter != request.user:
-            return Response(
-                {"error": "You do not have permission to cancel this rental."},
-                status=status.HTTP_403_FORBIDDEN
-            )
         
         if rental.status == CarRental.RentStatus.CANCELLED:
             return Response(
@@ -932,11 +1093,43 @@ class CarAvailabilityByCarAndDateView(APIView):
 
 @extend_schema(responses=PropertyListingResponseSerializer)
 class PropertyListingViewSet(AbstractModelViewSet):
-    permission_classes = [IsAuthenticatedOrReadOnly]
     serializer_class = PropertyListingSerializer
     queryset = PropertyListing.objects.all()
     filter_backends = [DjangoFilterBackend]
     filterset_class = PropertyFilter
+
+    def get_permissions(self):
+        """
+        - CREATE: Company users can create properties, admin can create all
+        - READ: Public (all can read)
+        - UPDATE/DELETE: Company can modify own properties, admin can modify all
+        """
+        if self.action == 'create':
+            return [IsAuthenticated()]
+        elif self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        else:
+            return [IsListingOwner()]
+
+    def get_queryset(self):
+        """Filter queryset - show all active to public, all to companies/admin."""
+        queryset = super().get_queryset()
+        
+        if not self.request.user or not self.request.user.is_authenticated:
+            return queryset.filter(is_active=True)
+        
+        if self.request.user.is_superuser or (
+            hasattr(self.request.user, 'role') and
+            self.request.user.role and
+            self.request.user.role.code == RoleCode.ADMIN.value
+        ):
+            return queryset
+        
+        if hasattr(self.request.user, 'role') and self.request.user.role:
+            if self.request.user.role.code == RoleCode.COMPANY.value:
+                return queryset
+        
+        return queryset.filter(is_active=True)
 
 
 class AmenityViewSet(AbstractModelViewSet):
@@ -949,17 +1142,67 @@ class AmenityViewSet(AbstractModelViewSet):
 class BookingViewSet(AbstractModelViewSet):
     http_method_names = ["get", "post"]
     serializer_class = BookingSerializer
-    permission_classes = [IsAuthenticated]
     queryset = Booking.objects.all()
     filter_backends = [DjangoFilterBackend]
     filterset_class = BookingFilter
 
+    def get_permissions(self):
+        """
+        - CREATE: Authenticated users can create bookings
+        - READ: Users see own bookings, companies see bookings for their listings, admin sees all
+        - Special actions: partial_cancel, rate require ownership
+        """
+        if self.action == 'create':
+            return [IsAuthenticated()]
+        elif self.action in ['list', 'retrieve']:
+            return [IsAuthenticated()]
+        elif self.action in ['partial_cancel', 'rate_booking']:
+            return [IsBookingOwner()]
+        else:
+            return [IsAuthenticated()]
+
     def get_queryset(self):
-        if self.request.user.is_authenticated:
-            return Booking.objects.filter(
-                user=self.request.user
-            ).prefetch_related("items", "items__room")
-        return Booking.objects.none()
+        """
+        Filter bookings based on user role:
+        - Users: See only their own bookings
+        - Companies: See bookings for their listings + own bookings (as customers)
+        - Admin: See all bookings
+        """
+        if not self.request.user or not self.request.user.is_authenticated:
+            return Booking.objects.none()
+        
+        queryset = Booking.objects.prefetch_related("items", "items__room")
+        
+        # Admin sees all
+        if self.request.user.is_superuser or (
+            hasattr(self.request.user, 'role') and
+            self.request.user.role and
+            self.request.user.role.code == RoleCode.ADMIN.value
+        ):
+            return queryset
+        
+        # Users see only their own bookings
+        user_bookings = queryset.filter(user=self.request.user)
+        
+        # Companies see bookings for their listings + own bookings
+        if hasattr(self.request.user, 'role') and self.request.user.role:
+            if self.request.user.role.code == RoleCode.COMPANY.value:
+                # Get company's hotels
+                if hasattr(self.request.user, 'profile') and self.request.user.profile:
+                    from apps.account.models import HotelProfile
+                    company = self.request.user.profile
+                    try:
+                        hotel = HotelProfile.objects.get(company=company)
+                        # Get bookings for rooms in this hotel
+                        hotel_bookings = queryset.filter(
+                            items__room__hotel=hotel
+                        ).distinct()
+                        # Combine with user's own bookings (if they booked as customer)
+                        return (user_bookings | hotel_bookings).distinct()
+                    except HotelProfile.DoesNotExist:
+                        pass
+        
+        return user_bookings
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
@@ -1097,13 +1340,44 @@ class StaySearchView(APIView):
         serializer = SearchResultSerializer(results, many=True)
         return Response(serializer.data)
 class StayAvailabilityUpdateView(APIView):
-    permission_classes = [IsAuthenticated]
+    def get_permissions(self):
+        """
+        Only company owners of the hotel or admin can update availability.
+        """
+        return [IsAuthenticated()]
 
     def put(self, request, pk):
         """
         Update a StayAvailability instance.
+        Only the hotel owner (company) or admin can update.
         """
         stay_availability = get_object_or_404(StayAvailability, pk=pk)
+        
+        # Check if user has permission to update this availability
+        user = request.user
+        
+        # Admin can always update
+        is_admin = user.is_superuser or (
+            hasattr(user, 'role') and
+            user.role and
+            user.role.code == RoleCode.ADMIN.value
+        )
+        
+        if not is_admin:
+            # Check if user owns the hotel
+            hotel = stay_availability.hotel
+            if hasattr(hotel, 'company') and hotel.company:
+                if not (hasattr(hotel.company, 'user') and hotel.company.user == user):
+                    return Response(
+                        {"detail": "You do not have permission to update this availability."},
+                        status=status.HTTP_403_FORBIDDEN
+                    )
+            else:
+                return Response(
+                    {"detail": "You do not have permission to update this availability."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        
         serializer = StayAvailabilityUpdateSerializer(
             instance=stay_availability,
             data=request.data

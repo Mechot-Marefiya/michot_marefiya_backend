@@ -9,6 +9,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from django.conf import settings
 from apps.listing.models import Booking
+from apps.account.enums import RoleCode
 from .services import ChapaPaymentService
 from .serializers import PaymentInitializeSerializer, PaymentTransactionSerializer
 from .models import PaymentTransaction
@@ -17,19 +18,36 @@ class InitiatePaymentView(APIView):
     permission_classes = [IsAuthenticated]
     
     def post(self, request):
+        """
+        Initiate payment for a booking.
+        Users can only initiate payment for their own bookings.
+        Companies can initiate payment for bookings they own (as customers).
+        Admin can initiate payment for any booking.
+        """
         serializer = PaymentInitializeSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            booking = Booking.objects.get(
-                id=serializer.validated_data['booking_id'],
-                user=request.user
-            )
+            booking = Booking.objects.get(id=serializer.validated_data['booking_id'])
         except Booking.DoesNotExist:
             return Response(
                 {"error": "Booking not found"}, 
                 status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # Check permission: user must own the booking (or be admin)
+        user = request.user
+        is_admin = user.is_superuser or (
+            hasattr(user, 'role') and
+            user.role and
+            user.role.code == RoleCode.ADMIN.value
+        )
+        
+        if not is_admin and booking.user != user:
+            return Response(
+                {"error": "You can only initiate payment for your own bookings."},
+                status=status.HTTP_403_FORBIDDEN
             )
         
         if booking.status != Booking.BookingStatus.PENDING:
@@ -95,14 +113,31 @@ def chapa_webhook(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def verify_payment(request, tx_ref):
+    """
+    Verify payment for authenticated user.
+    Users can only verify their own payments.
+    Admin can verify any payment.
+    """
     try:
         result = ChapaPaymentService.handle_callback({"tx_ref": tx_ref})
 
         try:
-            payment_tx = PaymentTransaction.objects.get(
-                tx_ref=tx_ref,
-                booking__user=request.user
+            payment_tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
+            
+            # Check permission
+            user = request.user
+            is_admin = user.is_superuser or (
+                hasattr(user, 'role') and
+                user.role and
+                user.role.code == RoleCode.ADMIN.value
             )
+            
+            if not is_admin and payment_tx.booking.user != user:
+                return Response(
+                    {"error": "You can only verify your own payments."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
             serializer = PaymentTransactionSerializer(payment_tx)
             response_data = serializer.data
             response_data["chapa_verification"] = result
@@ -137,11 +172,27 @@ def verify_payment_public(request, tx_ref):
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
 def cancel_payment(request, tx_ref):
+    """
+    Cancel payment transaction.
+    Users can only cancel their own payments.
+    Admin can cancel any payment.
+    """
     try:
-        payment_tx = PaymentTransaction.objects.get(
-            tx_ref=tx_ref,
-            booking__user=request.user
+        payment_tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
+        
+        # Check permission
+        user = request.user
+        is_admin = user.is_superuser or (
+            hasattr(user, 'role') and
+            user.role and
+            user.role.code == RoleCode.ADMIN.value
         )
+        
+        if not is_admin and payment_tx.booking.user != user:
+            return Response(
+                {"error": "You can only cancel your own payments."},
+                status=status.HTTP_403_FORBIDDEN
+            )
         
         if payment_tx.status != PaymentTransaction.PaymentStatus.PENDING:
             return Response(
