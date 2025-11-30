@@ -182,6 +182,7 @@ class CarListing(BaseListing):
     condition = models.CharField(
         max_length=200, choices=ConditionChoices.choices, verbose_name=_("Condition")
     )
+    images = GenericRelation(ListingImage, related_query_name="listings")
     quantity=models.PositiveSmallIntegerField(default=1,null=False)
     class Meta:
         verbose_name = _("Car Listing")
@@ -263,7 +264,7 @@ class CarRentalItem(AbstractBaseModel):
         return self.units_rent * self.price_per_unit
 
     def __str__(self) -> str:
-        return f"Car {self.car_listing} rent for {self.car_rental.check_in_date}"
+        return f"Car {self.car_listing} rent for {self.car_rental.start_date}"
 # class CarSale(AbstractBaseModel):
 #     class SaleStatus(models.TextChoices):
 #         PENDING = "pending", _("Pending")
@@ -625,81 +626,6 @@ class RoomInventory(AbstractBaseModel):
 
     def __str__(self):
         return f"{self.room_listing} — {self.date}"
-
-
-# class EventSpaceListing(BaseListing):
-#     class SpaceType(models.TextChoices):
-#         AUDITORIUM = "auditorium", _("Auditorium")
-#         CONFERENCE_HALL = "conference_hall", _("Conference Hall")
-#         MEETING_ROOM = "meeting_room", _("Meeting Room")
-
-#     hotel = models.ForeignKey(
-#         HotelProfile,
-#         on_delete=models.CASCADE,
-#         related_name="event_space_listings",
-#         verbose_name=_("Company"),
-#         help_text=_("The company that owns this listing."),
-#         null=True,
-#         blank=True,
-#     )
-
-#     address = models.OneToOneField(
-#         Address,
-#         on_delete=models.RESTRICT,
-#         related_name="+",
-#         # * Making only optional for validation cause either we use
-#         # * from payload or reuse company HQ address
-#         blank=True,
-#     )
-
-#     amenities = models.ManyToManyField(
-#         Amenity,
-#         blank=True,
-#         related_name="event_space_listings",
-#         verbose_name=_("Amenities"),
-#     )
-
-#     number_of_guests = models.PositiveIntegerField(default=1)
-
-#     space_type = models.CharField(max_length=50, choices=SpaceType.choices)
-
-#     floor_area_sqm = models.PositiveIntegerField(blank=True, null=True)
-
-#     class Meta:
-#         verbose_name = _("Event space")
-#         verbose_name_plural = _("Event Spaces")
-#         db_table = "event_spaces"
-
-#     def __str__(self):
-#         return f"{self.title}"
-
-
-# class EventSpaceAvailability(AbstractBaseModel):
-#     """
-#     Simplified per-day availability for event spaces (MVP).
-#     Later you can add time-slot granularity.
-#     """
-
-#     space_listing = models.ForeignKey(
-#         EventSpaceListing, on_delete=models.CASCADE, related_name="availability"
-#     )
-
-#     date = models.DateField(db_index=True)
-
-#     price = models.DecimalField(
-#         max_digits=10, decimal_places=2, null=True, blank=True)
-
-#     class Meta:
-#         verbose_name = _("Event space Availability")
-#         verbose_name_plural = _("Event Space Availabilities")
-#         db_table = "event_space_availabilities"
-#         unique_together = ("space_listing", "date")
-#         ordering = ["date"]
-
-#     def __str__(self):
-#         return f"{self.space_listing} — {self.date}"
-
-
 class Booking(AbstractBaseModel):
     class BookingStatus(models.TextChoices):
         PENDING = "pending", _("Pending")
@@ -892,3 +818,77 @@ class BookingItemPrice(AbstractBaseModel):
 
     def __str__(self) -> str:
         return f"{self.booking_item} - {self.date}: {self.price_per_unit} x {self.units}"
+class EventSpaceListing(BaseListing):
+    class SpaceType(models.TextChoices):
+        AUDITORIUM = "auditorium", _("Auditorium")
+        CONFERENCE_HALL = "conference_hall", _("Conference Hall")
+        MEETING_ROOM = "meeting_room", _("Meeting Room")
+
+    hotel = models.ForeignKey(
+        HotelProfile,
+        on_delete=models.CASCADE,
+        related_name="event_space_listings",
+        verbose_name=_("Company"),
+        help_text=_("The company that owns this listing."),
+        null=True,
+        blank=True,
+    )
+
+    address = models.OneToOneField(
+        Address,
+        on_delete=models.RESTRICT,
+        related_name="+",
+        # * Making only optional for validation cause either we use
+        # * from payload or reuse company HQ address
+        blank=True,
+    )
+
+    amenities = models.ManyToManyField(
+        Amenity,
+        blank=True,
+        related_name="event_space_listings",
+        verbose_name=_("Amenities"),
+    )
+
+    number_of_guests = models.PositiveIntegerField(default=1)
+    total_units = models.PositiveIntegerField(
+        verbose_name=_("Total eventspace of This Type"),
+        help_text=_("How many eventspace of this type exist in the property."),
+    )
+    space_type = models.CharField(max_length=50, choices=SpaceType.choices)
+
+    floor_area_sqm = models.PositiveIntegerField(blank=True, null=True)
+
+    class Meta:
+        verbose_name = _("Event space")
+        verbose_name_plural = _("Event Spaces")
+        db_table = "event_spaces"
+
+    def __str__(self):
+        return f"{self.title}"
+
+
+class EventSpaceAvailability(AbstractBaseModel):
+    """
+    Simplified per-day availability for event spaces (MVP).
+    Later you can add time-slot granularity.
+    """
+
+    space_listing = models.ForeignKey(
+        EventSpaceListing, on_delete=models.CASCADE, related_name="availability"
+    )
+
+    date = models.DateField(db_index=True)
+
+    price = models.DecimalField(
+        max_digits=10, decimal_places=2, null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("Event space Availability")
+        verbose_name_plural = _("Event Space Availabilities")
+        db_table = "event_space_availabilities"
+        unique_together = ("space_listing", "date")
+        ordering = ["date"]
+
+    def __str__(self):
+        return f"{self.space_listing} — {self.date}"

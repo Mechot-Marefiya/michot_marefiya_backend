@@ -9,6 +9,7 @@ from apps.listing.views import (
     AmenityViewSet,
     StaySearchView,
     CarRentalViewSet,
+    CarAvailabilityUpdateAPIView,
     CarAvailabilityByCarAndDateView,
     CarAvailabilityByDateRangeView, 
     StayAvailabilityUpdateView
@@ -27,6 +28,7 @@ router.register('car-rentals', CarRentalViewSet, basename='carrental')
 urlpatterns = [
    path(
         "stays/availability/<uuid:pk>/update/", StayAvailabilityUpdateView.as_view(),name="stay-availability-update"),
+   path("car-availabilities/<uuid:pk>/update/",CarAvailabilityUpdateAPIView.as_view(),name="car-availability-update"),
    # Stay search
     path("stays/search/", StaySearchView.as_view(), name="stay-search"),
     path("car-availabilities/by-car-and-date/", CarAvailabilityByCarAndDateView.as_view(),  name="car-availability-by-car-and-date"),
