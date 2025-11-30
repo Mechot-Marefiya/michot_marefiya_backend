@@ -851,7 +851,10 @@ class EventSpaceListing(BaseListing):
     )
 
     number_of_guests = models.PositiveIntegerField(default=1)
-
+    total_units = models.PositiveIntegerField(
+        verbose_name=_("Total eventspace of This Type"),
+        help_text=_("How many eventspace of this type exist in the property."),
+    )
     space_type = models.CharField(max_length=50, choices=SpaceType.choices)
 
     floor_area_sqm = models.PositiveIntegerField(blank=True, null=True)

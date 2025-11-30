@@ -38,6 +38,7 @@ from apps.listing.serializers import (
     CarListingResponseSerializer,
     CarListingSerializer,
     BookingRatingSerializer,
+    CarAvailabilityUpdateSerializer,
     GuestHouseListingResponseSerializer,
     GuestHouseListingSerializer,
     PropertyListingResponseSerializer,
@@ -1121,3 +1122,15 @@ class StayAvailabilityUpdateView(APIView):
             },
             status=status.HTTP_200_OK
         )
+class CarAvailabilityUpdateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+    def patch(self, request, pk, format=None):
+        """Update a CarAvailability instance (partial update)."""
+        availability = get_object_or_404(CarAvailability, pk=pk)
+        # Set partial=True to allow missing fields
+        serializer = CarAvailabilityUpdateSerializer(availability, data=request.data, partial=True)
+        
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

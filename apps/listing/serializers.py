@@ -18,7 +18,7 @@ from apps.listing.models import (
     CarListing,CarAvailability,
     GuestHouseListing,
     PropertyListing,
-    RoomListing,
+    RoomListing,EventSpaceListing,
     CarRental,CarRentalItem,
 )
 from apps.listing.exceptions import RatingException
@@ -618,6 +618,30 @@ class CarSearchSerializer(serializers.Serializer):
                 })
         
         return data
+class CarAvailabilityUpdateSerializer(serializers.Serializer):
+    is_available = serializers.BooleanField(required=False)
+    available_from = serializers.DateTimeField(required=False, allow_null=True)
+    available_to = serializers.DateTimeField(required=False, allow_null=True)
+    quantity_available = serializers.IntegerField(required=False, min_value=0)
+    base_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False) # Example field type
+
+    def update(self, instance, validated_data):
+        """
+        Required method for saving updates when using serializers.Serializer.
+        Includes logic to set is_available=False if quantity_available=0.
+        """
+        quantity = validated_data.get('quantity_available')
+        if quantity == 0:
+            validated_data['is_available'] = False
+        elif quantity is not None and quantity > 0:
+            if validated_data.get('is_available') is not False:
+                 validated_data['is_available'] = True
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+            
+        instance.save()
+        return instance
+    
 class PropertyListingResponseSerializer(serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     address = AddressSerializer()
@@ -834,4 +858,23 @@ class StayAvailabilityUpdateSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("available_rooms must be non-negative.")
         return value
+class EventSpaceListingResponseSerializer(serializers.ModelSerializer):
+    images = ListingImageSerializer(many=True)
+    amenities = AmenityResponseSSerializer(many=True)
+
+    class Meta:
+        model = EventSpaceListing
+        fields = [
+            "id",
+            "images",
+            "title",
+            "description",
+            "number_of_guests",
+            "base_price",
+            "amenities",
+            "number_of_guests",
+            "total_units",
+            "space_type",
+            "floor_area_sqm",
+        ]
 
