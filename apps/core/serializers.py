@@ -1,6 +1,6 @@
 from rest_framework import serializers
 from apps.core.models import Address, Facility
-
+from decimal import Decimal
 
 class AddressSerializer(serializers.ModelSerializer):
     class Meta:
@@ -41,3 +41,26 @@ class FacilityResponseSerializer(serializers.ModelSerializer):
     class Meta:
         model = Facility
         fields = ["id", "name", "icon"]
+
+class ConversionInputSerializer(serializers.Serializer):
+    """Serializer for validating currency conversion input."""
+    date = serializers.DateField(
+        required=True, 
+        help_text="The date for which the exchange rate should be used (YYYY-MM-DD)."
+    )
+    base = serializers.CharField(
+        max_length=3, 
+        required=True,
+        help_text="The source (base) currency code (e.g., 'USD')."
+    )
+    target = serializers.CharField(
+        max_length=3, 
+        required=True,
+        help_text="The destination (target) currency code (e.g., 'ETB')."
+    )
+    amount = serializers.DecimalField(
+        max_digits=18, 
+        decimal_places=2, 
+        required=True,
+        help_text="The amount to be converted."
+    )
