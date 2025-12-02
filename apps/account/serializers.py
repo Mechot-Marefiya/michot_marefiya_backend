@@ -445,7 +445,7 @@ class HotelProfileSerializer(serializers.Serializer):
         return hotel
 
     def to_representation(self, instance):
-        return HotelProfileResponseSerializer(instance, self.context).to_representation(
+        return HotelProfileResponseSerializer(instance, context=self.context).to_representation(
             instance
         )
 
