@@ -27,6 +27,7 @@ from apps.account.permissions import (
     IsBookingOwner,
     IsCarRentalOwner,
     CanModifyBooking,
+    IsCompanyOrFrontDesk,
 )
 from apps.account.enums import RoleCode
 from apps.listing.models import (
@@ -1154,7 +1155,7 @@ class BookingViewSet(AbstractModelViewSet):
         - Special actions: partial_cancel, rate require ownership
         """
         if self.action == 'create':
-            return [IsAuthenticated()]
+            return [IsAuthenticated(),IsCompanyOrFrontDesk()]
         elif self.action in ['list', 'retrieve']:
             return [IsAuthenticated()]
         elif self.action in ['partial_cancel', 'rate_booking']:

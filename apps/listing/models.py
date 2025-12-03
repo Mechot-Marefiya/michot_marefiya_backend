@@ -631,6 +631,7 @@ class Booking(AbstractBaseModel):
         PENDING = "pending", _("Pending")
         CONFIRMED = "confirmed", _("Confirmed")
         CANCELLED = "cancelled", _("Cancelled")
+        WALK_IN = "walk_in", _("Walk-In")
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -854,6 +855,7 @@ class EventSpaceListing(BaseListing):
     total_units = models.PositiveIntegerField(
         verbose_name=_("Total eventspace of This Type"),
         help_text=_("How many eventspace of this type exist in the property."),
+        default=1
     )
     space_type = models.CharField(max_length=50, choices=SpaceType.choices)
 

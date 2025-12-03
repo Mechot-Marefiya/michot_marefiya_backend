@@ -12,6 +12,7 @@ class Role(AbstractBaseModel):
     name = models.CharField(max_length=50, verbose_name=_("Name"))
 
     code = models.CharField(max_length=50, verbose_name=_("Code"))
+    parent = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, related_name='sub_roles')
 
     class Meta:
         verbose_name = _("Role")

@@ -233,4 +233,25 @@ class IsPublicReadOnly(permissions.BasePermission):
             return True
         
         return request.user and request.user.is_authenticated
+class IsCompanyOrFrontDesk(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if request.user and request.user.is_authenticated:
+            if request.user.is_superuser:
+                return True
+            if hasattr(request.user, 'role') and request.user.role:
+                return self.has_allowed_role(request.user.role)
+        return False
+    
+    def has_allowed_role(self, role):
+        user_role_code = role.code.lower()
+        allowed_codes = {RoleCode.COMPANY.value.lower(), RoleCode.FRONT_DESK.value.lower()}
 
+        if user_role_code in allowed_codes:
+            return True
+
+        while role.parent is not None:
+            role = role.parent
+            if role.code.lower() in allowed_codes:
+                return True
+        
+        return False

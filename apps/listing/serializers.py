@@ -9,6 +9,7 @@ from apps.account.services import ImageCreationService
 from apps.account.serializers import AddressSerializer, ListingImageSerializer
 from apps.core.serializers import JsonSerializerField
 from apps.listing.exceptions import BookingConflict
+from apps.account.enums import RoleCode
 from apps.listing.services import BookingService, ListingService
 
 from apps.listing.models import (
@@ -792,8 +793,8 @@ class BookingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Booking
-        fields = ["items", "check_in_date", "check_out_date"]
-
+        fields = ["items", "check_in_date", "check_out_date","status"]
+        read_only_fields = ["status"]
     def validate(self, data):
         check_in = data.get("check_in_date")
         check_out = data.get("check_out_date")
@@ -813,9 +814,17 @@ class BookingSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
+        # 1. Determine the user
         user = validated_data.pop("user", None)
-        if not user and self.context.get("request"):
-            user = self.context["request"].user
+        request = self.context.get("request")
+        if not user and request:
+            user = request.user
+        is_front_desk = False
+        
+        if user and user.is_authenticated and user.role and user.role.code == RoleCode.FRONT_DESK.value:
+            is_front_desk = True
+        if is_front_desk:
+            validated_data["status"] = Booking.BookingStatus.WALK_IN
         return BookingService.create_booking(validated_data, user=user)
 
     def to_representation(self, instance):
