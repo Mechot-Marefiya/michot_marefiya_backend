@@ -12,7 +12,9 @@ from apps.listing.views import (
     CarAvailabilityUpdateAPIView,
     CarAvailabilityByCarAndDateView,
     CarAvailabilityByDateRangeView, 
-    StayAvailabilityUpdateView
+    StayAvailabilityUpdateView,
+    EventSpaceListingViewSet,
+    EventSpaceBookingViewSet
 )
 
 router = DefaultRouter()
@@ -24,6 +26,8 @@ router.register("properties", PropertyListingViewSet, basename="properties")
 router.register("amenities", AmenityViewSet, basename="amenities")
 router.register("bookings", BookingViewSet, basename="bookings")
 router.register('car-rentals', CarRentalViewSet, basename='carrental')
+router.register('event-spaces',EventSpaceListingViewSet,basename="event-spaces")
+router.register('bookings-eventspaces',EventSpaceBookingViewSet,basename="bookings-eventspaces")
 
 urlpatterns = [
    path(

@@ -10,7 +10,7 @@ from apps.account.serializers import AddressSerializer, ListingImageSerializer
 from apps.core.serializers import JsonSerializerField
 from apps.listing.exceptions import BookingConflict
 from apps.account.enums import RoleCode
-from apps.listing.services import BookingService, ListingService
+from apps.listing.services import BookingService, ListingService,EventSpaceAvailabilityService,EventSpaceAvailabilityService
 
 from apps.listing.models import (
     Amenity,
@@ -308,6 +308,7 @@ class CarListingResponseSerializer(serializers.ModelSerializer):
             "car_class",
             "quantity",
             "company",
+            "seats",
             "individual_owner",
             "availabilities",
             "current_availability",
@@ -354,6 +355,7 @@ class CarListingSerializer(serializers.ModelSerializer):
             "fuel_type",
             "transmission",
             "condition",
+            "seats",
             "listing_type",
             "car_class",
             "quantity"
@@ -886,4 +888,158 @@ class EventSpaceListingResponseSerializer(serializers.ModelSerializer):
             "space_type",
             "floor_area_sqm",
         ]
+class EventSpaceListingSerializer(serializers.ModelSerializer):
+    """Serializer used for POST/PUT operations, relying on the service layer."""
+    
+    address = AddressSerializer(required=False)
+    images = serializers.ListField(child=serializers.ImageField(), required=False) 
+    amenities = JsonSerializerField(required=False) 
 
+    company_id = serializers.UUIDField()
+
+    class Meta:
+        model = EventSpaceListing
+        fields = [
+            "images",
+            "title",
+            "company_id",
+            "description",
+            "base_price",
+            "address",
+            "amenities",
+            "number_of_guests",
+            "total_units",
+            "space_type",
+            "floor_area_sqm",
+            # Add other fields as needed for creation
+        ]
+
+    # The Address validation is handled by the nested AddressSerializer
+    # if you use the standard nested serializer structure (as shown above).
+    # If using JsonSerializerField for Address, you must re-implement the validate_address:
+    # def validate_address(self, attr):
+    #     serializer = AddressSerializer(data=attr)
+    #     serializer.is_valid(raise_exception=True)
+    #     return serializer.validated_data
+
+    @transaction.atomic()
+    def create(self, validated_data):
+        """
+        Delegates the complex creation process (including availability) 
+        to the service layer.
+        """
+        return EventSpaceAvailabilityService.create_event_space_listing(validated_data)
+
+    def to_representation(self, instance):
+        """
+        Uses the Response Serializer for the representation of the created/updated object.
+        """
+        return EventSpaceListingResponseSerializer(instance, self.context).to_representation(
+            instance
+        )
+from rest_framework import serializers
+from .models import EventSpaceBooking, EventSpaceBookingItem
+from .services import EventSpaceBookingService 
+# Assuming imports for other required classes (RoleCode, serializers, etc.)
+
+# --- Response Serializers ---
+
+class EventSpaceBookingItemResponseSerializer(serializers.ModelSerializer):
+    event_space_id = serializers.UUIDField(source="event_space.id", read_only=True)
+    event_space_title = serializers.CharField(source="event_space.title", read_only=True)
+    event_space_description = serializers.CharField(source="event_space.description", read_only=True)
+    subtotal = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EventSpaceBookingItem
+        fields = [
+            "id",
+            "event_space_id",
+            "event_space_title",
+            "event_space_description",
+            "units_booked",
+            "price_per_unit",
+            "subtotal",
+        ]
+
+    def get_subtotal(self, obj):
+        return obj.subtotal()
+
+
+class EventSpaceBookingResponseSerializer(serializers.ModelSerializer):
+    """Serializer for reading/outputting a complete Event Space Booking."""
+    # Related_name is simply 'items' on EventSpaceBooking
+    items = EventSpaceBookingItemResponseSerializer(many=True, read_only=True) 
+
+    class Meta:
+        model = EventSpaceBooking
+        fields = [
+            "id",
+            "user",
+            "check_in_date",
+            "check_out_date",
+            "total_price",
+            "status",
+            "items",
+            "event_type"
+        ]
+
+# --- Write (Create) Serializers ---
+
+class EventSpaceBookingItemSerializer(serializers.ModelSerializer):
+    """Serializer for taking input on booking items."""
+    class Meta:
+        model = EventSpaceBookingItem
+        fields = ["event_space", "units_booked"] 
+
+
+class EventSpaceBookingSerializer(serializers.ModelSerializer):
+    """Main serializer for creating a new Event Space Booking."""
+    items = EventSpaceBookingItemSerializer(many=True) 
+
+    class Meta:
+        model = EventSpaceBooking # Mapped to the dedicated model
+        fields = ["items", "check_in_date", "check_out_date", "status","event_type"]
+        read_only_fields = ["status"]
+
+    def validate(self, data):
+        check_in = data.get("check_in_date")
+        check_out = data.get("check_out_date")
+        
+        if check_in and check_out:
+            if check_out <= check_in:
+                raise serializers.ValidationError(
+                    {"check_out_date": "Check-out date must be after check-in date."}
+                )
+        
+        items = data.get("items", [])
+        if not items:
+            raise serializers.ValidationError(
+                {"items": "At least one booking item is required."}
+            )
+        
+        # !To Do: You may want to add validation here to ensure all event spaces
+        # belong to the same hotel, if that is a business rule.
+        
+        return data
+
+    def create(self, validated_data):
+        # Determine the user and status logic (copied from your original)
+        user = validated_data.pop("user", None)
+        request = self.context.get("request")
+        if not user and request:
+            user = request.user
+            
+        is_front_desk = False
+        if user and user.is_authenticated and hasattr(user, 'role') and user.role and user.role.code == RoleCode.FRONT_DESK.value:
+            is_front_desk = True
+        
+        if is_front_desk:
+            validated_data["status"] = EventSpaceBooking.BookingStatus.WALK_IN 
+            
+        return EventSpaceBookingService.create_booking(validated_data, user=user)
+
+    def to_representation(self, instance):
+        return EventSpaceBookingResponseSerializer(instance, self.context).to_representation(
+            instance
+        )

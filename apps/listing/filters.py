@@ -1,6 +1,6 @@
 from django_filters import rest_framework as filters
 
-from apps.listing.models import Booking, PropertyListing, RoomListing
+from apps.listing.models import Booking, PropertyListing, RoomListing,EventSpaceListing,EventSpaceBooking
 
 
 class RoomFilter(filters.FilterSet):
@@ -10,7 +10,12 @@ class RoomFilter(filters.FilterSet):
         model = RoomListing
         fields = ["hotel"]
 
+class EventSpaceFilter(filters.FilterSet):
+    hotel = filters.UUIDFilter("hotel")
 
+    class Meta:
+        model = EventSpaceListing
+        fields = ["hotel"]
 # class CarFilter(filters.FilterSet):
 #     class Meta:
 #         model = CarListing
@@ -27,3 +32,10 @@ class BookingFilter(filters.FilterSet):
     class Meta:
         model = Booking
         fields = ["status"]
+class EventSpaceBookingFilter(filters.FilterSet):
+    """
+    Dedicated FilterSet for EventSpaceBooking objects.
+    """
+    class Meta:
+        model = EventSpaceBooking
+        fields = ["status", "check_in_date", "check_out_date"]

@@ -18,7 +18,7 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from apps.account.serializers import HotelProfileResponseSerializer
 from apps.listing.docs.schema import search_schema
 from apps.core.views import AbstractModelViewSet
-from apps.listing.filters import PropertyFilter, RoomFilter, BookingFilter
+from apps.listing.filters import PropertyFilter, RoomFilter, BookingFilter,EventSpaceFilter,EventSpaceBookingFilter
 from apps.account.permissions import (
     IsAuthenticatedOrReadOnly,
     IsPublicReadOnly,
@@ -27,6 +27,7 @@ from apps.account.permissions import (
     IsBookingOwner,
     IsCarRentalOwner,
     CanModifyBooking,
+    ORPermission,
     IsCompanyOrFrontDesk,
 )
 from apps.account.enums import RoleCode
@@ -39,7 +40,11 @@ from apps.listing.models import (
     Booking,StayAvailability,
     BookingItem,
     CarRentalItem,
-    CarAvailability
+    EventSpaceListing,
+    CarAvailability,
+    EventSpaceBooking,
+    CarRental
+    
 )
 from apps.account.models import(CompanyProfile,IndividualOwnerProfile)
 from apps.listing.serializers import (
@@ -54,13 +59,16 @@ from apps.listing.serializers import (
     PropertyListingResponseSerializer,
     PropertyListingSerializer,
     RoomListingResponseSerializer,
+    EventSpaceListingSerializer,
+    EventSpaceListingResponseSerializer,
     RoomListingSerializer,PartialCancelSerializer,
     SearchResultSerializer,StayAvailabilityUpdateSerializer,
     CarAvailabilitySerializer,
     AvailabilityCheckSerializer,
     CarSearchSerializer,
     CarRentalSerializer,
-    CarRental,
+    EventSpaceBookingResponseSerializer,
+    EventSpaceBookingSerializer
 )
 from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService,PriceService
 @extend_schema(responses=RoomListingResponseSerializer)
@@ -1155,7 +1163,7 @@ class BookingViewSet(AbstractModelViewSet):
         - Special actions: partial_cancel, rate require ownership
         """
         if self.action == 'create':
-            return [IsAuthenticated(),IsCompanyOrFrontDesk()]
+            return [ORPermission(IsAuthenticated, IsCompanyOrFrontDesk)]
         elif self.action in ['list', 'retrieve']:
             return [IsAuthenticated()]
         elif self.action in ['partial_cancel', 'rate_booking']:
@@ -1407,3 +1415,235 @@ class CarAvailabilityUpdateAPIView(APIView):
             serializer.save()
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+@extend_schema(responses=EventSpaceListingResponseSerializer)
+class EventSpaceListingViewSet(AbstractModelViewSet):
+    """
+    ViewSet for viewing and managing Event Space Listings, including 
+    handling seasonal pricing display.
+    """
+    serializer_class = EventSpaceListingSerializer
+    # Pre-fetch related data for efficient retrieval
+    queryset = EventSpaceListing.objects.all().select_related(
+        "hotel", "address"
+    ).prefetch_related(
+        "images", "amenities", "availability" 
+    )
+    filter_backends = [DjangoFilterBackend]
+    filterset_class = EventSpaceFilter # Use the dedicated filter class
+
+    # --- Permission Logic ---
+    def get_permissions(self):
+        """
+        Applies access control based on the action and user role.
+        """
+        if self.action == 'create':
+            # Only authenticated users (Company/Admin) can create listings
+            return [IsAuthenticated()]
+        elif self.action in ['list', 'retrieve']:
+            # Public access for reading listings
+            return [AllowAny()]
+        else:
+            # Update/Delete requires the user to own the listing
+            return [IsListingOwner()]
+
+    # --- Queryset Logic ---
+    def get_queryset(self):
+        """
+        Filters queryset based on user role, matching the logic of RoomListing.
+        """
+        queryset = super().get_queryset()
+        
+        # If user is not authenticated, show only active listings (assuming an 'is_active' field)
+        if not self.request.user or not self.request.user.is_authenticated:
+            return queryset.filter(is_active=True)
+        
+        if self.request.user.is_superuser or (
+            hasattr(self.request.user, 'role') and
+            self.request.user.role and
+            self.request.user.role.code == RoleCode.ADMIN.value
+        ):
+            return queryset
+        
+        # Company/Other user roles logic
+        if hasattr(self.request.user, 'role') and self.request.user.role:
+            if self.request.user.role.code == RoleCode.COMPANY.value:
+                # Companies see all listings for reference
+                return queryset
+            else:
+                # Regular users see only active listings
+                return queryset.filter(is_active=True)
+        
+        return queryset.filter(is_active=True)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["request"] = self.request
+        return context
+
+    # --- Retrieve (Detail) Action ---
+    def retrieve(self, request, *args, **kwargs):
+        """
+        Return event space detail with optional seasonal display price 
+        when date query params are provided.
+        """
+        instance = self.get_object()
+        serializer = EventSpaceListingResponseSerializer(instance, context=self.get_serializer_context())
+        data = serializer.data
+
+        # Price calculation logic
+        use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
+        check_in = request.query_params.get('check_in')
+        check_out = request.query_params.get('check_out')
+
+        # default values
+        data['display_price'] = data.get('base_price')
+
+        if use_seasonal and check_in and check_out:
+            check_in_date = parse_date(check_in)
+            check_out_date = parse_date(check_out)
+            
+            if check_in_date and check_out_date and check_out_date > check_in_date:
+                cursor = check_in_date
+                prices = []
+                while cursor < check_out_date:
+                    # Assumes PriceService can resolve price for an EventSpaceListing instance
+                    p = PriceService.resolve_price(instance, cursor) 
+                    prices.append(p)
+                    cursor += timedelta(days=1)
+
+                if prices:
+                    preview_total = sum(prices)
+                    preview_min = min(prices)
+                    preview_has_discount = any(p < instance.base_price for p in prices)
+                    
+                    data['preview_min_price'] = preview_min
+                    data['preview_total'] = preview_total
+                    data['preview_has_discount'] = preview_has_discount
+                    data['display_price'] = preview_min if preview_has_discount else instance.base_price
+
+        return Response(data)
+
+    # --- List Action ---
+    def list(self, request, *args, **kwargs):
+        """
+        List event spaces; computes display_price and preview fields for each 
+        listing if date params are provided.
+        """
+        qs = self.filter_queryset(self.get_queryset())
+
+        page = self.paginate_queryset(qs)
+        use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
+        check_in = request.query_params.get('check_in') or request.query_params.get('check_in_date')
+        check_out = request.query_params.get('check_out') or request.query_params.get('check_out_date')
+
+        listings = page if page is not None else list(qs)
+
+        serialized = []
+        for listing in listings:
+            serializer = EventSpaceListingResponseSerializer(listing, context=self.get_serializer_context())
+            data = serializer.data
+            
+            # default
+            data['display_price'] = data.get('base_price')
+
+            if use_seasonal and check_in and check_out:
+                check_in_date = parse_date(check_in)
+                check_out_date = parse_date(check_out)
+                
+                if check_in_date and check_out_date and check_out_date > check_in_date:
+                    cursor = check_in_date
+                    prices = []
+                    while cursor < check_out_date:
+                        # Assumes PriceService can resolve price for an EventSpaceListing instance
+                        p = PriceService.resolve_price(listing, cursor) 
+                        prices.append(p)
+                        cursor += timedelta(days=1)
+                        
+                    if prices:
+                        preview_total = sum(prices)
+                        preview_min = min(prices)
+                        preview_has_discount = any(p < listing.base_price for p in prices)
+                        
+                        data['preview_min_price'] = preview_min
+                        data['preview_total'] = preview_total
+                        data['preview_has_discount'] = preview_has_discount
+                        data['display_price'] = preview_min if preview_has_discount else listing.base_price
+
+            serialized.append(data)
+
+        if page is not None:
+            return self.get_paginated_response(serialized)
+
+        return Response(serialized)
+@extend_schema(responses=EventSpaceBookingResponseSerializer)
+class EventSpaceBookingViewSet(AbstractModelViewSet):
+    """
+    ViewSet for viewing and managing Event Space Bookings (Create/List/Retrieve only).
+    """
+    # Only allow GET (list/retrieve) and POST (create)
+    http_method_names = ["get", "post"] 
+    serializer_class = EventSpaceBookingSerializer
+    
+    # Prefetch related data for efficiency
+    queryset = EventSpaceBooking.objects.prefetch_related(
+        "items", 
+        "items__event_space"
+    )
+    filter_backends = [DjangoFilterBackend]
+    # Use the dedicated filter class (must be implemented)
+    filterset_class = EventSpaceBookingFilter 
+
+    # --- Permissions ---
+    def get_permissions(self):
+        """
+        Applies access control based on the action and user role.
+        """
+        if self.action == 'create':
+            # Only authenticated users (and potentially company/front desk) can create
+            return [ORPermission(IsAuthenticated, IsCompanyOrFrontDesk)]
+        elif self.action in ['list', 'retrieve']:
+            # All authenticated users can see their permitted list/detail
+            return [IsAuthenticated()]
+        # Removed: partial_cancel and rate_booking actions
+        else:
+            return [IsAuthenticated()]
+
+    # --- Queryset Filtering ---
+    def get_queryset(self):
+        """
+        Filter bookings based on user role: User, Company, or Admin.
+        """
+        user = self.request.user
+        if not user or not user.is_authenticated:
+            return EventSpaceBooking.objects.none()
+        
+        queryset = super().get_queryset() # Starts with the prefetched queryset
+        
+        # Admin sees all
+        if user.is_superuser or (
+            hasattr(user, 'role') and user.role and user.role.code == RoleCode.ADMIN.value
+        ):
+            return queryset
+        
+        user_bookings = queryset.filter(user=user)
+        
+        if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
+            if hasattr(user, 'profile') and user.profile:
+                company = user.profile
+                try:
+                    hotel = HotelProfile.objects.get(company=company)
+                    
+                    hotel_bookings = queryset.filter(
+                        items__event_space__hotel=hotel
+                    ).distinct()
+                    
+                    return (user_bookings | hotel_bookings).distinct()
+                except HotelProfile.DoesNotExist:
+                    pass
+        
+        # Default: Return only the user's own bookings
+        return user_bookings
+
+    def perform_create(self, serializer):
+        """Passes the request user to the serializer's create method."""
+        serializer.save(user=self.request.user)

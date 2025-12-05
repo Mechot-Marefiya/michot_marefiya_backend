@@ -4,7 +4,8 @@ from apps.listing.models import (
     BookingItem,
     CarListing,
     CarAvailability,CarRental,CarRentalItem,
-    # EventSpaceListing,
+    EventSpaceListing,
+    EventSpaceAvailability,
     GuestHouseListing,
     ListingImage,
     PropertyListing,
@@ -25,8 +26,10 @@ class ListingImageInline(GenericTabularInline):
     fields = ("image", "alt_text", "is_primary")
 
 admin.site.register(CarAvailability)
+admin.site.register(EventSpaceAvailability)
 admin.site.register(CarRental)
 admin.site.register(CarRentalItem)
+admin.site.register(EventSpaceListing)
 @admin.register(PropertyListing)
 class PropertyListingAdmin(admin.ModelAdmin):
     list_display = (

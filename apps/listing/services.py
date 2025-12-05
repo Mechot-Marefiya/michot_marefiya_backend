@@ -20,10 +20,12 @@ from apps.listing.models import (
     GuestHouseListing,
     PropertyListing,
     RoomListing,
-    StayAvailability,
-    Transaction,CarAvailability,
+    StayAvailability,EventSpaceListing,
+    Transaction,CarAvailability,EventSpaceAvailability,
     Season, SeasonalRate, BookingItemPrice, RoomInventory,
     CarListing,
+    EventSpaceBooking,
+    EventSpaceBookingItem,
     CarRental,
     CarRentalItem,
     Season,
@@ -603,7 +605,172 @@ class BookingService:
     @staticmethod
     def get_booking_total(booking):
         return sum(item.subtotal() for item in booking.items.all())
+class EventSpaceBookingService:
+    @transaction.atomic()
+    @staticmethod
+    def create_booking(validated_data, user=None):
+        """
+        Creates a new Event Space Booking, validates availability, and decrements inventory, 
+        using only the base price for calculation.
+        """
+        items_data = validated_data.pop("items")
+        
+        if user:
+            validated_data["user"] = user
+        
+        check_in_date = validated_data.get("check_in_date")
+        check_out_date = validated_data.get("check_out_date")
+        
+        spaces_info = []
+        for item in items_data:
+            event_space = item["event_space"]
+            units = item["units_booked"]
+            spaces_info.append({"space_listing": event_space, "quantity": units})
+        
+        # 1. Availability Check (and locking records)
+        if spaces_info:
+            EventSpaceAvailabilityService.validate_availability(
+                spaces_info, check_in_date, check_out_date
+            )
+        
+        # 2. Create the parent Booking object
+        booking = EventSpaceBooking.objects.create(**validated_data)
 
+        total_price = Decimal('0.00')
+        booking_items_to_create = []
+        duration = (check_out_date - check_in_date).days
+        
+        # 3. Create Booking Items and Calculate Price (Simplified)
+        for item in items_data:
+            event_space: EventSpaceListing = item["event_space"]
+            units = item["units_booked"]
+            
+            # Price Calculation: Base Price * Duration (Days)
+            # This is the price paid by the customer per unit for the entire booking period
+            price_per_unit_total = event_space.base_price * duration 
+            
+            booking_item = EventSpaceBookingItem(
+                booking=booking,
+                event_space=event_space,
+                units_booked=units,
+                price_per_unit=price_per_unit_total, # Total price per unit for the stay
+            )
+            booking_items_to_create.append(booking_item)
+            total_price += booking_item.subtotal()
+
+        EventSpaceBookingItem.objects.bulk_create(booking_items_to_create)
+        
+        # 4. Decrement Availability
+        EventSpaceAvailabilityService.update_availability(
+            spaces_info=spaces_info,
+            check_in_date=booking.check_in_date,
+            check_out_date=booking.check_out_date,
+            increment=False, # Decrement
+        )
+
+        # 5. Update Booking Total Price
+        booking.total_price = total_price
+        booking.save(update_fields=['total_price'])
+        
+        return booking
+
+    @staticmethod
+    def cancel_booking(booking: EventSpaceBooking):
+        # Logic remains the same, as it only deals with status and availability update
+        if booking.status in [
+            booking.BookingStatus.CANCELLED,
+            booking.BookingStatus.CONFIRMED 
+        ]:
+            raise BookingConflict(
+                "Booking is already finalized and cannot be changed."
+            )
+        
+        spaces_info = []
+        for item in booking.items.all():
+            spaces_info.append({
+                "space_listing": item.event_space, 
+                "quantity": item.units_booked
+            })
+
+        # Increment Availability
+        EventSpaceAvailabilityService.update_availability(
+            spaces_info=spaces_info,
+            check_in_date=booking.check_in_date,
+            check_out_date=booking.check_out_date,
+            increment=True, 
+        )
+        
+        booking.status = booking.BookingStatus.CANCELLED
+        booking.save()
+        return booking
+
+    @staticmethod
+    @transaction.atomic
+    def partial_cancel_booking(booking_item: EventSpaceBookingItem, units_to_cancel: int):
+        """Partially cancels units from a specific EventSpaceBookingItem."""
+        booking = booking_item.booking
+        # Check conflict status
+        if booking.status in [
+            booking.BookingStatus.CANCELLED,
+            booking.BookingStatus.CONFIRMED,
+        ]:
+            raise BookingConflict("Booking is already finalized and cannot be changed.")
+            
+        if units_to_cancel <= 0:
+            raise BookingConflict("Units to cancel must be greater than zero.")
+
+        if units_to_cancel > booking_item.units_booked:
+            raise BookingConflict(
+                f"You cannot cancel more units ({units_to_cancel}) "
+                f"than booked ({booking_item.units_booked})."
+            )
+
+        spaces_info = [
+            {"space_listing": booking_item.event_space, "quantity": units_to_cancel}
+        ]
+        
+        # Update availability (increment=True)
+        EventSpaceAvailabilityService.update_availability(
+            spaces_info=spaces_info,
+            check_in_date=booking.check_in_date,
+            check_out_date=booking.check_out_date,
+            increment=True,
+        )
+        
+        # Update item's booked quantity
+        booking_item.units_booked -= units_to_cancel
+
+        # If zero, delete the booking item
+        if booking_item.units_booked == 0:
+            booking_item.delete()
+        else:
+            booking_item.save()
+
+        # Recalculate booking total (Simplified: sum current item subtotals)
+        booking.total_price = sum(item.subtotal() for item in booking.items.all())
+        booking.save()
+
+        return booking
+
+    @staticmethod
+    def confirm_booking(booking: EventSpaceBooking):
+        # Logic remains the same
+        if booking.status in [
+            booking.BookingStatus.CANCELLED,
+            booking.BookingStatus.CONFIRMED
+        ]:
+            raise BookingConflict(
+                "Booking is already finalized and cannot be changed."
+            )
+
+        booking.status = booking.BookingStatus.CONFIRMED
+        booking.save()
+
+        return booking
+    
+    @staticmethod
+    def get_booking_total(booking: EventSpaceBooking):
+        return sum(item.subtotal() for item in booking.items.all())
 
 class PaymentService:
     """
@@ -881,3 +1048,184 @@ class CarAvailabilityService:
                 available_cars.append(car)
         
         return available_cars
+class EventSpaceAvailabilityService:
+    @staticmethod
+    def create_availability(space_listing, units_quantity, days=90):
+        """
+        Populates EventSpaceAvailability records for a new listing.
+        The price comes from the listing's base_price (or other logic).
+        """
+        today = timezone.now().date()
+        objs = []
+        base_price = space_listing.base_price 
+        for i in range(1, days + 1):
+            objs.append(
+                EventSpaceAvailability(
+                    space_listing=space_listing,
+                    available_eventspace=units_quantity, 
+                    date=today + timedelta(days=i),
+                    price=base_price,
+                )
+            )
+
+        EventSpaceAvailability.objects.bulk_create(
+            objs, batch_size=1000, ignore_conflicts=True
+        )
+        
+
+    @staticmethod
+    def get_available_listings(hotel, space_type, check_in_date, check_out_date):
+        """
+        Retrieves EventSpaceListings that have availability for ALL days in the range.
+        """
+        required_days = (check_out_date - check_in_date).days
+
+        # Aggregate availability across the date range
+        qs = (
+            EventSpaceAvailability.objects
+            .filter(
+                space_listing__hotel=hotel,
+                space_listing__space_type=space_type,
+                date__gte=check_in_date,
+                date__lt=check_out_date,
+                available_eventspace__gt=0 # Must have at least 1 unit available
+            )
+            .values("space_listing")
+            .annotate(
+                total_days=Count("date", distinct=True),
+                min_available=Min("available_eventspace")
+            )
+            .filter(total_days=required_days) # Ensure availability exists for ALL days
+        )
+
+        # Extract listing IDs
+        listing_ids = [row["space_listing"] for row in qs]
+
+        listings = EventSpaceListing.objects.filter(id__in=listing_ids)
+
+        # NOTE: You'll typically want to attach the `min_available` quantity to the
+        # listing object/data structure before returning it to the frontend.
+
+        return listings, qs
+
+    @staticmethod
+    def validate_availability(space_infos, check_in_date, check_out_date):
+        """
+        Validates if the requested quantity of each space is available on ALL dates.
+        `space_infos` is a list of dictionaries: [{"space_listing": listing_obj, "quantity": 1}]
+        """
+        dates = []
+        date_cursor = check_in_date
+        while date_cursor < check_out_date:
+            dates.append(date_cursor)
+            date_cursor += timedelta(days=1)
+        
+        space_listing_ids = [info["space_listing"].id for info in space_infos]
+        availabilities = EventSpaceAvailability.objects.select_for_update().filter(
+            space_listing_id__in=space_listing_ids,
+            date__in=dates
+        )
+        
+        availability_map = {}
+        for av in availabilities:
+            key = (av.space_listing_id, av.date)
+            availability_map[key] = av
+        
+        for date_cursor in dates:
+            for info in space_infos:
+                listing = info["space_listing"]
+                quantity = info["quantity"]
+                key = (listing.id, date_cursor)
+                availability = availability_map.get(key)
+                
+                if not availability:
+                    raise BookingConflict(
+                        f"No availability data for {listing.title} on {date_cursor}"
+                    )
+                
+                if availability.available_eventspace < quantity:
+                    raise BookingConflict(
+                        f"Not enough units available for {listing.title} on {date_cursor}. "
+                        f"Available: {availability.available_eventspace}, Requested: {quantity}"
+                    )
+
+    @staticmethod
+    def update_availability(
+        space_infos,
+        check_in_date,
+        check_out_date,
+        increment: bool = False,
+    ):
+        """
+        Updates the available_units count. Decrements on booking, increments on cancellation.
+        """
+        dates = []
+        date_cursor = check_in_date
+        while date_cursor < check_out_date:
+            dates.append(date_cursor)
+            date_cursor += timedelta(days=1) 
+        with transaction.atomic():
+            for date_cursor in dates:
+                for info in space_infos:
+                    listing_id = info["space_listing"].id
+                    quantity = info["quantity"]
+                    
+                    obj = EventSpaceAvailability.objects.select_for_update().filter(
+                        space_listing_id=listing_id, date=date_cursor
+                    )
+
+                    if increment:
+                        obj.update(available_eventspace=F("available_eventspace") + quantity)
+                    else:
+                        obj.update(available_units=F("available_eventspace") - quantity)
+                    
+    @staticmethod
+    def ensure_future_availability(days_ahead=180, start_date=None):
+        """
+        A maintenance function to ensure all listings have availability populated for the future.
+        """
+        start = start_date or timezone.now().date()
+        end = start + timedelta(days=days_ahead)
+        
+        # Select related data to avoid N+1 queries in the loop
+        listings = EventSpaceListing.objects.select_related("hotel")
+        created = 0
+        batch = []
+        
+        for listing in listings:
+            if not listing.hotel:
+                continue
+            
+            # Find all dates that already have availability for this listing in the range
+            existing_dates = set(
+                EventSpaceAvailability.objects.filter(
+                    space_listing=listing,
+                    date__gte=start,
+                    date__lt=end
+                ).values_list("date", flat=True)
+            )
+            
+            cursor = start
+            while cursor < end:
+                if cursor not in existing_dates:
+                    # Create a new availability record
+                    batch.append(
+                        EventSpaceAvailability(
+                            space_listing=listing,
+                            date=cursor,
+                            available_eventspace=listing.total_units,
+                            price=listing.base_price,
+                        )
+                    )
+                    
+                    if len(batch) >= 1000:
+                        EventSpaceAvailability.objects.bulk_create(batch, batch_size=1000, ignore_conflicts=True)
+                        created += len(batch)
+                        batch = []
+                cursor += timedelta(days=1)
+                
+        if batch:
+            EventSpaceAvailability.objects.bulk_create(batch, batch_size=1000, ignore_conflicts=True)
+            created += len(batch)
+            
+        return created

@@ -255,3 +255,19 @@ class IsCompanyOrFrontDesk(permissions.BasePermission):
                 return True
         
         return False
+class ORPermission(permissions.BasePermission):
+    """
+    Accepts multiple permissions and allows access if ANY of them pass.
+    """
+    def __init__(self, *permissions):
+        self.permissions = permissions
+
+    def has_permission(self, request, view):
+        return any(p().has_permission(request, view) for p in self.permissions)
+
+    def has_object_permission(self, request, view, obj):
+        return any(
+            p().has_object_permission(request, view, obj)
+            if hasattr(p, 'has_object_permission') else False
+            for p in self.permissions
+        )

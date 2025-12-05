@@ -184,6 +184,7 @@ class CarListing(BaseListing):
     )
     images = GenericRelation(ListingImage, related_query_name="listings")
     quantity=models.PositiveSmallIntegerField(default=1,null=False)
+    seats=models.PositiveSmallIntegerField(default=3,null=False)
     class Meta:
         verbose_name = _("Car Listing")
         verbose_name_plural = _("Car Listings")
@@ -371,9 +372,9 @@ class CarAvailability(AbstractBaseModel):
     )
     
     class Meta:
-        verbose_name = _("Availability")
-        verbose_name_plural = _("Availabilities")
-        db_table = "availabilities"
+        verbose_name = _("Car Availability")
+        verbose_name_plural = _("Car Availabilities")
+        db_table = "Car availabilities"
         indexes = [
             models.Index(fields=['car_listing', 'availability_type', 'is_available']),
             models.Index(fields=['available_from', 'available_to']),
@@ -588,8 +589,8 @@ class RoomListing(BaseListing):
     )
 
     class Meta:
-        verbose_name = _("Room Type")
-        verbose_name_plural = _("Room Types")
+        verbose_name = _("Room Listing")
+        verbose_name_plural = _("Room Listing")
         db_table = "room_listings"
 
     def __str__(self):
@@ -884,7 +885,10 @@ class EventSpaceAvailability(AbstractBaseModel):
 
     price = models.DecimalField(
         max_digits=10, decimal_places=2, null=True, blank=True)
-
+    available_eventspace = models.PositiveIntegerField(
+        default=0,
+        verbose_name=_("Available Event Spaces")
+    )
     class Meta:
         verbose_name = _("Event space Availability")
         verbose_name_plural = _("Event Space Availabilities")
@@ -894,3 +898,104 @@ class EventSpaceAvailability(AbstractBaseModel):
 
     def __str__(self):
         return f"{self.space_listing} — {self.date}"
+class BookingBase(AbstractBaseModel):
+    """
+    Abstract Base Class for all Booking types (Room, Event Space, etc.).
+    """
+    class BookingStatus(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        CONFIRMED = "confirmed", _("Confirmed")
+        CANCELLED = "cancelled", _("Cancelled")
+        WALK_IN = "walk_in", _("Walk-In")
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        verbose_name=_("User")
+    )
+
+    check_in_date = models.DateField(verbose_name=_("Check-In Date"))
+    check_out_date = models.DateField(verbose_name=_("Check-Out Date"))
+
+    total_price = models.DecimalField(
+        max_digits=10, decimal_places=2, default=0, verbose_name=_("Total Price"))
+
+    status = models.CharField(
+        max_length=20, choices=BookingStatus.choices, default=BookingStatus.PENDING, verbose_name=_("Status")
+    )
+
+    class Meta:
+        abstract = True
+        constraints = [
+            # Valid date range
+            models.CheckConstraint(
+                check=Q(check_in_date__lt=F("check_out_date")),
+                name="booking_valid_dates",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Booking #{self.id} by {self.user} ({self.status})"
+class EventSpaceBooking(BookingBase):
+    """
+    Top-level Booking for Event Spaces.
+    """
+    class EventType(models.TextChoices):
+        WALK_IN = "walk_in", _("Walk-In")
+        MEETING = "meeting", _("Meeting")
+        CONFERENCE = "conference", _("Conference")
+        SEMINAR = "seminar", _("Seminar")
+        WORKSHOP = "workshop", _("Workshop")
+        WEBINAR = "webinar", _("Webinar")
+        NETWORKING = "networking", _("Networking")
+        TRADE_SHOW = "trade_show", _("Trade Show")
+        SOCIAL = "social", _("Social Event")
+        FUNDRAISER = "fundraiser", _("Fundraiser")
+        RETREAT = "retreat", _("Retreat")
+    event_type = event_type = models.CharField(
+        max_length=20,
+        choices=EventType.choices,
+        default=EventType.MEETING,
+    ) 
+    
+    class Meta:
+        verbose_name = _("Event Space Booking")
+        verbose_name_plural = _("Event Space Bookings")
+        db_table = "event_space_bookings"
+
+    def __str__(self):
+        return f"Event Space Booking #{self.id} - {self.status}"
+
+
+class EventSpaceBookingItem(AbstractBaseModel):
+    """
+    Represents a single event space unit booking within an EventSpaceBooking.
+    """
+    booking = models.ForeignKey(
+        EventSpaceBooking, # ForeignKey to the dedicated booking model
+        on_delete=models.CASCADE,
+        related_name="items", # Simple 'items' related_name is clean here
+        verbose_name=_("Booking")
+    )
+
+    event_space = models.ForeignKey(
+        EventSpaceListing,
+        on_delete=models.CASCADE,
+        related_name="event_space_booking_items",
+        verbose_name=_("Event Space")
+    )
+
+    units_booked = models.PositiveIntegerField(default=1)
+
+    price_per_unit = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        verbose_name = _("Event Space Booking Item")
+        verbose_name_plural = _("Event Space Booking Items")
+        db_table = "event_space_booking_items" 
+
+    def subtotal(self):
+        return self.units_booked * self.price_per_unit
+
+    def __str__(self) -> str:
+        return f"Space {self.event_space.title} booked for {self.booking.check_in_date}"
