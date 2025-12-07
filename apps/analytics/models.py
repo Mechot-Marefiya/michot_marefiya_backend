@@ -33,3 +33,15 @@ class ListingDailyMetrics(AbstractBaseModel):
     class Meta:
         db_table = "listing_daily_metrics"
         unique_together = ("listing_id", "date")
+
+
+
+class AnalyticsDirtyDate(AbstractBaseModel):
+    """Tracks company/date pairs that need recomputation."""
+    company_id = models.UUIDField(db_index=True)
+    date = models.DateField(db_index=True)
+    processed = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "analytics_dirty_dates"
+        unique_together = ("company_id", "date")

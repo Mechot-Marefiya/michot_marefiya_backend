@@ -4,7 +4,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from apps.account.models import CompanyProfile
-from apps.analytics.models import CompanyDailyMetrics
+from apps.analytics.models import CompanyDailyMetrics, AnalyticsDirtyDate
 from apps.analytics import services
 
 
@@ -19,16 +19,26 @@ class Command(BaseCommand):
     help = "Compute daily company metrics for a date range and store them in CompanyDailyMetrics."
 
     def add_arguments(self, parser):
-        parser.add_argument("--start", required=True, help="Start date YYYY-MM-DD")
-        parser.add_argument("--end", required=True, help="End date YYYY-MM-DD")
+        parser.add_argument("--start", required=False, help="Start date YYYY-MM-DD")
+        parser.add_argument("--end", required=False, help="End date YYYY-MM-DD")
         parser.add_argument(
             "--company",
             help="Company UUID to compute for (omit to process all companies)",
         )
+        parser.add_argument(
+            "--process-dirty",
+            action="store_true",
+            help="Process unprocessed AnalyticsDirtyDate rows instead of a date range",
+        )
 
     def handle(self, *args, **options):
-        start = date.fromisoformat(options["start"])
-        end = date.fromisoformat(options["end"])
+        process_dirty = options.get("process_dirty")
+
+        start_raw = options.get("start")
+        end_raw = options.get("end")
+
+        start = date.fromisoformat(start_raw) if start_raw else None
+        end = date.fromisoformat(end_raw) if end_raw else None
         company_arg = options.get("company")
 
         if company_arg:
@@ -43,9 +53,66 @@ class Command(BaseCommand):
         created = 0
         updated = 0
 
+        if process_dirty:
+            # Process unprocessed dirty date rows
+            dirty_qs = AnalyticsDirtyDate.objects.filter(processed=False)
+            if company_arg:
+                dirty_qs = dirty_qs.filter(company_id=company_arg)
+            if start:
+                dirty_qs = dirty_qs.filter(date__gte=start)
+            if end:
+                dirty_qs = dirty_qs.filter(date__lte=end)
+
+            for dirty in dirty_qs.order_by("company_id", "date"):
+                comp_id = dirty.company_id
+                dt = dirty.date
+                metrics = services.compute_company_overview(str(comp_id), dt, dt)
+
+                defaults = {
+                    "revenue": _to_decimal(metrics.get("total_revenue", 0)),
+                    "bookings_count": int(metrics.get("total_bookings", 0) or 0),
+                    "confirmed_count": int(metrics.get("confirmed_bookings", 0) or 0),
+                    "cancelled_count": int(metrics.get("cancellations", 0) or 0),
+                    "avg_booking_value": _to_decimal(metrics.get("avg_booking_value", 0)),
+                    "top_listings": metrics.get("top_listings", []),
+                }
+
+                with transaction.atomic():
+                    obj, created_flag = CompanyDailyMetrics.objects.update_or_create(
+                        company_id=comp_id,
+                        date=dt,
+                        defaults=defaults,
+                    )
+                    # mark dirty processed
+                    dirty.processed = True
+                    dirty.save()
+
+                if created_flag:
+                    created += 1
+                else:
+                    updated += 1
+
+                self.stdout.write(f"Processed dirty company {comp_id} for {dt}: created={created_flag}")
+
+            self.stdout.write(self.style.SUCCESS(f"Done processing dirty rows. created={created} updated={updated}"))
+            return
+
+        # Non-dirty mode: require start and end
+        if not start or not end:
+            self.stdout.write(self.style.ERROR("--start and --end are required unless --process-dirty is used."))
+            return
+
+        if company_arg:
+            companies = CompanyProfile.objects.filter(id=company_arg)
+            if not companies.exists():
+                self.stdout.write(self.style.ERROR(f"Company {company_arg} not found."))
+                return
+        else:
+            companies = CompanyProfile.objects.all()
+
+        current = start
         while current <= end:
             for comp in companies:
-                # use the service to compute overview for the single day
                 metrics = services.compute_company_overview(str(comp.id), current, current)
 
                 defaults = {
@@ -69,9 +136,7 @@ class Command(BaseCommand):
                 else:
                     updated += 1
 
-                self.stdout.write(
-                    f"Processed company {comp.id} for {current}: created={created_flag}"
-                )
+                self.stdout.write(f"Processed company {comp.id} for {current}: created={created_flag}")
 
             current = current + timedelta(days=1)
 
