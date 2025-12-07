@@ -58,6 +58,7 @@ urlpatterns = [
     path("api/schema/", SpectacularAPIView.as_view(), name="schema"),
     
     path("api/v1/payment/", include("apps.payment.urls")),
+    path("api/v1/analytics/", include("apps.analytics.urls")),
 ]
 
 if settings.DEBUG:
