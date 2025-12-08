@@ -227,11 +227,13 @@ class ChangePasswordSerializer(serializers.Serializer):
 
 class CompanyProfileResponseSerializer(serializers.ModelSerializer):
     address = AddressSerializer()
+    user = UserResponseSerializer()
 
     class Meta:
         model = CompanyProfile
         fields = [
             "id",
+            "user",
             "name",
             "phone",
             "category",
