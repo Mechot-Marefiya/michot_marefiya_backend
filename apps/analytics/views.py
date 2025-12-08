@@ -8,6 +8,7 @@ from drf_spectacular.utils import extend_schema
 from apps.account.permissions import IsCompany
 from apps.analytics import services
 from apps.analytics.serializers import OverviewSerializer, TimeseriesItemSerializer
+from apps.account.enums import RoleCode
 
 
 class CompanyOverviewView(APIView):
@@ -36,12 +37,29 @@ class CompanyOverviewView(APIView):
 
         # admin may query other companies via company_id
         company_id = request.query_params.get("company_id")
+
+        # determine if current user is admin-like
+        is_admin = False
+        if request.user.is_superuser:
+            is_admin = True
+        elif hasattr(request.user, 'role') and request.user.role:
+            try:
+                is_admin = request.user.role.code == RoleCode.ADMIN.value
+            except Exception:
+                is_admin = False
+
         if not company_id:
             # try to resolve company profile id from user.profile
             profile = getattr(user, "profile", None)
             if not profile:
                 return Response({"detail": "Company profile not found."}, status=status.HTTP_403_FORBIDDEN)
             company_id = str(profile.id)
+        else:
+            # if a company_id was provided, only allow it for admin users
+            if not is_admin:
+                profile = getattr(user, "profile", None)
+                if not profile or str(profile.id) != str(company_id):
+                    return Response({"detail": "Not authorized to view this company's analytics."}, status=status.HTTP_403_FORBIDDEN)
 
         data = services.compute_company_overview(company_id, start_date, end_date)
 
@@ -73,11 +91,26 @@ class CompanyRevenueView(APIView):
             start_date = end_date - timedelta(days=30)
 
         company_id = request.query_params.get("company_id")
+
+        is_admin = False
+        if request.user.is_superuser:
+            is_admin = True
+        elif hasattr(request.user, 'role') and request.user.role:
+            try:
+                is_admin = request.user.role.code == RoleCode.ADMIN.value
+            except Exception:
+                is_admin = False
+
         if not company_id:
             profile = getattr(user, "profile", None)
             if not profile:
                 return Response({"detail": "Company profile not found."}, status=status.HTTP_403_FORBIDDEN)
             company_id = str(profile.id)
+        else:
+            if not is_admin:
+                profile = getattr(user, "profile", None)
+                if not profile or str(profile.id) != str(company_id):
+                    return Response({"detail": "Not authorized to view this company's analytics."}, status=status.HTTP_403_FORBIDDEN)
 
         items = services.revenue_timeseries(company_id, start_date, end_date, granularity=granularity)
         serializer = TimeseriesItemSerializer(items, many=True)
