@@ -16,6 +16,7 @@ from pathlib import Path
 import dj_database_url
 from environ import Env
 
+
 env = Env()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -235,3 +236,26 @@ CHAPA_SECRET_KEY = env("CHAPA_SECRET_KEY", default=None)
 CHAPA_WEBHOOK_SECRET = env("CHAPA_WEBHOOK_SECRET", default=None)
 CHAPA_CALLBACK_URL = env("CHAPA_CALLBACK_URL", default=None)
 FRONTEND_URL = env("FRONTEND_URL", default=None)
+# --- Celery Configuration ---
+# Use the Docker service name 'redis' as the hostname for the broker and backend.
+CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://redis:6379/0') 
+CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default='redis://redis:6379/0') 
+
+# Timezone must match the Django TIME_ZONE
+CELERY_TIMEZONE = TIME_ZONE 
+
+# Configuration for task serialization
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+BOOKING_PENDING_TIMEOUT_MINUTES = 15
+# Celery Beat Schedule Configuration
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    "fetch-daily-exchange-rates-every-1-day": {
+        "task": "apps.core.tasks.fetch_daily_exchange_rates",
+        "schedule": crontab(minute="*/5"),  # <-- RUN EVERY 1 day
+        "args": (),
+    },
+}
