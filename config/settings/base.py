@@ -76,7 +76,14 @@ THIRD_PARTY_APPS = [
     "corsheaders",
 ]
 
-CUSTOM_APPS = ["apps.account", "apps.core", "apps.listing", "apps.payment", "apps.analytics"]
+CUSTOM_APPS = [
+    "apps.account",
+    "apps.core",
+    "apps.listing",
+    "apps.payment",
+    "apps.analytics",
+    "apps.favorites",
+]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + CUSTOM_APPS
 
