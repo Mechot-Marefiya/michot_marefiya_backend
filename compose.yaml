@@ -10,7 +10,14 @@ services:
       retries: 5
     volumes:
       - marefiya_pgdata:/var/lib/postgresql
-
+  redis:  # <-- NEW REDIS SERVICE
+      image: redis:7-alpine
+      container_name: marefiya_redis
+      ports:
+        - "6379:6379"
+      command: redis-server --appendonly yes
+      volumes:
+        - marefiya_redis_data:/data # Volume for persistence
   pgadmin4:
     image: dpage/pgadmin4
     ports:
@@ -45,7 +52,40 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_started # Add dependency on Redis
+  celery: # <-- NEW CELERY WORKER SERVICE
+      build:
+        context: .
+        dockerfile: ./docker/prod/Dockerfile
+        args:
+          USER_ID: ${UID}
+          GROUP_ID: ${GID}
+      image: marefiya:dev
+      # The command runs the Celery worker, pointing to your new app instance
+      command: celery -A config.celery worker -l info
+      volumes:
+        - ./:/usr/src/app
+      user: "${UID}:${GID}"
+      env_file:
+        - .env
+      depends_on:
+        - redis
+        - api # Ensure Django is built before Celery starts looking for tasks
+  celery-beat: #new Sevice
+    build:
+      context: .
+      dockerfile: ./docker/prod/Dockerfile
+    command: celery -A config.celery beat -l info
+    depends_on:
+      - api
+      - redis
+    env_file:
+      - .env
+    volumes:
+      - ./:/usr/src/app
 
 volumes:
   marefiya_pgdata:
   marefiya_pgadmin_data:
+  marefiya_redis_data: # <-- NEW VOLUME FOR REDIS PERSISTENCE

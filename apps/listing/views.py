@@ -1166,7 +1166,7 @@ class BookingViewSet(AbstractModelViewSet):
             return [ORPermission(IsAuthenticated, IsCompanyOrFrontDesk)]
         elif self.action in ['list', 'retrieve']:
             return [IsAuthenticated()]
-        elif self.action in ['partial_cancel', 'rate_booking']:
+        elif self.action in ['partial_cancel', 'cancel','rate_booking']:
             return [IsBookingOwner()]
         else:
             return [IsAuthenticated()]
@@ -1216,6 +1216,22 @@ class BookingViewSet(AbstractModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        """Allows an authenticated user to cancel their booking."""
+        booking = self.get_object()
+        
+        try:
+            cancelled_booking = BookingService.cancel_booking(booking)
+        except BookingConflict as e:
+            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+
+        return Response(
+            BookingResponseSerializer(
+                cancelled_booking, context=self.get_serializer_context()
+            ).data,
+            status=status.HTTP_200_OK
+        )
     @action(detail=True, methods=["post"],serializer_class=PartialCancelSerializer, url_path="partial-cancel")
     def partial_cancel(self, request, pk=None):
         serializer = PartialCancelSerializer(data=request.data)
