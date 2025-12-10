@@ -708,7 +708,7 @@ class BookingViewSet(AbstractModelViewSet):
             return queryset
         
         # Users see only their own bookings
-        user_bookings = queryset.filter(user=self.request.user)
+        user_bookings = queryset.filter(user=self.request.user).distinct()
         
         # Companies see bookings for their listings + own bookings
         if hasattr(self.request.user, 'role') and self.request.user.role:
