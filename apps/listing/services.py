@@ -492,17 +492,19 @@ class BookingService:
             )
 
         if use_seasonal:
-            # compute total from BookingItemPrice rows
-            total = BookingItemPrice.objects.filter(booking_item__booking=booking).aggregate(
-                total=Min('price_per_unit')  # placeholder to force a queryset evaluation
-            )
-            # compute properly in Python to avoid complex aggregation across units
+            # compute total from BookingItemPrice rows (per-night prices already stored)
             total_price = Decimal('0.00')
             for pip in BookingItemPrice.objects.filter(booking_item__booking=booking):
-                total_price += (pip.price_per_unit * pip.units)
+                total_price += (Decimal(pip.price_per_unit) * Decimal(pip.units))
             booking.total_price = total_price
         else:
-            booking.total_price = sum(i.subtotal() for i in booking.items.all())
+            # Non-seasonal: price_per_unit on BookingItem is stored as per-night base price.
+            # Multiply by number of nights and units booked to get the total.
+            nights = (booking.check_out_date - booking.check_in_date).days
+            total_price = Decimal('0.00')
+            for item in booking.items.all():
+                total_price += (Decimal(item.price_per_unit) * Decimal(item.units_booked) * Decimal(nights))
+            booking.total_price = total_price
 
         booking.save()
         return booking
@@ -574,7 +576,18 @@ class BookingService:
             booking_item.save()
 
         # Recalculate booking total
-        booking.total_price = sum(item.subtotal() for item in booking.items.all())
+        use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
+        if use_seasonal:
+            total_price = Decimal('0.00')
+            for pip in BookingItemPrice.objects.filter(booking_item__booking=booking):
+                total_price += (Decimal(pip.price_per_unit) * Decimal(pip.units))
+            booking.total_price = total_price
+        else:
+            nights = (booking.check_out_date - booking.check_in_date).days
+            total_price = Decimal('0.00')
+            for item in booking.items.all():
+                total_price += (Decimal(item.price_per_unit) * Decimal(item.units_booked) * Decimal(nights))
+            booking.total_price = total_price
         booking.save()
 
         return booking
@@ -604,7 +617,23 @@ class BookingService:
     
     @staticmethod
     def get_booking_total(booking):
-        return sum(item.subtotal() for item in booking.items.all())
+        """Return booking total considering seasonal pricing if enabled.
+
+        - When `FEATURE_SEASONAL_PRICING` is enabled, sums `BookingItemPrice` rows (per-night).
+        - Otherwise, multiplies booking item per-night price by nights and units.
+        """
+        use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
+        if use_seasonal:
+            total = Decimal('0.00')
+            for pip in BookingItemPrice.objects.filter(booking_item__booking=booking):
+                total += (Decimal(pip.price_per_unit) * Decimal(pip.units))
+            return total
+
+        nights = (booking.check_out_date - booking.check_in_date).days
+        total = Decimal('0.00')
+        for item in booking.items.all():
+            total += (Decimal(item.price_per_unit) * Decimal(item.units_booked) * Decimal(nights))
+        return total
 class EventSpaceBookingService:
     @transaction.atomic()
     @staticmethod
@@ -1177,7 +1206,7 @@ class EventSpaceAvailabilityService:
                     if increment:
                         obj.update(available_eventspace=F("available_eventspace") + quantity)
                     else:
-                        obj.update(available_units=F("available_eventspace") - quantity)
+                        obj.update(available_eventspace=F("available_eventspace") - quantity)
                     
     @staticmethod
     def ensure_future_availability(days_ahead=180, start_date=None):
