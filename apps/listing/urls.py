@@ -14,7 +14,8 @@ from apps.listing.views import (
     CarAvailabilityByDateRangeView, 
     StayAvailabilityUpdateView,
     EventSpaceListingViewSet,
-    EventSpaceBookingViewSet
+    EventSpaceBookingViewSet,
+    GuestHouseBookingAPIView,
 )
 
 router = DefaultRouter()
@@ -33,10 +34,12 @@ urlpatterns = [
    path(
         "stays/availability/<uuid:pk>/update/", StayAvailabilityUpdateView.as_view(),name="stay-availability-update"),
    path("car-availabilities/<uuid:pk>/update/",CarAvailabilityUpdateAPIView.as_view(),name="car-availability-update"),
+   
    # Stay search
     path("stays/search/", StaySearchView.as_view(), name="stay-search"),
     path("car-availabilities/by-car-and-date/", CarAvailabilityByCarAndDateView.as_view(),  name="car-availability-by-car-and-date"),
     path("car-availabilities/by-dates/", CarAvailabilityByDateRangeView.as_view(), name="car-availability-by-date-range"),
+    path('guesthouse-bookings/', GuestHouseBookingAPIView.as_view(), name='guesthouse-bookings'),
 ]
 
 urlpatterns += router.urls

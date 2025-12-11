@@ -5,8 +5,13 @@ from apps.listing.models import (
     CarListing,
     CarAvailability,CarRental,CarRentalItem,
     EventSpaceListing,
+     GuestHouseListing,
+     GuestHouseAvailability,
+    GuestHouseBooking,
+    GuestHouseBookingItem,
+    EventSpaceBookingItem,
+    EventSpaceBooking,
     EventSpaceAvailability,
-    GuestHouseListing,
     ListingImage,
     PropertyListing,
     RoomListing,
@@ -30,6 +35,10 @@ admin.site.register(EventSpaceAvailability)
 admin.site.register(CarRental)
 admin.site.register(CarRentalItem)
 admin.site.register(EventSpaceListing)
+admin.site.register(EventSpaceBookingItem)
+admin.site.register(EventSpaceBooking)
+admin.site.register(GuestHouseAvailability)
+admin.site.register(GuestHouseBooking)
 @admin.register(PropertyListing)
 class PropertyListingAdmin(admin.ModelAdmin):
     list_display = (
@@ -95,3 +104,6 @@ class TransactionAdmin(admin.ModelAdmin):
 class StayAvailabilityAdmin(admin.ModelAdmin):
     # list_display = ["hotel", "room"]
     ordering = ["date"]
+@admin.register(GuestHouseBookingItem)
+class GuestHouseBookingItemAdmin(admin.ModelAdmin):
+    list_display = ("booking", "room", "units_booked", "price_per_unit")

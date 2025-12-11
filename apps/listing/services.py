@@ -11,7 +11,7 @@ from typing import Dict, Optional, Tuple,Any,List
 from decimal import Decimal
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.account.services import ImageCreationService
-from apps.core.models import Address
+from apps.core.models import Address,Facility
 from apps.listing.exceptions import BookingConflict
 from apps.listing.models import (
     Amenity,
@@ -27,6 +27,7 @@ from apps.listing.models import (
     EventSpaceBooking,
     EventSpaceBookingItem,
     CarRental,
+    GuestHouseAvailability,
     CarRentalItem,
     Season,
     BookingItemPrice,
@@ -94,6 +95,7 @@ class ListingService:
         images = validated_data.pop("images")
         address_data = validated_data.pop("address", None)
         amenity_ids = validated_data.pop("amenities")
+        facility_ids=validated_data.pop("facilities")
         # individual_owner_id = validated_data.pop('individual_owner')
         address_instance = ListingService.create_address(address_data)
 
@@ -109,10 +111,14 @@ class ListingService:
         for id in amenity_ids:
             instance = get_object_or_404(Amenity, id=id)
             amenities.append(instance)
-
-        # M2M to amenities
+                # M2M to amenities
         guest_house_listing_instance.amenities.set(amenities)
-
+        facilities = []
+        for id in facility_ids:
+            instance = get_object_or_404(Facility, id=id)
+            facilities.append(instance)
+        # M2M to facilities
+        guest_house_listing_instance.facilities.set(facilities)
         ImageCreationService.create_images(
             guest_house_listing_instance, images)
 
@@ -1189,4 +1195,148 @@ class EventSpaceAvailabilityService:
             EventSpaceAvailability.objects.bulk_create(batch, batch_size=1000, ignore_conflicts=True)
             created += len(batch)
             
+        return created
+class GuestHouseAvailabilityService:
+
+    @staticmethod
+    def create_availability(guest_house, units_quantity, days=90):
+        """
+        Creates GuestHouseAvailability rows for the next `days` for a new listing.
+        """
+        today = timezone.now().date()
+        objs = []
+
+        for i in range(1, days + 1):
+            objs.append(
+                GuestHouseAvailability(
+                    guest_house=guest_house,
+                    available_rooms=units_quantity,
+                    date=today + timedelta(days=i)
+                )
+            )
+
+        GuestHouseAvailability.objects.bulk_create(
+            objs, batch_size=1000, ignore_conflicts=True
+        )
+
+    @staticmethod
+    def get_available_listings(check_in_date, check_out_date, min_units=1, address_filters=None):
+        """
+        Returns GuestHouseListing objects available for all days in the range.
+        """
+        required_days = (check_out_date - check_in_date).days
+
+        qs = GuestHouseAvailability.objects.filter(
+            date__gte=check_in_date,
+            date__lt=check_out_date,
+            available_rooms__gte=min_units
+        )
+
+        if address_filters:
+            qs = qs.filter(
+                guest_house__address__city__icontains=address_filters.get("city", ""),
+                guest_house__address__country__icontains=address_filters.get("country", ""),
+                guest_house__address__region__icontains=address_filters.get("region", ""),
+                guest_house__address__sub_city__icontains=address_filters.get("sub_city", "")
+            )
+
+        aggregated = qs.values("guest_house").annotate(
+            total_days=Count("date", distinct=True),
+            min_available=Min("available_rooms")
+        ).filter(total_days=required_days)
+
+        listing_ids = [row["guest_house"] for row in aggregated]
+        listings = GuestHouseListing.objects.filter(id__in=listing_ids, is_active=True)
+
+        return listings, aggregated
+
+    @staticmethod
+    def validate_availability(room_infos, check_in_date, check_out_date):
+        """
+        Validate availability for each room in room_infos:
+        room_infos = [{"guesthouse_listing": obj, "quantity": 2}, ...]
+        """
+        dates = [check_in_date + timedelta(days=i) for i in range((check_out_date - check_in_date).days)]
+        listing_ids = [r["guesthouse_listing"].id for r in room_infos]
+
+        availabilities = GuestHouseAvailability.objects.select_for_update().filter(
+            guest_house_id__in=listing_ids,
+            date__in=dates
+        )
+
+        availability_map = {(av.guest_house_id, av.date): av for av in availabilities}
+
+        for date in dates:
+            for info in room_infos:
+                listing = info["guesthouse_listing"]
+                qty = info["quantity"]
+                key = (listing.id, date)
+                av = availability_map.get(key)
+
+                if not av:
+                    raise BookingConflict(f"No availability for {listing.title} on {date}")
+                if av.available_rooms < qty:
+                    raise BookingConflict(f"Not enough rooms for {listing.title} on {date}. Available: {av.available_rooms}, Requested: {qty}")
+
+    @staticmethod
+    def update_availability(room_infos, check_in_date, check_out_date, increment=False):
+        """
+        Updates available_rooms:
+        decrement if booking, increment if cancellation.
+        """
+        dates = [check_in_date + timedelta(days=i) for i in range((check_out_date - check_in_date).days)]
+
+        with transaction.atomic():
+            for date in dates:
+                for info in room_infos:
+                    listing_id = info["guesthouse_listing"].id
+                    qty = info["quantity"]
+                    qs = GuestHouseAvailability.objects.select_for_update().filter(
+                        guest_house_id=listing_id, date=date
+                    )
+                    if increment:
+                        qs.update(available_rooms=F("available_rooms") + qty)
+                    else:
+                        qs.update(available_rooms=F("available_rooms") - qty)
+
+    @staticmethod
+    def ensure_future_availability(days_ahead=180, start_date=None):
+        """
+        Ensure all guest houses have availability populated for the next `days_ahead`.
+        """
+        start = start_date or timezone.now().date()
+        end = start + timedelta(days=days_ahead)
+        listings = GuestHouseListing.objects.all()
+        batch = []
+        created = 0
+
+        for listing in listings:
+            existing_dates = set(
+                GuestHouseAvailability.objects.filter(
+                    guest_house=listing,
+                    date__gte=start,
+                    date__lt=end
+                ).values_list("date", flat=True)
+            )
+
+            for day in range((end - start).days):
+                date = start + timedelta(days=day)
+                if date not in existing_dates:
+                    batch.append(
+                        GuestHouseAvailability(
+                            guest_house=listing,
+                            date=date,
+                            available_rooms=listing.total_rooms
+                        )
+                    )
+
+                    if len(batch) >= 1000:
+                        GuestHouseAvailability.objects.bulk_create(batch, batch_size=1000, ignore_conflicts=True)
+                        created += len(batch)
+                        batch = []
+
+        if batch:
+            GuestHouseAvailability.objects.bulk_create(batch, batch_size=1000, ignore_conflicts=True)
+            created += len(batch)
+
         return created

@@ -18,6 +18,7 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from apps.account.serializers import HotelProfileResponseSerializer
 from apps.listing.docs.schema import search_schema
 from apps.core.views import AbstractModelViewSet
+from rest_framework import viewsets
 from apps.listing.utils import ParseDatesAndQuantity
 from apps.listing.filters import PropertyFilter, RoomFilter, BookingFilter,EventSpaceFilter,EventSpaceBookingFilter
 from apps.account.permissions import (
@@ -44,7 +45,9 @@ from apps.listing.models import (
     EventSpaceListing,
     CarAvailability,
     EventSpaceBooking,
-    CarRental
+    CarRental,
+    GuestHouseBooking,
+    GuestHouseBookingItem
     
 )
 from apps.account.models import(CompanyProfile,IndividualOwnerProfile)
@@ -54,6 +57,7 @@ from apps.listing.serializers import (
     CarListingResponseSerializer,
     CarListingSerializer,
     BookingRatingSerializer,
+    
     CarAvailabilityUpdateSerializer,
     GuestHouseListingResponseSerializer,
     GuestHouseListingSerializer,
@@ -69,9 +73,10 @@ from apps.listing.serializers import (
     CarSearchSerializer,
     CarRentalSerializer,
     EventSpaceBookingResponseSerializer,
-    EventSpaceBookingSerializer
+    EventSpaceBookingSerializer,
+    GuestHouseBookingSerializer
 )
-from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService,PriceService
+from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService,PriceService,GuestHouseAvailabilityService
 @extend_schema(responses=RoomListingResponseSerializer)
 class RoomListingViewSet(AbstractModelViewSet):
     serializer_class = RoomListingSerializer
@@ -265,16 +270,137 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
         context["request"] = self.request
 
         return context
+    @extend_schema(
+            parameters=[
+                OpenApiParameter("check_in", OpenApiTypes.DATE, required=True),
+                OpenApiParameter("check_out", OpenApiTypes.DATE, required=True),
+                OpenApiParameter("units", OpenApiTypes.INT, required=False),
+                OpenApiParameter("city", OpenApiTypes.STR, required=False),
+                OpenApiParameter("country", OpenApiTypes.STR, required=False),
+                OpenApiParameter("region", OpenApiTypes.STR, required=False),
+                OpenApiParameter("sub_city", OpenApiTypes.STR, required=False),
+                OpenApiParameter("guesthouse_id", OpenApiTypes.INT, required=False),
+            ],
+            responses=GuestHouseListingResponseSerializer(many=True)
+        )
+    @action(detail=False, methods=["get"], url_path="check-availability")
+    def check_availability(self, request):
+            """
+            Check availability across all guesthouses or a specific one.
+            """
+            try:
+                check_in = datetime.strptime(request.query_params.get("check_in"), "%Y-%m-%d").date()
+                check_out = datetime.strptime(request.query_params.get("check_out"), "%Y-%m-%d").date()
+            except:
+                return Response({"error": "Invalid check_in/check_out format (YYYY-MM-DD required)."},
+                                status=status.HTTP_400_BAD_REQUEST)
 
+            if check_in >= check_out:
+                return Response({"error": "check_out must be after check_in."},
+                                status=status.HTTP_400_BAD_REQUEST)
 
-# @extend_schema(responses=CarListingResponseSerializer)
-# class CarListingViewSet(AbstractModelViewSet):
-#     permission_classes = [IsAuthenticatedOrReadOnly]
-#     serializer_class = CarListingSerializer
-#     queryset = CarListing.objects.all()
-#     # filter_backends = [DjangoFilterBackend]
-#     # filterset_class = CarFilter
+            units = int(request.query_params.get("units", 1))
 
+            address_filters = {
+                "city": request.query_params.get("city"),
+                "country": request.query_params.get("country"),
+                "region": request.query_params.get("region"),
+                "sub_city": request.query_params.get("sub_city"),
+            }
+
+            guesthouse_id = request.query_params.get("guesthouse_id")
+
+            if guesthouse_id:
+                listing = GuestHouseListing.objects.filter(id=guesthouse_id, is_active=True).first()
+                if not listing:
+                    return Response({"error": "Guest house not found."}, status=404)
+
+                qs, meta = GuestHouseAvailabilityService.get_available_listings(
+                    check_in, check_out, units, address_filters
+                )
+
+                qs = qs.filter(id=guesthouse_id)
+
+            else:
+                qs, meta = GuestHouseAvailabilityService.get_available_listings(
+                    check_in, check_out, units, address_filters
+                )
+            serializer = GuestHouseListingResponseSerializer(qs, many=True)
+            return Response({
+                "count": qs.count(),
+                "results": serializer.data
+            })
+
+@extend_schema(request=GuestHouseBookingSerializer,responses=GuestHouseBookingSerializer)
+class GuestHouseBookingAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        List bookings:
+        - Admins: all bookings
+        - Users: own bookings
+        """
+        user = request.user
+        if user.is_superuser:
+            bookings = GuestHouseBooking.objects.all()
+        else:
+            bookings = GuestHouseBooking.objects.filter(renter=user)
+
+        serializer = GuestHouseBookingSerializer(bookings, many=True)
+        return Response(serializer.data)
+
+    @transaction.atomic
+    def post(self, request):
+        """
+        Create a new booking.
+        Validates availability and updates it.
+        """
+        serializer = GuestHouseBookingSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+
+        items_data = serializer.validated_data.pop("items")
+        renter = request.user
+        start_date = serializer.validated_data["start_date"]
+        end_date = serializer.validated_data["end_date"]
+
+        # Prepare room infos for availability service
+        room_infos = [
+            {"guesthouse_listing": item["room"], "quantity": item["units_booked"]}
+            for item in items_data
+        ]
+
+        # Validate availability
+        GuestHouseAvailabilityService.validate_availability(
+            room_infos, start_date, end_date
+        )
+
+        # Calculate total price
+        total_price = sum(item["units_booked"] * item["price_per_unit"] for item in items_data)
+
+        # Create booking
+        booking = GuestHouseBooking.objects.create(
+            renter=renter,
+            total_price=total_price,
+            **serializer.validated_data
+        )
+
+        # Create booking items
+        for item in items_data:
+            GuestHouseBookingItem.objects.create(
+                booking=booking,
+                **item
+            )
+
+        # Decrement availability
+        GuestHouseAvailabilityService.update_availability(
+            room_infos, start_date, end_date, increment=False
+        )
+
+        return Response(
+            GuestHouseBookingSerializer(booking).data,
+            status=status.HTTP_201_CREATED
+        )
 # Car Listing ViewSet
 @extend_schema(responses=CarListingResponseSerializer)
 class CarListingViewSet(AbstractModelViewSet):

@@ -7,20 +7,21 @@ from datetime import date
 from rest_framework.exceptions import ValidationError
 from apps.account.services import ImageCreationService
 from apps.account.serializers import AddressSerializer, ListingImageSerializer
-from apps.core.serializers import JsonSerializerField
+from apps.core.serializers import JsonSerializerField,FacilitySerializer
 from apps.listing.exceptions import BookingConflict
 from apps.account.enums import RoleCode
-from apps.listing.services import BookingService, ListingService,EventSpaceAvailabilityService,EventSpaceAvailabilityService
+from apps.core.models import Address
+from apps.listing.services import BookingService, ListingService,EventSpaceAvailabilityService,EventSpaceAvailabilityService,GuestHouseAvailabilityService
 
 from apps.listing.models import (
     Amenity,
     Booking,BookingRating,
-    BookingItem,StayAvailability,
+    BookingItem,StayAvailability,GuestHouseAvailability,
     CarListing,CarAvailability,
     GuestHouseListing,
     PropertyListing,
     RoomListing,EventSpaceListing,
-    CarRental,CarRentalItem,
+    CarRental,CarRentalItem,GuestHouseBookingItem,GuestHouseBooking
 )
 from apps.listing.exceptions import RatingException
 from .services import CarAvailabilityService
@@ -103,7 +104,7 @@ class GuestHouseListingResponseSerializer(serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     address = AddressSerializer()
     amenities = AmenityResponseSSerializer(many=True)
-
+    facilities=FacilitySerializer()
     class Meta:
         model = GuestHouseListing
         fields = [
@@ -116,6 +117,7 @@ class GuestHouseListingResponseSerializer(serializers.ModelSerializer):
             "amenities",
             "address",
             "rating",
+            "facilities",
         ]
 
 
@@ -123,7 +125,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
     address = JsonSerializerField()
     images = serializers.ListField(child=serializers.ImageField())
     amenities = JsonSerializerField()
-
+    facilities=FacilitySerializer()
     class Meta:
         model = GuestHouseListing
         fields = [
@@ -136,6 +138,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             "total_rooms",
             "amenities",
             "address",
+            "facilities"
         ]
 
     def validate_address(self, attr):
@@ -153,32 +156,190 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("An owner is required.")
         return data
 
+    # def create(self, validated_data):
+    #     # user = self.context["request"].user
+    #     # individual_owner = validated_data.get("individual_owner")
+
+    #     # ? Just for testing purpose
+    #     # validated_data['individual_owner'] = "8393efcf-27c8-4408-bac1-cea75cccee96"
+
+    #     # if not individual_owner:
+    #     #     # ! Checking if the company is not doing this
+    #     #     # ! but rather the Michot admin doing this and in some case the individual owner is missed.
+    #     #     # ! Which means the logged in user is Michot admin (not another vendor)
+    #     #     if user.role and user.role.code == RoleCode.ADMIN.value:
+    #     #         raise serializers.ValidationError(
+    #     #             "Valid Company or individual owner must exist."
+    #     #         )
+    #     #     company = get_object_or_404(CompanyProfile, user=user)
+    #     #     validated_data["company"] = company
+
+    #     # TODO: proper error handling
+    #     return ListingService.create_guest_house_listing(validated_data)
+    @transaction.atomic
     def create(self, validated_data):
-        # user = self.context["request"].user
-        # individual_owner = validated_data.get("individual_owner")
+        images = validated_data.pop("images", [])
+        amenities = validated_data.pop("amenities", [])
+        facilities = validated_data.pop("facilities", [])
+        address_data = validated_data.pop("address")
 
-        # ? Just for testing purpose
-        # validated_data['individual_owner'] = "8393efcf-27c8-4408-bac1-cea75cccee96"
+        address = Address.objects.create(**address_data)
+        validated_data["address"] = address
 
-        # if not individual_owner:
-        #     # ! Checking if the company is not doing this
-        #     # ! but rather the Michot admin doing this and in some case the individual owner is missed.
-        #     # ! Which means the logged in user is Michot admin (not another vendor)
-        #     if user.role and user.role.code == RoleCode.ADMIN.value:
-        #         raise serializers.ValidationError(
-        #             "Valid Company or individual owner must exist."
-        #         )
-        #     company = get_object_or_404(CompanyProfile, user=user)
-        #     validated_data["company"] = company
+        instance = GuestHouseListing.objects.create(**validated_data)
 
-        # TODO: proper error handling
-        return ListingService.create_guest_house_listing(validated_data)
+        if isinstance(amenities, list):
+            instance.amenities.set(amenities)
+
+        if isinstance(facilities, list):
+            instance.facility.set(facilities)
+
+        if images:
+            ImageCreationService.create_images(instance, images)
+
+        # FIX: use correct service method
+        GuestHouseAvailabilityService.create_availability(
+            instance,
+            units_quantity=instance.total_rooms
+        )
+
+        return instance
 
     def to_representation(self, instance):
         return GuestHouseListingResponseSerializer(
             instance, self.context
         ).to_representation(instance)
+class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GuestHouseBookingItem
+        fields = [
+            "room",
+            "units_booked",
+        ]
+class GuestHouseBookingSerializer(serializers.ModelSerializer):
+    items = GuestHouseBookingItemSerializer(many=True, write_only=True)
+    class Meta:
+        model = GuestHouseBooking
+        fields = [
+            "id",
+            "renter",
+            "start_date",
+            "end_date",
+            "total_price",
+            "items",
+            
+        ]
+        read_only_fields = ["id", "status", "created_at", "updated_at"]
+    def validate(self, data):
+        start = data["start_date"]
+        end = data["end_date"]
+        items = data.get("items", [])
 
+        if start >= end:
+            raise serializers.ValidationError("End date must be after start date.")
+
+        if start < datetime.now().date():
+            raise serializers.ValidationError("Start date cannot be in the past.")
+
+        if not items:
+            raise serializers.ValidationError("At least one room booking item is required.")
+
+        # Build space_infos list expected by availability service
+        room_infos = [
+            {"guesthouse_listing": item["room"], "quantity": item["units_booked"]}
+            for item in items
+        ]
+
+        # Centralized availability validation
+        GuestHouseAvailabilityService.validate_availability(
+            room_infos, start, end
+        )
+
+        return data
+
+    @transaction.atomic
+    def create(self, validated_data):
+        items_data = validated_data.pop("items")
+        renter = self.context["request"].user
+
+        # Calculate total price
+        total_price = sum([
+            item["units_booked"] * item["price_per_unit"]
+            for item in items_data
+        ])
+
+        booking = GuestHouseBooking.objects.create(
+            renter=renter,
+            total_price=total_price,
+            **validated_data
+        )
+
+        # Build space_infos for update
+        room_infos = []
+
+        for item in items_data:
+            obj = GuestHouseBookingItem.objects.create(
+                booking=booking,
+                **item
+            )
+
+            room_infos.append({
+                "guesthouse_listing": obj.room,
+                "quantity": obj.units_booked
+            })
+
+        # Decrement availability
+        GuestHouseAvailabilityService.update_availability(
+            room_infos,
+            booking.start_date,
+            booking.end_date,
+            increment=False
+        )
+
+        return booking
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        new_status = validated_data.get("status")
+        old_status = instance.status
+
+        # CANCELLED → add back availability
+        if old_status == GuestHouseBooking.RentStatus.CONFIRMED and new_status == GuestHouseBooking.RentStatus.CANCELLED:
+
+            room_infos = [{
+                "guesthouse_listing": item.room,
+                "quantity": item.units_booked
+            } for item in instance.items.all()]
+
+            GuestHouseAvailabilityService.update_availability(
+                room_infos,
+                instance.start_date,
+                instance.end_date,
+                increment=True
+            )
+
+        # CONFIRMATION → revalidate
+        if old_status == GuestHouseBooking.RentStatus.PENDING and new_status == GuestHouseBooking.RentStatus.CONFIRMED:
+
+            room_infos = [{
+                "guesthouse_listing": item.room,
+                "quantity": item.units_booked
+            } for item in instance.items.all()]
+
+            GuestHouseAvailabilityService.validate_availability(
+                room_infos,
+                instance.start_date,
+                instance.end_date
+            )
+
+        return super().update(instance, validated_data)
+
+
+class GuestHouseAvailabilitySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = GuestHouseAvailability
+        fields = ["id", "date", "available_rooms"]
+        read_only_fields = ["id"]
 
 # class CarListingResponseSerializer(serializers.ModelSerializer):
 #     images = ListingImageSerializer(many=True)
@@ -955,7 +1116,7 @@ class EventSpaceBookingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = EventSpaceBooking # Mapped to the dedicated model
-        fields = ["items", "check_in_date", "check_out_date", "status","event_type"]
+        fields = ["items", "check_in_date", "check_out_date","event_type"]
         read_only_fields = ["status"]
 
     def validate(self, data):
