@@ -3,6 +3,23 @@ from django.db import models
 from django.db.models import Q, F
 from django.contrib.contenttypes.fields import GenericRelation
 from django.utils.translation import gettext_lazy as _
+from django.core.exceptions import ValidationError
+
+
+def validate_days_of_week(value):
+    """Validator to ensure `days_of_week` is a list of integers 0..6.
+
+    Accepts empty list. Raises ValidationError on invalid types or values.
+    """
+    if value is None:
+        return
+    if not isinstance(value, (list, tuple)):
+        raise ValidationError("days_of_week must be a list of integers 0..6")
+    for v in value:
+        if not isinstance(v, int):
+            raise ValidationError("each entry in days_of_week must be an integer 0..6")
+        if v < 0 or v > 6:
+            raise ValidationError("each entry in days_of_week must be between 0 and 6 (Mon=0..Sun=6)")
 from apps.core.models import AbstractBaseModel, Address
 from apps.account.models import (
     CompanyProfile,
@@ -794,7 +811,7 @@ class SeasonalRate(AbstractBaseModel):
 
     priority = models.IntegerField(default=0)
     active = models.BooleanField(default=True)
-    days_of_week = models.JSONField(default=list, blank=True)
+    days_of_week = models.JSONField(default=list, blank=True, validators=[validate_days_of_week])
     min_stay = models.PositiveIntegerField(null=True, blank=True)
 
     class Meta:

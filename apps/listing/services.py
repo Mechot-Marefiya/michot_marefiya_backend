@@ -411,6 +411,7 @@ class PriceService:
         if matched:
             # sort by priority desc then specificity (room>hotel>company>global)
             def score(r):
+                # specificity: room > hotel > company > global
                 spec = 0
                 if r.room:
                     spec = 3
@@ -418,8 +419,10 @@ class PriceService:
                     spec = 2
                 elif r.company:
                     spec = 1
-                return (r.priority, spec)
+                # use created_at as deterministic tie-breaker; later entries win
+                return (r.priority, spec, getattr(r, 'created_at', None))
 
+            # sort by priority desc, then specificity desc, then created_at desc
             matched.sort(key=score, reverse=True)
             chosen = matched[0]
             if chosen.price_override is not None:
