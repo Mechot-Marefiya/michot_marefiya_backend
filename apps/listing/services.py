@@ -434,6 +434,76 @@ class PriceService:
         # 3) fallback to base price
         return Decimal(room.base_price)
 
+    @staticmethod
+    def resolve_price_detail(room: RoomListing, when: date) -> dict:
+        # Returns detailed info for a single date: final price and source info
+        inv = RoomInventory.objects.filter(room_listing=room, date=when).first()
+        if inv and inv.price is not None:
+            return {
+                "price": Decimal(inv.price).quantize(Decimal('0.01')),
+                "source": "inventory",
+                "rate_id": None,
+                "note": None,
+            }
+
+        hotel = room.hotel
+        company = getattr(hotel, 'company', None) if hotel else None
+
+        candidates = SeasonalRate.objects.filter(active=True).select_related('season')
+        scope_q = Q(room=room) | Q(hotel=hotel)
+        if company:
+            scope_q |= Q(company=company)
+        scope_q |= Q(room__isnull=True, hotel__isnull=True, company__isnull=True)
+        candidates = candidates.filter(scope_q)
+
+        matched = []
+        for rate in candidates:
+            if not PriceService._season_matches(rate.season, when):
+                continue
+            if rate.days_of_week:
+                try:
+                    if when.weekday() not in rate.days_of_week:
+                        continue
+                except Exception:
+                    pass
+            matched.append(rate)
+
+        if matched:
+            def score(r):
+                spec = 0
+                if r.room:
+                    spec = 3
+                elif r.hotel:
+                    spec = 2
+                elif r.company:
+                    spec = 1
+                return (r.priority, spec, getattr(r, 'created_at', None))
+
+            matched.sort(key=score, reverse=True)
+            chosen = matched[0]
+            if chosen.price_override is not None:
+                return {
+                    "price": Decimal(chosen.price_override).quantize(Decimal('0.01')),
+                    "source": "seasonal",
+                    "rate_id": str(chosen.id),
+                    "note": None,
+                }
+            if chosen.multiplier is not None:
+                base = Decimal(room.base_price)
+                return {
+                    "price": (base * Decimal(chosen.multiplier)).quantize(Decimal('0.01')),
+                    "source": "seasonal",
+                    "rate_id": str(chosen.id),
+                    "note": f"multiplier {chosen.multiplier}",
+                }
+
+        return {
+            "price": Decimal(room.base_price).quantize(Decimal('0.01')),
+            "source": "base",
+            "rate_id": None,
+            "note": None,
+        }
+
 
 class BookingService:
     @transaction.atomic()

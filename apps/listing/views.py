@@ -4,6 +4,7 @@ from django.conf import settings
 from django.db.models import Q, Count, Avg, Sum
 from django.utils import timezone
 from datetime import datetime, timedelta
+from decimal import Decimal
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework import status,filters
@@ -121,6 +122,43 @@ class RoomListingViewSet(AbstractModelViewSet):
                 return queryset.filter(is_active=True)
         
         return queryset.filter(is_active=True)
+
+    @action(detail=True, methods=['get'], url_path='price-preview')
+    def price_preview(self, request, pk=None):
+        room = self.get_object()
+        check_in = request.query_params.get('check_in')
+        check_out = request.query_params.get('check_out')
+        if not check_in or not check_out:
+            return Response({"detail": "check_in and check_out are required"}, status=400)
+        try:
+            check_in_date = parse_date(check_in)
+            check_out_date = parse_date(check_out)
+        except Exception:
+            return Response({"detail": "invalid date format"}, status=400)
+        if check_in_date >= check_out_date:
+            return Response({"detail": "check_out must be after check_in"}, status=400)
+
+        days = (check_out_date - check_in_date).days
+        lines = []
+        total = Decimal('0.00')
+        for i in range(days):
+            when = check_in_date + timedelta(days=i)
+            info = PriceService.resolve_price_detail(room, when)
+            price = info.get('price')
+            lines.append({
+                'date': when.isoformat(),
+                'price': str(price),
+                'source': info.get('source'),
+                'rate_id': info.get('rate_id'),
+                'note': info.get('note'),
+            })
+            total += Decimal(str(price))
+
+        return Response({
+            'lines': lines,
+            'total': str(total.quantize(Decimal('0.01'))),
+            'has_discount': False,
+        })
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
