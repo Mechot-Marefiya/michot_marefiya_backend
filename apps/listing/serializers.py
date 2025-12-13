@@ -483,7 +483,7 @@ class CarListingResponseSerializer(serializers.ModelSerializer):
         """
         Return today's available units if exists.
         """
-        today = datetime.date.today()
+        today = date.today()
         availability = CarAvailability.objects.filter(
             car_listing=obj, date=today
         ).first()

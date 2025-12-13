@@ -3,6 +3,7 @@ from django.utils.dateparse import parse_date
 from django.conf import settings
 from django.db.models import Q, Count, Avg, Sum
 from django.utils import timezone
+from datetime import date
 from datetime import datetime, timedelta
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
@@ -76,7 +77,7 @@ from apps.listing.serializers import (
     EventSpaceBookingSerializer,
     GuestHouseBookingSerializer
 )
-from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService,PriceService,GuestHouseAvailabilityService
+from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService,PriceService,GuestHouseAvailabilityService,EventSpaceAvailabilityService
 @extend_schema(responses=RoomListingResponseSerializer)
 class RoomListingViewSet(AbstractModelViewSet):
     serializer_class = RoomListingSerializer
@@ -415,6 +416,7 @@ class CarListingViewSet(AbstractModelViewSet):
     def get_permissions(self):
         if self.action == 'create':
             return [IsAuthenticated()]
+        # 'list' is the action for GET /api/v1/listing/cars/
         elif self.action in ['list', 'retrieve', 'check_availability', 'available_for_rent', 'search']:
             return [AllowAny()]
         elif self.action == 'my_listings':
@@ -470,6 +472,26 @@ class CarListingViewSet(AbstractModelViewSet):
                     serializer.save()
         else:
             serializer.save()
+    @extend_schema(responses=CarListingResponseSerializer)
+    def list(self, request):
+        """
+        Handles GET /api/v1/listing/cars/ - the default endpoint.
+        Applies queryset logic (active/all) and then filters/paginates.
+        """
+        queryset = self.get_queryset()
+        
+        # Apply DRF's default filtering/searching/ordering (from filter_backends)
+        queryset = self.filter_queryset(queryset)
+        
+        # Pagination
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = CarListingResponseSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+
+        # No pagination
+        serializer = CarListingResponseSerializer(queryset, many=True, context={'request': request})
+        return Response(serializer.data)
 
     # --- Availability Actions ---
     @extend_schema(request=AvailabilityCheckSerializer)
@@ -478,12 +500,13 @@ class CarListingViewSet(AbstractModelViewSet):
         car_listing = self.get_object()
         serializer = AvailabilityCheckSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        availability = CarAvailabilityService.check_availability_for_rent(
+        availability = CarAvailabilityService.validate_availability(
             car_listing,
+            serializer.validated_data['quantity'],
             serializer.validated_data['start_date'],
             serializer.validated_data['end_date'],
-            serializer.validated_data['quantity']
         )
+        
         return Response(availability)
 
     @extend_schema(parameters=[
@@ -498,7 +521,7 @@ class CarListingViewSet(AbstractModelViewSet):
         serializer = CarSearchSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
 
-        cars = CarAvailabilityService.get_available_cars_for_rent(
+        cars = CarAvailabilityService.search_available_cars(
             start_date=serializer.validated_data['start_date'],
             end_date=serializer.validated_data['end_date'],
             brand=serializer.validated_data.get('brand'),
@@ -524,8 +547,11 @@ class CarListingViewSet(AbstractModelViewSet):
         user = request.user
         if user.is_authenticated:
             if user.is_superuser or getattr(user, 'role', None) and user.role.code == RoleCode.ADMIN.value:
-                queryset = self.get_queryset()
+                # The get_queryset method handles filtering by role/active status already
+                queryset = self.get_queryset() 
             else:
+                # Fetch only listings belonging to the user's company/profile
+                # NOTE: Depending on your model relationships, you might need to adjust this filter
                 queryset = CarListing.objects.filter(company__user=user).distinct()
         else:
             return Response({"error": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
@@ -536,7 +562,6 @@ class CarListingViewSet(AbstractModelViewSet):
             return self.get_paginated_response(serializer.data)
         serializer = CarListingResponseSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
-
 # Car Rental ViewSet
 @extend_schema(responses=CarRentalSerializer)
 class CarRentalViewSet(AbstractModelViewSet):
@@ -584,7 +609,7 @@ class CarRentalViewSet(AbstractModelViewSet):
         # --- Check availability for all rental items ---
         for item_data in rental_items_data:
             car_listing = CarListing.objects.get(id=item_data['car_listing'])
-            availability = CarAvailabilityService.check_availability_for_rent(
+            availability = CarAvailabilityService.validate_availability(
                 car_listing,
                 serializer.validated_data['start_date'],
                 serializer.validated_data['end_date'],
@@ -604,7 +629,7 @@ class CarRentalViewSet(AbstractModelViewSet):
                 units_rent=item_data['units_rent'],
                 price_per_unit=item_data['price_per_unit']
             )
-            CarAvailabilityService.update_availability_after_rental(
+            CarAvailabilityService.update_availability(
                 car_listing=car_listing,
                 rental=rental,
                 rental_item=rental_item,
@@ -621,7 +646,7 @@ class CarRentalViewSet(AbstractModelViewSet):
 
         # Check daily availability again
         for item in rental.rental_items.all():
-            availability = CarAvailabilityService.check_availability_for_rent(
+            availability = CarAvailabilityService.validate_availability(
                 item.car_listing, rental.start_date, rental.end_date, item.units_rent
             )
             if not availability.get('available'):
@@ -631,7 +656,7 @@ class CarRentalViewSet(AbstractModelViewSet):
         rental.save()
 
         for item in rental.rental_items.all():
-            CarAvailabilityService.update_availability_after_rental(
+            CarAvailabilityService.update_availability(
                 item.car_listing, rental, item, action="confirm"
             )
         return Response(self.get_serializer(rental).data)
@@ -646,7 +671,7 @@ class CarRentalViewSet(AbstractModelViewSet):
         rental.save()
 
         for item in rental.rental_items.all():
-            CarAvailabilityService.update_availability_after_rental(
+            CarAvailabilityService.update_availability(
                 item.car_listing, rental, item, action="cancel"
             )
         return Response(self.get_serializer(rental).data)
@@ -684,7 +709,7 @@ class CarAvailabilitySearchView(APIView):
         if isinstance(quantity_or_resp, Response):
             return quantity_or_resp
         car_listing = CarListing.objects.get(id=car_listing_id)
-        availability = CarAvailabilityService.check_availability_for_rent(car_listing, start_date, end_date, quantity_or_resp)
+        availability = CarAvailabilityService.validate_availability(car_listing, start_date, end_date, quantity_or_resp)
         return Response({
             "car_listing": {
                 "id": car_listing.id, "title": car_listing.title, "brand": car_listing.brand,
@@ -706,7 +731,7 @@ class CarAvailabilityByDateRangeView(APIView):
 
         results = []
         for car in CarListing.objects.all():
-            availability = CarAvailabilityService.check_availability_for_rent(car, start_date, end_date, quantity_or_resp)
+            availability = CarAvailabilityService.get_available_cars(car, start_date, end_date, quantity_or_resp)
             if availability.get("is_available"):
                 results.append({
                     "car_listing_id": car.id,
@@ -732,7 +757,7 @@ class CarAvailabilityByCarAndDateView(APIView):
         if isinstance(quantity_or_resp, Response):
             return quantity_or_resp
         car_listing = CarListing.objects.get(id=car_listing_id)
-        availability = CarAvailabilityService.check_availability_for_rent(car_listing, start_date, end_date, quantity_or_resp)
+        availability = CarAvailabilityService.validate_availability(car_listing, start_date, end_date, quantity_or_resp)
         return Response({
             "car_listing": {
                 "id": car_listing.id, "title": car_listing.title, "brand": car_listing.brand,
@@ -1233,6 +1258,48 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
             return self.get_paginated_response(serialized)
 
         return Response(serialized)
+    @action(detail=False, methods=['get'])
+    def search(self, request):
+        """
+        Searches available event spaces by date, quantity, and address.
+        """
+        
+        # 1. Input Validation and Parsing
+        try:
+            quantity_str = request.query_params.get('quantity')
+            check_in_str = request.query_params.get('check_in')
+            check_out_str = request.query_params.get('check_out')
+            address_query = request.query_params.get('address') # Optional
+
+            if not all([quantity_str, check_in_str, check_out_str]):
+                return Response(
+                    {"error": "Missing required query parameters: quantity, check_in, check_out."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Type conversion
+            required_quantity = int(quantity_str)
+            check_in_date = date.fromisoformat(check_in_str)
+            check_out_date = date.fromisoformat(check_out_str)
+
+        except (ValueError, TypeError) as e:
+            return Response(
+                {"error": f"Invalid parameter format: {e}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # 2. Call the Service Layer
+        available_listings = EventSpaceAvailabilityService.search_available_listings(
+            check_in_date,
+            check_out_date,
+            required_quantity,
+            address_query=address_query,
+        )
+
+        # 3. Serialize and Return
+        # You would use the standard EventSpaceListingSerializer here
+        serializer = self.get_serializer(available_listings, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 @extend_schema(responses=EventSpaceBookingResponseSerializer)
 class EventSpaceBookingViewSet(AbstractModelViewSet):
     """
@@ -1305,3 +1372,4 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
     def perform_create(self, serializer):
         """Passes the request user to the serializer's create method."""
         serializer.save(user=self.request.user)
+    

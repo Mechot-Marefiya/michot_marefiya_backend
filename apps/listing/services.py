@@ -872,6 +872,7 @@ class CarAvailabilityService:
 
         return cars, qs
     @staticmethod
+    @transaction.atomic
     def validate_availability(car_listing, quantity, start_date, end_date):
         dates = []
         d = start_date
@@ -1070,9 +1071,6 @@ class EventSpaceAvailabilityService:
 
         listings = EventSpaceListing.objects.filter(id__in=listing_ids)
 
-        # NOTE: You'll typically want to attach the `min_available` quantity to the
-        # listing object/data structure before returning it to the frontend.
-
         return listings, qs
 
     @staticmethod
@@ -1196,6 +1194,50 @@ class EventSpaceAvailabilityService:
             created += len(batch)
             
         return created
+    @staticmethod
+    def search_available_listings(
+        check_in_date,
+        check_out_date,
+        required_quantity,
+        address_query=None,
+        max_distance_km=None,
+    ):
+        required_days = (check_out_date - check_in_date).days
+        availability_qs = (
+            EventSpaceAvailability.objects
+            .filter(
+                date__gte=check_in_date,
+                date__lt=check_out_date,
+                available_eventspace__gte=required_quantity # Must meet quantity check on each day
+            )
+            .values("space_listing")
+            .annotate(
+                total_days=Count("date", distinct=True),
+                min_available=Min("available_eventspace")
+            )
+            .filter(total_days=required_days) # Ensure availability exists for ALL days
+        )
+
+        # Extract listing IDs that are available
+        available_listing_ids = [row["space_listing"] for row in availability_qs]
+        
+        # 2. Filter EventSpaceListing based on availability and address
+        listings_qs = EventSpaceListing.objects.filter(id__in=available_listing_ids)
+
+        if address_query:
+            listings_qs = listings_qs.filter(
+                Q(address__icontains=address_query) | 
+                Q(hotel__city__icontains=address_query)
+            )
+        listing_info_map = {row["space_listing"]: row["min_available"] for row in availability_qs}
+        
+        final_listings = []
+        for listing in listings_qs:
+            # Dynamically attach the guaranteed minimum available quantity for the requested dates
+            listing.min_available_for_period = listing_info_map.get(listing.id)
+            final_listings.append(listing)
+            
+        return final_listings
 class GuestHouseAvailabilityService:
 
     @staticmethod
@@ -1233,13 +1275,19 @@ class GuestHouseAvailabilityService:
         )
 
         if address_filters:
-            qs = qs.filter(
-                guest_house__address__city__icontains=address_filters.get("city", ""),
-                guest_house__address__country__icontains=address_filters.get("country", ""),
-                guest_house__address__region__icontains=address_filters.get("region", ""),
-                guest_house__address__sub_city__icontains=address_filters.get("sub_city", "")
-            )
+            filter_kwargs = {}
+            
+            address_fields = ["city", "country", "region", "sub_city"]
 
+            for key in address_fields:
+                value = address_filters.get(key)               
+                if value:
+                    # Construct the full Django ORM lookup string dynamically
+                    lookup_key = f"guest_house__address__{key}__icontains"
+                    filter_kwargs[lookup_key] = value
+
+            if filter_kwargs:
+                qs = qs.filter(**filter_kwargs)
         aggregated = qs.values("guest_house").annotate(
             total_days=Count("date", distinct=True),
             min_available=Min("available_rooms")
