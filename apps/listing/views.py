@@ -3,6 +3,7 @@ from django.utils.dateparse import parse_date
 from django.conf import settings
 from django.db.models import Q, Count, Avg, Sum
 from django.utils import timezone
+from datetime import date
 from datetime import datetime, timedelta
 from decimal import Decimal
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -19,6 +20,8 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from apps.account.serializers import HotelProfileResponseSerializer
 from apps.listing.docs.schema import search_schema
 from apps.core.views import AbstractModelViewSet
+from rest_framework import viewsets
+from apps.listing.utils import ParseDatesAndQuantity
 from apps.listing.filters import PropertyFilter, RoomFilter, BookingFilter,EventSpaceFilter,EventSpaceBookingFilter
 from apps.account.permissions import (
     IsAuthenticatedOrReadOnly,
@@ -44,7 +47,9 @@ from apps.listing.models import (
     EventSpaceListing,
     CarAvailability,
     EventSpaceBooking,
-    CarRental
+    CarRental,
+    GuestHouseBooking,
+    GuestHouseBookingItem
     
 )
 from apps.account.models import(CompanyProfile,IndividualOwnerProfile)
@@ -54,6 +59,7 @@ from apps.listing.serializers import (
     CarListingResponseSerializer,
     CarListingSerializer,
     BookingRatingSerializer,
+    
     CarAvailabilityUpdateSerializer,
     GuestHouseListingResponseSerializer,
     GuestHouseListingSerializer,
@@ -69,9 +75,10 @@ from apps.listing.serializers import (
     CarSearchSerializer,
     CarRentalSerializer,
     EventSpaceBookingResponseSerializer,
-    EventSpaceBookingSerializer
+    EventSpaceBookingSerializer,
+    GuestHouseBookingSerializer
 )
-from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService,PriceService
+from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService,PriceService,GuestHouseAvailabilityService,EventSpaceAvailabilityService
 @extend_schema(responses=RoomListingResponseSerializer)
 class RoomListingViewSet(AbstractModelViewSet):
     serializer_class = RoomListingSerializer
@@ -305,323 +312,298 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
         context["request"] = self.request
 
         return context
+    @extend_schema(
+            parameters=[
+                OpenApiParameter("check_in", OpenApiTypes.DATE, required=True),
+                OpenApiParameter("check_out", OpenApiTypes.DATE, required=True),
+                OpenApiParameter("units", OpenApiTypes.INT, required=False),
+                OpenApiParameter("city", OpenApiTypes.STR, required=False),
+                OpenApiParameter("country", OpenApiTypes.STR, required=False),
+                OpenApiParameter("region", OpenApiTypes.STR, required=False),
+                OpenApiParameter("sub_city", OpenApiTypes.STR, required=False),
+                OpenApiParameter("guesthouse_id", OpenApiTypes.UUID, required=False),
+            ],
+            responses=GuestHouseListingResponseSerializer(many=True)
+        )
+    @action(detail=False, methods=["get"], url_path="check-availability")
+    def check_availability(self, request):
+            """
+            Check availability across all guesthouses or a specific one.
+            """
+            try:
+                check_in = datetime.strptime(request.query_params.get("check_in"), "%Y-%m-%d").date()
+                check_out = datetime.strptime(request.query_params.get("check_out"), "%Y-%m-%d").date()
+            except:
+                return Response({"error": "Invalid check_in/check_out format (YYYY-MM-DD required)."},
+                                status=status.HTTP_400_BAD_REQUEST)
 
+            if check_in >= check_out:
+                return Response({"error": "check_out must be after check_in."},
+                                status=status.HTTP_400_BAD_REQUEST)
 
-# @extend_schema(responses=CarListingResponseSerializer)
-# class CarListingViewSet(AbstractModelViewSet):
-#     permission_classes = [IsAuthenticatedOrReadOnly]
-#     serializer_class = CarListingSerializer
-#     queryset = CarListing.objects.all()
-#     # filter_backends = [DjangoFilterBackend]
-#     # filterset_class = CarFilter
+            units = int(request.query_params.get("units", 1))
 
-# views.py
+            address_filters = {
+                "city": request.query_params.get("city"),
+                "country": request.query_params.get("country"),
+                "region": request.query_params.get("region"),
+                "sub_city": request.query_params.get("sub_city"),
+            }
+
+            guesthouse_id = request.query_params.get("guesthouse_id")
+
+            if guesthouse_id:
+                listing = GuestHouseListing.objects.filter(id=guesthouse_id, is_active=True).first()
+                if not listing:
+                    return Response({"error": "Guest house not found."}, status=404)
+
+                qs, meta = GuestHouseAvailabilityService.get_available_listings(
+                    check_in, check_out, units, address_filters
+                )
+
+                qs = qs.filter(id=guesthouse_id)
+
+            else:
+                qs, meta = GuestHouseAvailabilityService.get_available_listings(
+                    check_in, check_out, units, address_filters
+                )
+            serializer = GuestHouseListingResponseSerializer(qs, many=True)
+            return Response({
+                "count": qs.count(),
+                "results": serializer.data
+            })
+
+@extend_schema(request=GuestHouseBookingSerializer,responses=GuestHouseBookingSerializer)
+class GuestHouseBookingAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        """
+        List bookings:
+        - Admins: all bookings
+        - Users: own bookings
+        """
+        user = request.user
+        if user.is_superuser:
+            bookings = GuestHouseBooking.objects.all()
+        else:
+            bookings = GuestHouseBooking.objects.filter(renter=user)
+
+        serializer = GuestHouseBookingSerializer(bookings, many=True)
+        return Response(serializer.data)
+
+    @transaction.atomic
+    def post(self, request):
+        """
+        Create a new booking.
+        Validates availability and updates it.
+        """
+        serializer = GuestHouseBookingSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+
+        items_data = serializer.validated_data.pop("items")
+        renter = request.user
+        start_date = serializer.validated_data["start_date"]
+        end_date = serializer.validated_data["end_date"]
+
+        # Prepare room infos for availability service
+        room_infos = [
+            {"guesthouse_listing": item["room"], "quantity": item["units_booked"]}
+            for item in items_data
+        ]
+
+        # Validate availability
+        GuestHouseAvailabilityService.validate_availability(
+            room_infos, start_date, end_date
+        )
+
+        # Calculate total price
+        total_price = sum(item["units_booked"] * item["price_per_unit"] for item in items_data)
+
+        # Create booking
+        booking = GuestHouseBooking.objects.create(
+            renter=renter,
+            total_price=total_price,
+            **serializer.validated_data
+        )
+
+        # Create booking items
+        for item in items_data:
+            GuestHouseBookingItem.objects.create(
+                booking=booking,
+                **item
+            )
+
+        # Decrement availability
+        GuestHouseAvailabilityService.update_availability(
+            room_infos, start_date, end_date, increment=False
+        )
+
+        return Response(
+            GuestHouseBookingSerializer(booking).data,
+            status=status.HTTP_201_CREATED
+        )
+# Car Listing ViewSet
 @extend_schema(responses=CarListingResponseSerializer)
 class CarListingViewSet(AbstractModelViewSet):
     serializer_class = CarListingSerializer
     queryset = CarListing.objects.all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = [
-        'brand', 'car_class', 'fuel_type', 'transmission', 
-        'condition', 'listing_type', 'is_active'
-    ]
+    filterset_fields = ['brand', 'car_class', 'fuel_type', 'transmission', 'condition', 'listing_type', 'is_active']
     search_fields = ['title', 'description', 'brand', 'model']
     ordering_fields = ['base_price', 'year', 'mileage', 'created_at']
     ordering = ['-created_at']
-    
+
     def get_permissions(self):
-        """
-        - CREATE: Company users can create cars for their company, admin can create all
-        - READ: Public (all can read)
-        - UPDATE/DELETE: Company can modify own cars, admin can modify all
-        - Special actions: check_availability, available_for_rent, search, my_listings are public read
-        """
         if self.action == 'create':
             return [IsAuthenticated()]
+        # 'list' is the action for GET /api/v1/listing/cars/
         elif self.action in ['list', 'retrieve', 'check_availability', 'available_for_rent', 'search']:
             return [AllowAny()]
         elif self.action == 'my_listings':
             return [IsAuthenticated()]
         else:
             return [IsListingOwner()]
-    
+
     def get_serializer_class(self):
         if self.action in ['create', 'update', 'partial_update']:
             return CarListingSerializer
         return CarListingResponseSerializer
-    
+
     def get_queryset(self):
         queryset = super().get_queryset()
-        
-        # If not authenticated, show only active listings
-        if not self.request.user or not self.request.user.is_authenticated:
-            return queryset.filter(is_active=True)
-        
+        user = self.request.user
+
         # Admin sees all
-        if self.request.user.is_superuser or (
-            hasattr(self.request.user, 'role') and
-            self.request.user.role and
-            self.request.user.role.code == RoleCode.ADMIN.value
-        ):
-            return queryset
-        
-        # For companies, show all (they can only modify their own via permission)
-        if hasattr(self.request.user, 'role') and self.request.user.role:
-            if self.request.user.role.code == RoleCode.COMPANY.value:
-                return queryset
-        
-        # Regular users see only active
-        return queryset.filter(is_active=True)
-        
-        # Additional filters
+        if user.is_authenticated and (user.is_superuser or getattr(user, 'role', None) and user.role.code == RoleCode.ADMIN.value):
+            pass
+        # Company sees all
+        elif user.is_authenticated and getattr(user, 'role', None) and user.role.code == RoleCode.COMPANY.value:
+            pass
+        # Others see only active
+        else:
+            queryset = queryset.filter(is_active=True)
+
+        # --- Apply extra filters from query params ---
         min_year = self.request.query_params.get('min_year')
         max_year = self.request.query_params.get('max_year')
         min_price = self.request.query_params.get('min_price')
         max_price = self.request.query_params.get('max_price')
         max_mileage = self.request.query_params.get('max_mileage')
-        
-        if min_year:
-            queryset = queryset.filter(year__gte=min_year)
-        if max_year:
-            queryset = queryset.filter(year__lte=max_year)
-        if min_price:
-            queryset = queryset.filter(base_price__gte=min_price)
-        if max_price:
-            queryset = queryset.filter(base_price__lte=max_price)
-        if max_mileage:
-            queryset = queryset.filter(mileage__lte=max_mileage)
-        
+
+        if min_year: queryset = queryset.filter(year__gte=int(min_year))
+        if max_year: queryset = queryset.filter(year__lte=int(max_year))
+        if min_price: queryset = queryset.filter(base_price__gte=float(min_price))
+        if max_price: queryset = queryset.filter(base_price__lte=float(max_price))
+        if max_mileage: queryset = queryset.filter(mileage__lte=int(max_mileage))
+
         return queryset
-    
+
     def perform_create(self, serializer):
-        """Set the owner based on the current user if not provided"""
         user = self.request.user
-        
-        # If neither company nor individual_owner is provided, try to set based on user
         if not serializer.validated_data.get('company') and not serializer.validated_data.get('individual_owner'):
-            # Try to get individual owner
             try:
                 individual_owner = IndividualOwnerProfile.objects.get(user=user)
                 serializer.save(individual_owner=individual_owner)
             except IndividualOwnerProfile.DoesNotExist:
-                # Try to get company
                 try:
                     company = CompanyProfile.objects.get(user=user)
                     serializer.save(company=company)
                 except CompanyProfile.DoesNotExist:
-                    # If user doesn't have either profile, let the validation error handle it
                     serializer.save()
         else:
             serializer.save()
-    
-    @extend_schema(
-        request=AvailabilityCheckSerializer,
-        responses={
-            200: OpenApiTypes.OBJECT,
-            400: OpenApiTypes.OBJECT
-        }
-    )
-    @action(detail=True, methods=['post'], serializer_class=AvailabilityCheckSerializer)
-    def check_availability(self, request, pk=None):
+    @extend_schema(responses=CarListingResponseSerializer)
+    def list(self, request):
         """
-        Check availability for a specific car listing for rental
-        """
-        car_listing = self.get_object()
-        serializer = AvailabilityCheckSerializer(data=request.data)
-        
-        if serializer.is_valid():
-            availability_check = CarAvailabilityService.check_availability_for_rent(
-                car_listing=car_listing,
-                start_date=serializer.validated_data['start_date'],
-                end_date=serializer.validated_data['end_date'],
-                quantity=serializer.validated_data['quantity']
-            )
-            
-            return Response(availability_check)
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    @extend_schema(
-        parameters=[
-            OpenApiParameter('start_date', OpenApiTypes.DATE, description='Start date for rental'),
-            OpenApiParameter('end_date', OpenApiTypes.DATE, description='End date for rental'),
-            OpenApiParameter('brand', OpenApiTypes.STR, description='Filter by brand'),
-            OpenApiParameter('car_class', OpenApiTypes.STR, description='Filter by car class'),
-            OpenApiParameter('max_daily_price', OpenApiTypes.FLOAT, description='Maximum daily price'),
-        ]
-    )
-    @action(detail=False, methods=['get'], serializer_class=CarSearchSerializer)
-    def available_for_rent(self, request):
-        """
-        Search for available cars for rent in a specific period
-        """
-        serializer = CarSearchSerializer(data=request.query_params)
-        
-        if serializer.is_valid():
-            available_cars = CarAvailabilityService.get_available_cars_for_rent(
-                start_date=serializer.validated_data['start_date'],
-                end_date=serializer.validated_data['end_date'],
-                brand=serializer.validated_data.get('brand'),
-                car_class=serializer.validated_data.get('car_class')
-            )
-            
-            # Filter by maximum daily price if provided
-            max_daily_price = serializer.validated_data.get('max_daily_price')
-            if max_daily_price is not None:
-                available_cars = [car for car in available_cars if car.base_price <= max_daily_price]
-            
-            # Apply additional filters
-            fuel_type = request.query_params.get('fuel_type')
-            transmission = request.query_params.get('transmission')
-            condition = request.query_params.get('condition')
-            min_year = request.query_params.get('min_year')
-            max_year = request.query_params.get('max_year')
-            max_mileage = request.query_params.get('max_mileage')
-            
-            if fuel_type:
-                available_cars = [car for car in available_cars if car.fuel_type == fuel_type]
-            if transmission:
-                available_cars = [car for car in available_cars if car.transmission == transmission]
-            if condition:
-                available_cars = [car for car in available_cars if car.condition == condition]
-            if min_year:
-                available_cars = [car for car in available_cars if car.year >= int(min_year)]
-            if max_year:
-                available_cars = [car for car in available_cars if car.year <= int(max_year)]
-            if max_mileage:
-                available_cars = [car for car in available_cars if car.mileage <= int(max_mileage)]
-            
-            # Apply ordering
-            ordering = request.query_params.get('ordering', '-created_at')
-            if ordering.lstrip('-') in ['base_price', 'year', 'mileage', 'created_at']:
-                reverse = ordering.startswith('-')
-                field = ordering.lstrip('-')
-                available_cars.sort(key=lambda x: getattr(x, field), reverse=reverse)
-            
-            # Pagination
-            page = self.paginate_queryset(available_cars)
-            if page is not None:
-                serializer = CarListingResponseSerializer(
-                    page, 
-                    many=True, 
-                    context={'request': request}
-                )
-                return self.get_paginated_response(serializer.data)
-            
-            serializer = CarListingResponseSerializer(
-                available_cars, 
-                many=True, 
-                context={'request': request}
-            )
-            
-            return Response({
-                'count': len(available_cars),
-                'results': serializer.data
-            })
-        
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-    
-    @extend_schema(
-        parameters=[
-            OpenApiParameter('brand', OpenApiTypes.STR, description='Filter by brand'),
-            OpenApiParameter('car_class', OpenApiTypes.STR, description='Filter by car class'),
-            OpenApiParameter('fuel_type', OpenApiTypes.STR, description='Filter by fuel type'),
-            OpenApiParameter('transmission', OpenApiTypes.STR, description='Filter by transmission'),
-            OpenApiParameter('condition', OpenApiTypes.STR, description='Filter by condition'),
-            OpenApiParameter('listing_type', OpenApiTypes.STR, description='Filter by listing type'),
-            OpenApiParameter('min_year', OpenApiTypes.INT, description='Minimum year'),
-            OpenApiParameter('max_year', OpenApiTypes.INT, description='Maximum year'),
-            OpenApiParameter('max_mileage', OpenApiTypes.INT, description='Maximum mileage'),
-            OpenApiParameter('max_price', OpenApiTypes.FLOAT, description='Maximum price'),
-        ]
-    )
-    @action(detail=False, methods=['get'])
-    def search(self, request):
-        """
-        General search for car listings with various filters
+        Handles GET /api/v1/listing/cars/ - the default endpoint.
+        Applies queryset logic (active/all) and then filters/paginates.
         """
         queryset = self.get_queryset()
         
-        # Apply filters
-        brand = request.query_params.get('brand')
-        car_class = request.query_params.get('car_class')
-        fuel_type = request.query_params.get('fuel_type')
-        transmission = request.query_params.get('transmission')
-        condition = request.query_params.get('condition')
-        listing_type = request.query_params.get('listing_type')
-        min_year = request.query_params.get('min_year')
-        max_year = request.query_params.get('max_year')
-        max_mileage = request.query_params.get('max_mileage')
-        max_price = request.query_params.get('max_price')
+        # Apply DRF's default filtering/searching/ordering (from filter_backends)
+        queryset = self.filter_queryset(queryset)
         
-        if brand:
-            queryset = queryset.filter(brand=brand)
-        if car_class:
-            queryset = queryset.filter(car_class=car_class)
-        if fuel_type:
-            queryset = queryset.filter(fuel_type=fuel_type)
-        if transmission:
-            queryset = queryset.filter(transmission=transmission)
-        if condition:
-            queryset = queryset.filter(condition=condition)
-        if listing_type:
-            queryset = queryset.filter(listing_type=listing_type)
-        if min_year:
-            queryset = queryset.filter(year__gte=min_year)
-        if max_year:
-            queryset = queryset.filter(year__lte=max_year)
-        if max_mileage:
-            queryset = queryset.filter(mileage__lte=max_mileage)
-        if max_price:
-            queryset = queryset.filter(base_price__lte=max_price)
-        
+        # Pagination
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = CarListingResponseSerializer(page, many=True, context={'request': request})
             return self.get_paginated_response(serializer.data)
-        
+
+        # No pagination
         serializer = CarListingResponseSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
-    @extend_schema(responses=OpenApiTypes.OBJECT)
+
+    # --- Availability Actions ---
+    @extend_schema(request=AvailabilityCheckSerializer)
+    @action(detail=True, methods=['post'], serializer_class=AvailabilityCheckSerializer)
+    def check_availability(self, request, pk=None):
+        car_listing = self.get_object()
+        serializer = AvailabilityCheckSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        availability = CarAvailabilityService.validate_availability(
+            car_listing,
+            serializer.validated_data['quantity'],
+            serializer.validated_data['start_date'],
+            serializer.validated_data['end_date'],
+        )
+        
+        return Response(availability)
+
+    @extend_schema(parameters=[
+        OpenApiParameter('start_date', OpenApiTypes.DATE),
+        OpenApiParameter('end_date', OpenApiTypes.DATE),
+        OpenApiParameter('brand', OpenApiTypes.STR),
+        OpenApiParameter('car_class', OpenApiTypes.STR),
+        OpenApiParameter('max_daily_price', OpenApiTypes.FLOAT),
+    ])
+    @action(detail=False, methods=['get'], serializer_class=CarSearchSerializer)
+    def available_for_rent(self, request):
+        serializer = CarSearchSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+
+        cars = CarAvailabilityService.search_available_cars(
+            start_date=serializer.validated_data['start_date'],
+            end_date=serializer.validated_data['end_date'],
+            brand=serializer.validated_data.get('brand'),
+            car_class=serializer.validated_data.get('car_class')
+        )
+
+        # Filter max_daily_price
+        max_price = serializer.validated_data.get('max_daily_price')
+        if max_price:
+            cars = [c for c in cars if c.base_price <= max_price]
+
+        page = self.paginate_queryset(cars)
+        if page is not None:
+            serializer = CarListingResponseSerializer(page, many=True, context={'request': request})
+            return self.get_paginated_response(serializer.data)
+
+        serializer = CarListingResponseSerializer(cars, many=True, context={'request': request})
+        return Response({'count': len(cars), 'results': serializer.data})
+
+    @extend_schema(responses=CarListingResponseSerializer)
     @action(detail=False, methods=['get'])
     def my_listings(self, request):
-        """
-        Get current user's car listings.
-        Companies see their own car listings.
-        Admin sees all (will be filtered by get_queryset).
-        """
-        if not request.user.is_authenticated:
-            return Response(
-                {"error": "Authentication required."},
-                status=status.HTTP_401_UNAUTHORIZED
-            )
-        
         user = request.user
-        
-        # Admin sees all (will be filtered by get_queryset)
-        if user.is_superuser or (
-            hasattr(user, 'role') and
-            user.role and
-            user.role.code == RoleCode.ADMIN.value
-        ):
-            queryset = self.get_queryset()
+        if user.is_authenticated:
+            if user.is_superuser or getattr(user, 'role', None) and user.role.code == RoleCode.ADMIN.value:
+                # The get_queryset method handles filtering by role/active status already
+                queryset = self.get_queryset() 
+            else:
+                # Fetch only listings belonging to the user's company/profile
+                # NOTE: Depending on your model relationships, you might need to adjust this filter
+                queryset = CarListing.objects.filter(company__user=user).distinct()
         else:
-            # Get listings where user is company owner
-            # Individual owners don't have user accounts, only admin can manage them
-            company_listings = CarListing.objects.filter(
-                company__user=user
-            )
-            queryset = company_listings
-        
-        queryset = queryset.distinct()
-        
+            return Response({"error": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
+
         page = self.paginate_queryset(queryset)
-        if page is not None:
+        if page:
             serializer = CarListingResponseSerializer(page, many=True, context={'request': request})
             return self.get_paginated_response(serializer.data)
-        
         serializer = CarListingResponseSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
+# Car Rental ViewSet
 @extend_schema(responses=CarRentalSerializer)
 class CarRentalViewSet(AbstractModelViewSet):
     serializer_class = CarRentalSerializer
@@ -632,515 +614,200 @@ class CarRentalViewSet(AbstractModelViewSet):
     ordering = ['-created_at']
 
     def get_permissions(self):
-        """
-        - CREATE: Authenticated users can create rentals
-        - READ: Users see own rentals, companies see rentals for their cars, admin sees all
-        - UPDATE/DELETE/ACTIONS: Only owner or admin can modify
-        """
         if self.action == 'create':
             return [IsAuthenticated()]
         elif self.action in ['list', 'retrieve', 'my_rentals', 'rental_stats']:
             return [IsAuthenticated()]
-        elif self.action in ['confirm', 'cancel']:
-            return [IsCarRentalOwner()]
         else:
-            return [IsAuthenticated()]
-    
+            return [IsCarRentalOwner()]
+
     def get_queryset(self):
-        """
-        Filter rentals based on user role:
-        - Users: See only their own rentals
-        - Companies: See rentals for their cars + own rentals (as customers)
-        - Admin: See all rentals
-        """
-        if not self.request.user or not self.request.user.is_authenticated:
+        user = self.request.user
+        if not user.is_authenticated:
             return CarRental.objects.none()
-        
         queryset = super().get_queryset()
-        
+
         # Admin sees all
-        if self.request.user.is_superuser or (
-            hasattr(self.request.user, 'role') and
-            self.request.user.role and
-            self.request.user.role.code == RoleCode.ADMIN.value
-        ):
-            # Apply filters but don't restrict by owner
-            return self._apply_filters(queryset)
-        
-        # Users see only their own rentals
-        user_rentals = queryset.filter(renter=self.request.user)
-        
-        # Companies see rentals for their cars + own rentals
-        if hasattr(self.request.user, 'role') and self.request.user.role:
-            if self.request.user.role.code == RoleCode.COMPANY.value:
-                if hasattr(self.request.user, 'profile') and self.request.user.profile:
-                    company = self.request.user.profile
-                    # Get rentals for cars owned by this company
-                    company_rentals = queryset.filter(
-                        rental_items__car_listing__company=company
-                    ).distinct()
-                    # Combine with user's own rentals
-                    combined = (user_rentals | company_rentals).distinct()
-                    return self._apply_filters(combined)
-        
-        return self._apply_filters(user_rentals)
-    
-    def _apply_filters(self, queryset):
-        """Apply common filters to queryset."""
-        status_filter = self.request.query_params.get('status')
-        if status_filter:
-            queryset = queryset.filter(status=status_filter)
-        
-        start_date_from = self.request.query_params.get('start_date_from')
-        start_date_to = self.request.query_params.get('start_date_to')
-        end_date_from = self.request.query_params.get('end_date_from')
-        end_date_to = self.request.query_params.get('end_date_to')
-        
-        if start_date_from:
-            queryset = queryset.filter(start_date__gte=start_date_from)
-        if start_date_to:
-            queryset = queryset.filter(start_date__lte=start_date_to)
-        if end_date_from:
-            queryset = queryset.filter(end_date__gte=end_date_from)
-        if end_date_to:
-            queryset = queryset.filter(end_date__lte=end_date_to)
-        
-        return queryset
-    
-    def perform_create(self, serializer):
-        serializer.save(renter=self.request.user)
-    
+        if user.is_superuser or getattr(user, 'role', None) and user.role.code == RoleCode.ADMIN.value:
+            return queryset
+
+        # User sees own rentals
+        user_rentals = queryset.filter(renter=user)
+
+        # Company sees rentals for their cars + own rentals
+        if getattr(user, 'role', None) and user.role.code == RoleCode.COMPANY.value:
+            company_rentals = queryset.filter(rental_items__car_listing__company=user.profile).distinct()
+            return (user_rentals | company_rentals).distinct()
+
+        return user_rentals
+
     @transaction.atomic
     def create(self, request, *args, **kwargs):
-        """
-        Create a rental and update availability
-        """
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        
         rental_items_data = request.data.get('rental_items', [])
-        
-        # Check availability for all rental items first
+
+        # --- Check availability for all rental items ---
         for item_data in rental_items_data:
-            car_listing_id = item_data.get('car_listing')
-            quantity = item_data.get('units_rent', 1)
-            start_date = serializer.validated_data.get('start_date')
-            end_date = serializer.validated_data.get('end_date')
-            
-            try:
-                car_listing = CarListing.objects.get(id=car_listing_id)
-            except CarListing.DoesNotExist:
-                return Response(
-                    {"error": f"Car listing {car_listing_id} does not exist"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            availability_check = CarAvailabilityService.check_availability_for_rent(
-                car_listing=car_listing,
-                start_date=start_date,
-                end_date=end_date,
-                quantity=quantity
+            car_listing = CarListing.objects.get(id=item_data['car_listing'])
+            availability = CarAvailabilityService.validate_availability(
+                car_listing,
+                serializer.validated_data['start_date'],
+                serializer.validated_data['end_date'],
+                item_data.get('units_rent', 1)
             )
-            
-            if not availability_check.get('available'):
-                return Response(
-                    {"error": f"Car {car_listing} is not available: {availability_check.get('reason')}"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        
-        # Create the rental
-        rental = serializer.save()
-        
-        # Create rental items and update availability
+            if not availability.get('available'):
+                return Response({"error": availability.get('reason')}, status=status.HTTP_400_BAD_REQUEST)
+
+        rental = serializer.save(renter=request.user)
+
+        # --- Create rental items & update availability ---
         for item_data in rental_items_data:
-            car_listing = CarListing.objects.get(id=item_data.get('car_listing'))
-            
+            car_listing = CarListing.objects.get(id=item_data['car_listing'])
             rental_item = CarRentalItem.objects.create(
                 car_rental=rental,
                 car_listing=car_listing,
-                units_rent=item_data.get('units_rent', 1),
-                price_per_unit=item_data.get('price_per_unit')
+                units_rent=item_data['units_rent'],
+                price_per_unit=item_data['price_per_unit']
             )
-            
-            # Update availability after rental creation
-            availability_result = CarAvailabilityService.update_availability_after_rental(
+            CarAvailabilityService.update_availability(
                 car_listing=car_listing,
                 rental=rental,
                 rental_item=rental_item,
                 action="create"
             )
-            
-            if not availability_result.get('success'):
-                # Rollback transaction if availability update fails
-                raise serializers.ValidationError({
-                    "error": f"Failed to update availability: {availability_result.get('error')}"
-                })
-        
-        headers = self.get_success_headers(serializer.data)
-        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
-    
-    @extend_schema(responses=CarRentalSerializer)
+
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):
-        """
-        Confirm a pending rental and finalize availability updates.
-        Permission is checked by IsCarRentalOwner permission class.
-        """
         rental = self.get_object()
-        
         if rental.status != CarRental.RentStatus.PENDING:
-            return Response(
-                {"error": "Only pending rentals can be confirmed."},
-                status=status.HTTP_400_BAD_REQUEST
+            return Response({"error": "Only pending rentals can be confirmed."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Check daily availability again
+        for item in rental.rental_items.all():
+            availability = CarAvailabilityService.validate_availability(
+                item.car_listing, rental.start_date, rental.end_date, item.units_rent
             )
-        
-        # Check if still available
-        for rental_item in rental.rental_items.all():
-            availability_check = CarAvailabilityService.check_availability_for_rent(
-                car_listing=rental_item.car_listing,
-                start_date=rental.start_date,
-                end_date=rental.end_date,
-                quantity=rental_item.units_rent
-            )
-            
-            if not availability_check.get('available'):
-                return Response(
-                    {"error": f"Cannot confirm rental: {availability_check.get('reason')}"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        
-        # Update rental status
+            if not availability.get('available'):
+                return Response({"error": availability.get('reason')}, status=status.HTTP_400_BAD_REQUEST)
+
         rental.status = CarRental.RentStatus.CONFIRMED
         rental.save()
-        
-        # Finalize availability updates for confirmed rental
-        for rental_item in rental.rental_items.all():
-            CarAvailabilityService.update_availability_after_rental(
-                car_listing=rental_item.car_listing,
-                rental=rental,
-                rental_item=rental_item,
-                action="confirm"
+
+        for item in rental.rental_items.all():
+            CarAvailabilityService.update_availability(
+                item.car_listing, rental, item, action="confirm"
             )
-        
-        serializer = self.get_serializer(rental)
-        return Response(serializer.data)
-    
-    @extend_schema(responses=CarRentalSerializer)
+        return Response(self.get_serializer(rental).data)
+
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
-        """
-        Cancel a rental and restore availability.
-        Permission is checked by IsCarRentalOwner permission class.
-        """
         rental = self.get_object()
-        
         if rental.status == CarRental.RentStatus.CANCELLED:
-            return Response(
-                {"error": "Rental is already cancelled."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        
-        old_status = rental.status
+            return Response({"error": "Rental is already cancelled."}, status=status.HTTP_400_BAD_REQUEST)
+
         rental.status = CarRental.RentStatus.CANCELLED
         rental.save()
-        
-        # Restore availability for cancelled rental
-        for rental_item in rental.rental_items.all():
-            CarAvailabilityService.update_availability_after_rental(
-                car_listing=rental_item.car_listing,
-                rental=rental,
-                rental_item=rental_item,
-                action="cancel"
+
+        for item in rental.rental_items.all():
+            CarAvailabilityService.update_availability(
+                item.car_listing, rental, item, action="cancel"
             )
-        
-        serializer = self.get_serializer(rental)
-        return Response(serializer.data)
-    
+        return Response(self.get_serializer(rental).data)
+
     @action(detail=False, methods=['get'])
     def my_rentals(self, request):
-        """
-        Get current user's rentals
-        """
         rentals = self.get_queryset().filter(renter=request.user)
-        
-        # Filter by active rentals (not cancelled)
-        active_only = request.query_params.get('active_only')
-        if active_only and active_only.lower() == 'true':
-            rentals = rentals.exclude(status=CarRental.RentStatus.CANCELLED)
-        
-        # Filter by upcoming rentals
-        upcoming_only = request.query_params.get('upcoming_only')
-        if upcoming_only and upcoming_only.lower() == 'true':
-            rentals = rentals.filter(start_date__gte=datetime.now().date())
-        
         page = self.paginate_queryset(rentals)
-        if page is not None:
+        if page:
             serializer = self.get_serializer(page, many=True)
             return self.get_paginated_response(serializer.data)
-        
         serializer = self.get_serializer(rentals, many=True)
         return Response(serializer.data)
-    
-    @extend_schema(responses=OpenApiTypes.OBJECT)
+
     @action(detail=False, methods=['get'])
     def rental_stats(self, request):
-        """
-        Get rental statistics for current user
-        """
         user = request.user
-        
-        total_rentals = CarRental.objects.filter(renter=user).count()
-        confirmed_rentals = CarRental.objects.filter(renter=user, status=CarRental.RentStatus.CONFIRMED).count()
-        pending_rentals = CarRental.objects.filter(renter=user, status=CarRental.RentStatus.PENDING).count()
-        cancelled_rentals = CarRental.objects.filter(renter=user, status=CarRental.RentStatus.CANCELLED).count()
-        
-        # Total spent
-        total_spent = CarRental.objects.filter(
-            renter=user, 
-            status=CarRental.RentStatus.CONFIRMED
-        ).aggregate(total=Sum('total_price'))['total'] or 0
-        
-        # Upcoming rentals
-        upcoming_rentals = CarRental.objects.filter(
-            renter=user,
-            start_date__gte=datetime.now().date(),
-            status__in=[CarRental.RentStatus.PENDING, CarRental.RentStatus.CONFIRMED]
-        ).count()
-        
+        queryset = CarRental.objects.filter(renter=user)
+        total_spent = queryset.filter(status=CarRental.RentStatus.CONFIRMED).aggregate(total=Sum('total_price'))['total'] or 0
         return Response({
-            'total_rentals': total_rentals,
-            'confirmed_rentals': confirmed_rentals,
-            'pending_rentals': pending_rentals,
-            'cancelled_rentals': cancelled_rentals,
-            'total_spent': float(total_spent),
-            'upcoming_rentals': upcoming_rentals
+            "total_rentals": queryset.count(),
+            "confirmed_rentals": queryset.filter(status=CarRental.RentStatus.CONFIRMED).count(),
+            "pending_rentals": queryset.filter(status=CarRental.RentStatus.PENDING).count(),
+            "cancelled_rentals": queryset.filter(status=CarRental.RentStatus.CANCELLED).count(),
+            "total_spent": float(total_spent)
         })
 
-@extend_schema(responses=CarAvailabilitySerializer)
-@extend_schema(
-    parameters=[
-        OpenApiParameter("car_listing", OpenApiTypes.UUID, description="Car listing ID", required=True),
-        OpenApiParameter("start_date", OpenApiTypes.DATE, description="Rental start date", required=True),
-        OpenApiParameter("end_date", OpenApiTypes.DATE, description="Rental end date", required=True),
-        OpenApiParameter("quantity", OpenApiTypes.INT, description="Number of cars requested", required=False),
-    ],
-    responses=CarAvailabilitySerializer
-)
+# Availability APIViews
 class CarAvailabilitySearchView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(responses=CarAvailabilitySerializer)
     def get(self, request):
-        car_listing_id = request.query_params.get("car_listing")
-        start_date = request.query_params.get("start_date")
-        end_date = request.query_params.get("end_date")
-        quantity = int(request.query_params.get("quantity", 1))
-
-        # --- Required params check ---
-        if not all([car_listing_id, start_date, end_date]):
-            return Response(
-                {"detail": "Missing required parameters."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # --- Parse dates ---
-        start_date_obj = parse_date(start_date)
-        end_date_obj = parse_date(end_date)
-
-        if not start_date_obj or not end_date_obj:
-            return Response(
-                {"detail": "Invalid date format. Use YYYY-MM-DD."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if end_date_obj <= start_date_obj:
-            return Response(
-                {"detail": "end_date must be after start_date."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # --- Lookup car listing ---
-        try:
-            car_listing = CarListing.objects.get(id=car_listing_id)
-        except CarListing.DoesNotExist:
-            return Response(
-                {"detail": "Car listing not found."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        # --- Business logic (unchanged) ---
-        availability_data = CarAvailabilityService.check_availability_for_rent(
-            car_listing=car_listing,
-            start_date=start_date_obj,
-            end_date=end_date_obj,
-            quantity=quantity
-        )
-
-        # --- Build clean response (StaySearch style) ---
-        response = {
+        car_listing_id, start_date, end_date, quantity_or_resp = ParseDatesAndQuantity.parse_dates_and_quantity(request, require_car=True)
+        if isinstance(quantity_or_resp, Response):
+            return quantity_or_resp
+        car_listing = CarListing.objects.get(id=car_listing_id)
+        availability = CarAvailabilityService.validate_availability(car_listing, start_date, end_date, quantity_or_resp)
+        return Response({
             "car_listing": {
-                "id": car_listing.id,
-                "title": car_listing.title,
-                "brand": car_listing.brand,
-                "model": car_listing.model,
-                "base_price": str(car_listing.base_price),
+                "id": car_listing.id, "title": car_listing.title, "brand": car_listing.brand,
+                "model": car_listing.model, "base_price": str(car_listing.base_price)
             },
-            "search_period": {
-                "start_date": start_date,
-                "end_date": end_date,
-            },
-            "quantity_requested": quantity,
-            "availability": availability_data,
-        }
+            "search_period": {"start_date": start_date, "end_date": end_date},
+            "quantity_requested": quantity_or_resp,
+            "availability": availability
+        })
 
-        return Response(response)
-@extend_schema(
-    parameters=[
-        OpenApiParameter("start_date", OpenApiTypes.DATE, description="Rental start date", required=True),
-        OpenApiParameter("end_date", OpenApiTypes.DATE, description="Rental end date", required=True),
-        OpenApiParameter("quantity", OpenApiTypes.INT, description="Number of cars requested", required=False),
-    ],
-    summary="Search all available cars in a date range"
-)
 class CarAvailabilityByDateRangeView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(summary="Search all available cars in a date range")
     def get(self, request):
-        start_date = request.query_params.get("start_date")
-        end_date = request.query_params.get("end_date")
-        quantity = int(request.query_params.get("quantity", 1))
-
-        # --- Validate required params ---
-        if not all([start_date, end_date]):
-            return Response(
-                {"detail": "start_date and end_date are required."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # --- Parse dates ---
-        start_date_obj = parse_date(start_date)
-        end_date_obj = parse_date(end_date)
-
-        if not start_date_obj or not end_date_obj:
-            return Response(
-                {"detail": "Invalid date format. Use YYYY-MM-DD."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if end_date_obj <= start_date_obj:
-            return Response(
-                {"detail": "end_date must be after start_date."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # --- Fetch all car listings ---
-        car_listings = CarListing.objects.all()
+        _, start_date, end_date, quantity_or_resp = ParseDatesAndQuantity.parse_dates_and_quantity(request)
+        if isinstance(quantity_or_resp, Response):
+            return quantity_or_resp
 
         results = []
-
-        # --- Loop all listings and check availability ---
-        for car_listing in car_listings:
-            availability = CarAvailabilityService.check_availability_for_rent(
-                car_listing=car_listing,
-                start_date=start_date_obj,
-                end_date=end_date_obj,
-                quantity=quantity
-            )
-
-            if availability.get("is_available", False):
+        for car in CarListing.objects.all():
+            availability = CarAvailabilityService.get_available_cars(car, start_date, end_date, quantity_or_resp)
+            if availability.get("is_available"):
                 results.append({
-                    "car_listing_id": car_listing.id,
-                    "title": car_listing.title,
-                    "brand": car_listing.brand,
-                    "model": car_listing.model,
-                    "base_price": str(car_listing.base_price),
+                    "car_listing_id": car.id,
+                    "title": car.title,
+                    "brand": car.brand,
+                    "model": car.model,
+                    "base_price": str(car.base_price),
                     "availability": availability
                 })
-
         return Response({
-            "search_period": {
-                "start_date": start_date,
-                "end_date": end_date
-            },
-            "quantity_requested": quantity,
+            "search_period": {"start_date": start_date, "end_date": end_date},
+            "quantity_requested": quantity_or_resp,
             "available_cars_count": len(results),
             "available_cars": results
         })
-@extend_schema(
-    parameters=[
-        OpenApiParameter("car_listing", OpenApiTypes.UUID, description="Car listing ID", required=True),
-        OpenApiParameter("start_date", OpenApiTypes.DATE, description="Start date", required=True),
-        OpenApiParameter("end_date", OpenApiTypes.DATE, description="End date", required=True),
-        OpenApiParameter("quantity", OpenApiTypes.INT, description="Number of cars requested", required=False),
-    ],
-    summary="Get availability for a specific car listing within a date range"
-)
+
 class CarAvailabilityByCarAndDateView(APIView):
     permission_classes = [AllowAny]
 
+    @extend_schema(summary="Get availability for a specific car listing within a date range")
     def get(self, request):
-        car_listing_id = request.query_params.get("car_listing")
-        start_date = request.query_params.get("start_date")
-        end_date = request.query_params.get("end_date")
-        quantity = int(request.query_params.get("quantity", 1))
-
-        # --- Validate required parameters ---
-        if not all([car_listing_id, start_date, end_date]):
-            return Response(
-                {"detail": "car_listing, start_date and end_date are required."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # --- Parse dates ---
-        start_date_obj = parse_date(start_date)
-        end_date_obj = parse_date(end_date)
-
-        if not start_date_obj or not end_date_obj:
-            return Response(
-                {"detail": "Invalid date format. Use YYYY-MM-DD."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if end_date_obj <= start_date_obj:
-            return Response(
-                {"detail": "end_date must be after start_date."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # --- Lookup car listing ---
-        try:
-            car_listing = CarListing.objects.get(id=car_listing_id)
-        except CarListing.DoesNotExist:
-            return Response(
-                {"detail": "Car listing not found."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
-        # --- Business logic: Check availability ---
-        availability_data = CarAvailabilityService.check_availability_for_rent(
-            car_listing=car_listing,
-            start_date=start_date_obj,
-            end_date=end_date_obj,
-            quantity=quantity
-        )
-
-        # --- Build clean response ---
-        response = {
+        car_listing_id, start_date, end_date, quantity_or_resp = ParseDatesAndQuantity.parse_dates_and_quantity(request, require_car=True)
+        if isinstance(quantity_or_resp, Response):
+            return quantity_or_resp
+        car_listing = CarListing.objects.get(id=car_listing_id)
+        availability = CarAvailabilityService.validate_availability(car_listing, start_date, end_date, quantity_or_resp)
+        return Response({
             "car_listing": {
-                "id": car_listing.id,
-                "title": car_listing.title,
-                "brand": car_listing.brand,
-                "model": car_listing.model,
-                "base_price": str(car_listing.base_price),
+                "id": car_listing.id, "title": car_listing.title, "brand": car_listing.brand,
+                "model": car_listing.model, "base_price": str(car_listing.base_price)
             },
-            "search_period": {
-                "start_date": start_date,
-                "end_date": end_date
-            },
-            "quantity_requested": quantity,
-            "availability": availability_data,
-        }
-
-        return Response(response)
+            "search_period": {"start_date": start_date, "end_date": end_date},
+            "quantity_requested": quantity_or_resp,
+            "availability": availability
+        })
 
 @extend_schema(responses=PropertyListingResponseSerializer)
 class PropertyListingViewSet(AbstractModelViewSet):
@@ -1632,6 +1299,77 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
             return self.get_paginated_response(serialized)
 
         return Response(serialized)
+    @extend_schema(
+    summary="Search available event spaces",
+    description="Searches available event spaces by date, quantity, and optional address.",
+    parameters=[
+        OpenApiParameter(
+            name="quantity",
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            required=True,
+            description="Required number of units"
+        ),
+        OpenApiParameter(
+            name="check_in",
+            type=OpenApiTypes.DATE,
+            location=OpenApiParameter.QUERY,
+            required=True,
+            description="Check-in date (YYYY-MM-DD)"
+        ),
+        OpenApiParameter(
+            name="check_out",
+            type=OpenApiTypes.DATE,
+            location=OpenApiParameter.QUERY,
+            required=True,
+            description="Check-out date (YYYY-MM-DD)"
+        ),
+        OpenApiParameter(
+            name="address",
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            description="Optional address search term"
+        ),
+    ],
+    responses={200: EventSpaceListingSerializer(many=True)}
+)
+    @action(detail=False, methods=['get'])
+    def search(self, request):
+        """
+        Searches available event spaces by date, quantity, and address.
+        """
+        try:
+            quantity_str = request.query_params.get('quantity')
+            check_in_str = request.query_params.get('check_in')
+            check_out_str = request.query_params.get('check_out')
+            address_query = request.query_params.get('address')
+
+            if not all([quantity_str, check_in_str, check_out_str]):
+                return Response(
+                    {"error": "Missing required query parameters: quantity, check_in, check_out."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            required_quantity = int(quantity_str)
+            check_in_date = date.fromisoformat(check_in_str)
+            check_out_date = date.fromisoformat(check_out_str)
+
+        except (ValueError, TypeError) as e:
+            return Response(
+                {"error": f"Invalid parameter format: {e}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        available_listings = EventSpaceAvailabilityService.search_available_listings(
+            check_in_date,
+            check_out_date,
+            required_quantity,
+            address_query=address_query,
+        )
+
+        serializer = self.get_serializer(available_listings, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 @extend_schema(responses=EventSpaceBookingResponseSerializer)
 class EventSpaceBookingViewSet(AbstractModelViewSet):
     """
@@ -1704,3 +1442,4 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
     def perform_create(self, serializer):
         """Passes the request user to the serializer's create method."""
         serializer.save(user=self.request.user)
+    

@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.utils.timezone import now
 from django.db.models import Q, F
 from django.contrib.contenttypes.fields import GenericRelation
 from django.utils.translation import gettext_lazy as _
@@ -21,6 +22,7 @@ def validate_days_of_week(value):
         if v < 0 or v > 6:
             raise ValidationError("each entry in days_of_week must be between 0 and 6 (Mon=0..Sun=6)")
 from apps.core.models import AbstractBaseModel, Address
+from apps.core.models import AbstractBaseModel, Address,Facility
 from apps.account.models import (
     CompanyProfile,
     HotelProfile,
@@ -344,61 +346,27 @@ class CarRentalItem(AbstractBaseModel):
 #         return f"Car {self.car_listing} sell for {self.car_sale.sale_date}"
 # models.py
 class CarAvailability(AbstractBaseModel):
-    class CarAvailabilityType(models.TextChoices):
-        RENT = "rent", _("For Rent")
-        SALE = "sale", _("For Sale")
-    
     car_listing = models.ForeignKey(
         CarListing,
         on_delete=models.CASCADE,
-        related_name="availabilities",
-        verbose_name=_("Car Listing"),
+        related_name="daily_availabilities"
     )
-    
-    availability_type = models.CharField(
-        max_length=20,
-        choices=CarAvailabilityType.choices,
-        verbose_name=_("Availability Type"),
-        default=CarAvailabilityType.RENT
-    )
-    
-    is_available = models.BooleanField(
-        default=True,
-        verbose_name=_("Is Available"),
-        help_text=_("Whether the car is currently available for booking/purchase"),
-    )
-    
-    available_from = models.DateTimeField(
-        null=True,
-        blank=True,
-        verbose_name=_("Available From"),
-        help_text=_("Date from which the car is available (for rentals)"),
-    )
-    
-    available_to = models.DateTimeField(
-        null=True,
-        blank=True,
-        verbose_name=_("Available To"),
-        help_text=_("Date until which the car is available (for rentals)"),
-    )
-    
-    quantity_available = models.PositiveIntegerField(
-        default=1,
-        verbose_name=_("Quantity Available"),
-        help_text=_("Number of units available for sale/rent"),
-    )
-    
+    date = models.DateField()
+    available_units = models.PositiveIntegerField(default=0)
+
     class Meta:
         verbose_name = _("Car Availability")
         verbose_name_plural = _("Car Availabilities")
-        db_table = "Car availabilities"
-        indexes = [
-            models.Index(fields=['car_listing', 'availability_type', 'is_available']),
-            models.Index(fields=['available_from', 'available_to']),
+        constraints = [
+            models.UniqueConstraint(
+                fields=["car_listing", "date"], name="car_listing_date_unique"
+            )
         ]
+        indexes = [models.Index(fields=["car_listing", "date"])]
     
     def __str__(self):
-        return f"{self.car_listing} - {self.availability_type} - {'Available' if self.is_available else 'Not Available'}"
+        return f"{self.car_listing} on {self.date} — {self.available_units} units available"
+
 class PropertyListing(BaseListing):
     class PropertyTypeChoices(models.TextChoices):
         APARTMENT = "apartment", _("Apartment")
@@ -520,7 +488,7 @@ class GuestHouseListing(BaseListing):
         related_name="guest_house_listings",
         verbose_name=_("Amenities"),
     )
-
+    facility=models.ManyToManyField(Facility,blank=True,related_name="guest_house_listing",verbose_name=_("Facility"))
     rating = models.DecimalField(
         max_digits=3,
         decimal_places=2,
@@ -547,8 +515,64 @@ class GuestHouseListing(BaseListing):
 
     def __str__(self) -> str:
         return f"{self.title} ({self.address.city})"
+class GuestHouseAvailability(AbstractBaseModel):
+    guest_house = models.ForeignKey(
+        GuestHouseListing,
+        on_delete=models.CASCADE,
+        related_name="availability",
+    )
+    date = models.DateField()
+    available_rooms = models.PositiveIntegerField()
+    
+    class Meta:
+        unique_together = ("guest_house", "date")
+        ordering = ["date"]
 
+    def __str__(self):
+        return f"{self.guest_house.title} - {self.date}: {self.available_rooms} rooms"
+class GuestHouseBooking(AbstractBaseModel):
+    class RentStatus(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        CONFIRMED = "confirmed", _("Confirmed")
+        CANCELLED = "cancelled", _("Cancelled")
+        WALK_IN = "walk_in", _("Walk-In")
+    renter = models.ForeignKey(settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE)
+    start_date = models.DateField()
+    end_date = models.DateField()
+    total_price = models.DecimalField(max_digits=10, decimal_places=2)
+    status = models.CharField(max_length=20, choices=RentStatus.choices, default=RentStatus.PENDING)
+    def __str__(self):
+        return f"Booking #{self.id} ({self.start_date} → {self.end_date})"
+class GuestHouseBookingItem(AbstractBaseModel):
+    booking = models.ForeignKey(
+        GuestHouseBooking,
+        on_delete=models.CASCADE,
+        related_name="items",
+        verbose_name=_("Booking")
+    )
 
+    room = models.ForeignKey(
+        GuestHouseListing,
+        on_delete=models.CASCADE,
+        related_name="booking_items",
+        verbose_name=_("Room")
+    )
+
+    units_booked = models.PositiveIntegerField(default=1)
+
+    price_per_unit = models.DecimalField(max_digits=10, decimal_places=2)
+
+    class Meta:
+        verbose_name = _("Guesthouse Booking Item")
+        verbose_name_plural = _("GuestBooking Items")
+        db_table = "guesthouse_booking_items"
+
+    def subtotal(self):
+        return self.units_booked * self.price_per_unit
+
+    def __str__(self):
+        return f"{self.room.title} booked on {self.booking.start_date}"
 class RoomListing(BaseListing):
     """
     One row ~= one room type for a given hotel.

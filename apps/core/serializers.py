@@ -16,8 +16,14 @@ class AddressSerializer(serializers.ModelSerializer):
             "state",
             "postal_code",
         ]
-
-
+class FacilitySerializer(serializers.ModelSerializer):
+ class Meta:
+        model = Facility
+        fields = [
+            "icon",
+            "name",
+            
+        ]
 class JsonSerializerField(serializers.Field):
     """Used to convert JSON string to dict"""
 
