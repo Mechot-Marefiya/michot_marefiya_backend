@@ -439,11 +439,14 @@ class PriceService:
         # Returns detailed info for a single date: final price and source info
         inv = RoomInventory.objects.filter(room_listing=room, date=when).first()
         if inv and inv.price is not None:
+            p = Decimal(inv.price).quantize(Decimal('0.01'))
+            base = Decimal(room.base_price)
             return {
-                "price": Decimal(inv.price).quantize(Decimal('0.01')),
+                "price": p,
                 "source": "inventory",
                 "rate_id": None,
                 "note": None,
+                "is_discounted": p < base,
             }
 
         hotel = room.hotel
@@ -482,26 +485,33 @@ class PriceService:
             matched.sort(key=score, reverse=True)
             chosen = matched[0]
             if chosen.price_override is not None:
+                p = Decimal(chosen.price_override).quantize(Decimal('0.01'))
+                base = Decimal(room.base_price)
                 return {
-                    "price": Decimal(chosen.price_override).quantize(Decimal('0.01')),
+                    "price": p,
                     "source": "seasonal",
                     "rate_id": str(chosen.id),
                     "note": None,
+                    "is_discounted": p < base,
                 }
             if chosen.multiplier is not None:
                 base = Decimal(room.base_price)
+                p = (base * Decimal(chosen.multiplier)).quantize(Decimal('0.01'))
                 return {
-                    "price": (base * Decimal(chosen.multiplier)).quantize(Decimal('0.01')),
+                    "price": p,
                     "source": "seasonal",
                     "rate_id": str(chosen.id),
                     "note": f"multiplier {chosen.multiplier}",
+                    "is_discounted": p < base,
                 }
 
+        base = Decimal(room.base_price).quantize(Decimal('0.01'))
         return {
-            "price": Decimal(room.base_price).quantize(Decimal('0.01')),
+            "price": base,
             "source": "base",
             "rate_id": None,
             "note": None,
+            "is_discounted": False,
         }
 
 

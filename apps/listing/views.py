@@ -151,13 +151,16 @@ class RoomListingViewSet(AbstractModelViewSet):
                 'source': info.get('source'),
                 'rate_id': info.get('rate_id'),
                 'note': info.get('note'),
+                'is_discounted': bool(info.get('is_discounted', False)),
             })
             total += Decimal(str(price))
+
+        has_discount = any(l.get('is_discounted') for l in lines)
 
         return Response({
             'lines': lines,
             'total': str(total.quantize(Decimal('0.01'))),
-            'has_discount': False,
+            'has_discount': bool(has_discount),
         })
 
     def get_serializer_context(self):
