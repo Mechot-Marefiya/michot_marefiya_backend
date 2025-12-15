@@ -104,7 +104,7 @@ class GuestHouseListingResponseSerializer(serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     address = AddressSerializer()
     amenities = AmenityResponseSSerializer(many=True)
-    facilities=FacilitySerializer()
+    facility=FacilitySerializer()
     class Meta:
         model = GuestHouseListing
         fields = [
@@ -117,7 +117,7 @@ class GuestHouseListingResponseSerializer(serializers.ModelSerializer):
             "amenities",
             "address",
             "rating",
-            "facilities",
+            "facility",
         ]
 
 
@@ -125,7 +125,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
     address = JsonSerializerField()
     images = serializers.ListField(child=serializers.ImageField())
     amenities = JsonSerializerField()
-    facilities=FacilitySerializer()
+    facility=FacilitySerializer()
     class Meta:
         model = GuestHouseListing
         fields = [
@@ -138,7 +138,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             "total_rooms",
             "amenities",
             "address",
-            "facilities"
+            "facility"
         ]
 
     def validate_address(self, attr):
@@ -180,7 +180,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         images = validated_data.pop("images", [])
         amenities = validated_data.pop("amenities", [])
-        facilities = validated_data.pop("facilities", [])
+        facilities = validated_data.pop("facility", [])
         address_data = validated_data.pop("address")
 
         address = Address.objects.create(**address_data)
