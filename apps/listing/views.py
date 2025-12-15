@@ -87,7 +87,7 @@ class RoomListingViewSet(AbstractModelViewSet):
         """
         if self.action == 'create':
             return [IsAuthenticated()]
-        elif self.action in ['list', 'retrieve']:
+        elif self.action in ['list', 'retrieve', 'price_preview']:
             return [AllowAny()]
         else:
             return [IsListingOwner()]
