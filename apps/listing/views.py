@@ -280,7 +280,7 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
                 OpenApiParameter("country", OpenApiTypes.STR, required=False),
                 OpenApiParameter("region", OpenApiTypes.STR, required=False),
                 OpenApiParameter("sub_city", OpenApiTypes.STR, required=False),
-                OpenApiParameter("guesthouse_id", OpenApiTypes.INT, required=False),
+                OpenApiParameter("guesthouse_id", OpenApiTypes.UUID, required=False),
             ],
             responses=GuestHouseListingResponseSerializer(many=True)
         )
@@ -1258,26 +1258,58 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
             return self.get_paginated_response(serialized)
 
         return Response(serialized)
+    @extend_schema(
+    summary="Search available event spaces",
+    description="Searches available event spaces by date, quantity, and optional address.",
+    parameters=[
+        OpenApiParameter(
+            name="quantity",
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            required=True,
+            description="Required number of units"
+        ),
+        OpenApiParameter(
+            name="check_in",
+            type=OpenApiTypes.DATE,
+            location=OpenApiParameter.QUERY,
+            required=True,
+            description="Check-in date (YYYY-MM-DD)"
+        ),
+        OpenApiParameter(
+            name="check_out",
+            type=OpenApiTypes.DATE,
+            location=OpenApiParameter.QUERY,
+            required=True,
+            description="Check-out date (YYYY-MM-DD)"
+        ),
+        OpenApiParameter(
+            name="address",
+            type=OpenApiTypes.STR,
+            location=OpenApiParameter.QUERY,
+            required=False,
+            description="Optional address search term"
+        ),
+    ],
+    responses={200: EventSpaceListingSerializer(many=True)}
+)
     @action(detail=False, methods=['get'])
     def search(self, request):
         """
         Searches available event spaces by date, quantity, and address.
         """
-        
-        # 1. Input Validation and Parsing
         try:
             quantity_str = request.query_params.get('quantity')
             check_in_str = request.query_params.get('check_in')
             check_out_str = request.query_params.get('check_out')
-            address_query = request.query_params.get('address') # Optional
+            address_query = request.query_params.get('address')
 
             if not all([quantity_str, check_in_str, check_out_str]):
                 return Response(
                     {"error": "Missing required query parameters: quantity, check_in, check_out."},
                     status=status.HTTP_400_BAD_REQUEST
                 )
-            
-            # Type conversion
+
             required_quantity = int(quantity_str)
             check_in_date = date.fromisoformat(check_in_str)
             check_out_date = date.fromisoformat(check_out_str)
@@ -1287,8 +1319,7 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
                 {"error": f"Invalid parameter format: {e}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        # 2. Call the Service Layer
+
         available_listings = EventSpaceAvailabilityService.search_available_listings(
             check_in_date,
             check_out_date,
@@ -1296,8 +1327,6 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
             address_query=address_query,
         )
 
-        # 3. Serialize and Return
-        # You would use the standard EventSpaceListingSerializer here
         serializer = self.get_serializer(available_listings, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 @extend_schema(responses=EventSpaceBookingResponseSerializer)

@@ -1203,40 +1203,43 @@ class EventSpaceAvailabilityService:
         max_distance_km=None,
     ):
         required_days = (check_out_date - check_in_date).days
+
         availability_qs = (
             EventSpaceAvailability.objects
             .filter(
                 date__gte=check_in_date,
                 date__lt=check_out_date,
-                available_eventspace__gte=required_quantity # Must meet quantity check on each day
+                available_eventspace__gte=required_quantity
             )
             .values("space_listing")
             .annotate(
                 total_days=Count("date", distinct=True),
                 min_available=Min("available_eventspace")
             )
-            .filter(total_days=required_days) # Ensure availability exists for ALL days
+            .filter(total_days=required_days)
         )
 
-        # Extract listing IDs that are available
         available_listing_ids = [row["space_listing"] for row in availability_qs]
-        
-        # 2. Filter EventSpaceListing based on availability and address
+
         listings_qs = EventSpaceListing.objects.filter(id__in=available_listing_ids)
 
         if address_query:
             listings_qs = listings_qs.filter(
-                Q(address__icontains=address_query) | 
-                Q(hotel__city__icontains=address_query)
-            )
-        listing_info_map = {row["space_listing"]: row["min_available"] for row in availability_qs}
-        
+        Q(address__city__icontains=address_query) |
+        Q(address__sub_city__icontains=address_query) |
+        Q(address__street_line1__icontains=address_query)
+    )
+
+        listing_info_map = {
+            row["space_listing"]: row["min_available"]
+            for row in availability_qs
+        }
+
         final_listings = []
         for listing in listings_qs:
-            # Dynamically attach the guaranteed minimum available quantity for the requested dates
             listing.min_available_for_period = listing_info_map.get(listing.id)
             final_listings.append(listing)
-            
+
         return final_listings
 class GuestHouseAvailabilityService:
 
