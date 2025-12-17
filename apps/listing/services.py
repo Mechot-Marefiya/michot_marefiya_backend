@@ -8,6 +8,7 @@ from django.utils import timezone
 from django.conf import settings
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple,Any,List
+from rest_framework.exceptions import ValidationError
 from decimal import Decimal
 from apps.account.models import CompanyProfile, HotelProfile
 from apps.account.services import ImageCreationService
@@ -51,6 +52,8 @@ class ListingService:
 
         if company_id:
             company = get_object_or_404(CompanyProfile, id=company_id)
+            if company.status != CompanyProfile.StatusChoice.APPROVED:
+                raise ValidationError("Company profile is not approved.")
 
         print("------->", company)
         # else:

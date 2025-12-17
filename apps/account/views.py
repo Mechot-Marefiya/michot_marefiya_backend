@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework import status, serializers
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.conf import settings
+from django.utils import timezone
 import logging
 import traceback
 from rest_framework.views import APIView
@@ -25,6 +26,7 @@ from apps.account.models import (
     IndividualOwnerProfile,
     User,
 )
+from apps.account.models import Role
 from apps.account.serializers import (
     CompanyProfileResponseSerializer,
     CustomTokenObtainPairSerializer,
@@ -34,6 +36,7 @@ from apps.account.serializers import (
     IndividualOwnerProfileSerializer,
     UserSerializer,
     CompanyProfileSerializer,
+    CompanyApplicationSerializer,
     UserResponseSerializer,
     UserUpdateSerializer,
     ChangePasswordSerializer,
@@ -245,6 +248,51 @@ class CompanyProfileViewSet(AbstractModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset()
+
+    @action(detail=False, methods=["post"], url_path="apply", permission_classes=[IsAuthenticated])
+    def apply(self, request):
+        """Authenticated users apply to create a company profile (status=PENDING)."""
+        serializer = CompanyApplicationSerializer(data=request.data, context=self.get_serializer_context())
+        serializer.is_valid(raise_exception=True)
+        profile = serializer.save()
+        return Response(CompanyProfileResponseSerializer(profile).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="approve", permission_classes=[IsAdmin])
+    def approve(self, request, pk=None):
+        profile = self.get_object()
+        if profile.status == CompanyProfile.StatusChoice.APPROVED:
+            return Response({"detail": "Profile already approved."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            role = Role.objects.get(code=RoleCode.COMPANY.value)
+        except Role.DoesNotExist:
+            return Response({"detail": "Company role not configured."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        profile.status = CompanyProfile.StatusChoice.APPROVED
+        profile.approved_at = timezone.now()
+        profile.approved_by = request.user
+        profile.save()
+
+        # Promote the user to company role
+        profile.user.role = role
+        profile.user.save()
+
+        return Response(CompanyProfileResponseSerializer(profile).data)
+
+    @action(detail=True, methods=["post"], url_path="reject", permission_classes=[IsAdmin])
+    def reject(self, request, pk=None):
+        profile = self.get_object()
+        if profile.status == CompanyProfile.StatusChoice.REJECTED:
+            return Response({"detail": "Profile already rejected."}, status=status.HTTP_400_BAD_REQUEST)
+
+        reason = request.data.get("reason")
+        profile.status = CompanyProfile.StatusChoice.REJECTED
+        profile.rejection_reason = reason
+        profile.approved_by = request.user
+        profile.approved_at = timezone.now()
+        profile.save()
+
+        return Response(CompanyProfileResponseSerializer(profile).data)
 
 
 @extend_schema(responses=IndividualOwnerProfileResponseSerializer)

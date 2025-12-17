@@ -23,7 +23,40 @@ class HotelProfileModelAdmin(admin.ModelAdmin):
 
 
 admin.site.register(Role)
-admin.site.register(CompanyProfile)
+from django.utils import timezone
+from apps.account.enums import RoleCode
+
+
+def approve_companies(modeladmin, request, queryset):
+    try:
+        role = Role.objects.get(code=RoleCode.COMPANY.value)
+    except Role.DoesNotExist:
+        modeladmin.message_user(request, "Company role not configured.")
+        return
+
+    for profile in queryset:
+        profile.status = CompanyProfile.StatusChoice.APPROVED
+        profile.approved_at = timezone.now()
+        profile.approved_by = request.user
+        profile.save()
+        profile.user.role = role
+        profile.user.save()
+
+
+def reject_companies(modeladmin, request, queryset):
+    for profile in queryset:
+        profile.status = CompanyProfile.StatusChoice.REJECTED
+        profile.rejection_reason = "Rejected by admin via Django admin action."
+        profile.approved_at = timezone.now()
+        profile.approved_by = request.user
+        profile.save()
+
+
+@admin.register(CompanyProfile)
+class CompanyProfileAdmin(admin.ModelAdmin):
+    list_display = ("name", "user", "status", "approved_at", "approved_by")
+    actions = [approve_companies, reject_companies]
+
 admin.site.register(IndividualOwnerProfile)
 admin.site.register(User)
 
