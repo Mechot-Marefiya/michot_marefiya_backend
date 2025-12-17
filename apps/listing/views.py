@@ -79,6 +79,8 @@ from apps.listing.serializers import (
     GuestHouseBookingSerializer
 )
 from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService,PriceService,GuestHouseAvailabilityService,EventSpaceAvailabilityService
+from rest_framework.exceptions import PermissionDenied
+
 @extend_schema(responses=RoomListingResponseSerializer)
 class RoomListingViewSet(AbstractModelViewSet):
     serializer_class = RoomListingSerializer
@@ -508,6 +510,8 @@ class CarListingViewSet(AbstractModelViewSet):
             except IndividualOwnerProfile.DoesNotExist:
                 try:
                     company = CompanyProfile.objects.get(user=user)
+                    if company.status != CompanyProfile.StatusChoice.APPROVED:
+                        raise PermissionDenied("Company profile is not approved.")
                     serializer.save(company=company)
                 except CompanyProfile.DoesNotExist:
                     serializer.save()

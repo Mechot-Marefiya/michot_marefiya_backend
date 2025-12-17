@@ -6,6 +6,8 @@ from datetime import datetime
 from datetime import date
 from rest_framework.exceptions import ValidationError
 from apps.account.services import ImageCreationService
+from apps.account.models import CompanyProfile
+from django.shortcuts import get_object_or_404
 from apps.account.serializers import AddressSerializer, ListingImageSerializer
 from apps.core.serializers import JsonSerializerField,FacilitySerializer
 from apps.listing.exceptions import BookingConflict
@@ -154,6 +156,10 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Only one owner type allowed.")
         if not company_id and not individual_id:
             raise serializers.ValidationError("An owner is required.")
+        if company_id:
+            company_obj = company_id if isinstance(company_id, CompanyProfile) else get_object_or_404(CompanyProfile, id=company_id)
+            if company_obj.status != CompanyProfile.StatusChoice.APPROVED:
+                raise serializers.ValidationError({"company": "Company profile is not approved."})
         return data
 
     # def create(self, validated_data):
@@ -543,6 +549,11 @@ class CarListingSerializer(serializers.ModelSerializer):
         base_price = data.get('base_price')
         if base_price and base_price <= 0:
             raise serializers.ValidationError("Base price must be greater than 0.")
+        # Ensure provided company profile (if any) is approved
+        if company:
+            company_obj = company if isinstance(company, CompanyProfile) else get_object_or_404(CompanyProfile, id=company)
+            if company_obj.status != CompanyProfile.StatusChoice.APPROVED:
+                raise serializers.ValidationError({"company": "Company profile is not approved."})
         
         return data
 

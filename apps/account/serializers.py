@@ -12,6 +12,7 @@ from apps.account.models import (
     ListingImage,
     Role,
 )
+from django.utils import timezone
 from apps.account.utils import generate_password
 from rest_framework import serializers
 
@@ -228,12 +229,16 @@ class ChangePasswordSerializer(serializers.Serializer):
 class CompanyProfileResponseSerializer(serializers.ModelSerializer):
     address = AddressSerializer()
     user = UserResponseSerializer()
+    approved_by = UserResponseSerializer(read_only=True)
 
     class Meta:
         model = CompanyProfile
         fields = [
             "id",
             "user",
+            "status",
+            "approved_at",
+            "approved_by",
             "name",
             "phone",
             "category",
@@ -299,7 +304,11 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
         user.save()
         address = Address.objects.create(**address_data)
         profile = CompanyProfile.objects.create(
-            user=user, address=address, **validated_data
+            user=user,
+            address=address,
+            status=CompanyProfile.StatusChoice.APPROVED,
+            approved_at=timezone.now(),
+            **validated_data,
         )
 
         return profile
@@ -308,6 +317,49 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
         return CompanyProfileResponseSerializer(
             instance, self.context
         ).to_representation(instance)
+
+
+class CompanyApplicationSerializer(serializers.ModelSerializer):
+    address = JsonSerializerField()
+
+    class Meta:
+        model = CompanyProfile
+        fields = [
+            "name",
+            "license",
+            "address",
+            "phone",
+            "logo",
+            "category",
+            "description",
+        ]
+
+    def validate_address(self, attr):
+        serializer = AddressSerializer(data=attr)
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
+
+    def validate(self, attrs):
+        user = self.context["request"].user
+        if hasattr(user, "profile") and user.profile:
+            raise serializers.ValidationError("User already has a company profile.")
+        return attrs
+
+    @transaction.atomic()
+    def create(self, validated_data):
+        request = self.context.get("request")
+        user = request.user
+        address_data = validated_data.pop("address")
+        address = Address.objects.create(**address_data)
+
+        profile = CompanyProfile.objects.create(
+            user=user, address=address, status=CompanyProfile.StatusChoice.PENDING, **validated_data
+        )
+
+        return profile
+
+    def to_representation(self, instance):
+        return CompanyProfileResponseSerializer(instance, self.context).to_representation(instance)
 
 
 class IndividualOwnerProfileResponseSerializer(serializers.ModelSerializer):

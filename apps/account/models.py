@@ -130,6 +130,31 @@ class CompanyProfile(AbstractBaseModel):
 
     address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
 
+    class StatusChoice(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        APPROVED = "approved", _("Approved")
+        REJECTED = "rejected", _("Rejected")
+
+    status = models.CharField(
+        max_length=20,
+        choices=StatusChoice.choices,
+        default=StatusChoice.PENDING,
+        verbose_name=_("Status"),
+    )
+
+    approved_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Approved At"))
+
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("Approved By"),
+    )
+
+    rejection_reason = models.TextField(null=True, blank=True, verbose_name=_("Rejection Reason"))
+
     class Meta:
         verbose_name = _("Company Profile")
         verbose_name_plural = _("Company Profiles")
@@ -137,6 +162,10 @@ class CompanyProfile(AbstractBaseModel):
 
     def __str__(self) -> str:
         return f"{self.name}::{self.category}"
+
+    @property
+    def is_approved(self) -> bool:
+        return self.status == CompanyProfile.StatusChoice.APPROVED
 
 
 class IndividualOwnerProfile(AbstractBaseModel):
