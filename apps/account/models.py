@@ -119,12 +119,13 @@ class CompanyProfile(AbstractBaseModel):
         verbose_name=_("Logo"), upload_to="company_logos/", blank=True, null=True
     )
 
-    license = models.FileField(verbose_name=_("License"), upload_to="company_licenses/")
+    license = models.FileField(verbose_name=_("License"), blank=True, null=True,upload_to="company_licenses/")
 
     category = models.CharField(
         max_length=100, choices=CategoryChoice.choices, verbose_name=_("Category")
     )
-
+    tin=models.CharField(max_length=15,verbose_name=_("Tin"),blank=True, null=True)
+    business_license_number=models.CharField(max_length=50,verbose_name=_("Business License Number"),blank=True, null=True)
     description = models.TextField(verbose_name=_("Description"), blank=True)
 
     address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")

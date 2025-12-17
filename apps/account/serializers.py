@@ -240,6 +240,8 @@ class CompanyProfileResponseSerializer(serializers.ModelSerializer):
             "description",
             # "logo",
             "address",
+            "tin",
+            "business_license_number",
         ]
 
 
@@ -260,7 +262,9 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
             "phone",
             "logo",
             "category",
+            "tin",
             "description",
+            "business_license_number",
         ]
 
     def validate_email(self, value):
