@@ -34,7 +34,12 @@ admin.site.register(CarAvailability)
 admin.site.register(EventSpaceAvailability)
 admin.site.register(CarRental)
 admin.site.register(CarRentalItem)
-admin.site.register(EventSpaceListing)
+@admin.register(EventSpaceListing)
+class EventSpaceListingAdmin(admin.ModelAdmin):
+    list_display = ("title", "hotel", "space_type", "base_price", "is_active")
+    search_fields = ("title", "description")
+    list_filter = ("space_type", "is_active", "hotel")
+    inlines = [ListingImageInline]
 admin.site.register(EventSpaceBookingItem)
 admin.site.register(EventSpaceBooking)
 admin.site.register(GuestHouseAvailability)
@@ -57,6 +62,7 @@ class RoomListingAdmin(admin.ModelAdmin):
     list_display = ("title", "hotel", "base_price", "is_active")
     search_fields = ("title", "description")
     list_filter = ("is_active", "hotel")
+    inlines=[ListingImageInline]
 # admin.site.register(EventSpaceListing)
 admin.site.register(Booking)
 admin.site.register(BookingItem)
@@ -65,7 +71,10 @@ class CarListingModelAdmin(admin.ModelAdmin):
     list_display = ["brand", "company"]
     inlines = [ListingImageInline]
 # admin.site.register(PropertyListing)
-admin.site.register(GuestHouseListing)
+@admin.register(GuestHouseListing)
+class GuestHouseListingModelAdmin(admin.ModelAdmin):
+    list_display=["company","title"]
+    inlines=[ListingImageInline]
 admin.site.register(Amenity)
 
 

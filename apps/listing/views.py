@@ -1311,7 +1311,7 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
             name="quantity",
             type=OpenApiTypes.INT,
             location=OpenApiParameter.QUERY,
-            required=True,
+            required=False,
             description="Required number of units"
         ),
         OpenApiParameter(
