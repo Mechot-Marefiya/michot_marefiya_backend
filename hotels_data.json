@@ -1,0 +1,373 @@
+{
+  "version": "1.0",
+  "last_updated": "2024-01-01",
+  "hotels": [
+    {
+      "business_name": "goha addis hotel",
+      "display_name": "Goha Addis Hotel",
+      "type_of_property": "hotel",
+      "business_license_number": "ml/AA/14/673/3394528/2013",
+      "tin": "00016420266",
+      "owner_manager": "Asmare adugna",
+      "contact_phone": "0929901860",
+      "email": "gouaaddis21@gmail.com",
+      "website": "www.gouaaddishotel.com",
+      "address": {
+        "street_line1": "addis abeba bole atlass capeverde street",
+        "city": "Addis Ababa",
+        "country": "Ethiopia",
+        "sub_city": "Bole",
+        "state": "",
+        "postal_code": ""
+      },
+      "total_rooms": 38,
+      "room_types": {
+        "single": 5,
+        "double": 24,
+        "twin": 6,
+        "family": 3,
+        "suite": 0
+      },
+      "amenities": [
+        "air_conditioning", "heating", "television", "mini_fridge",
+        "telephone", "safe_box", "closet", "private_bathroom",
+        "balcony", "shower", "wifi", "room_key_card",
+        "daily_housekeeping", "towels_toiletries", "restaurant", "parking"
+      ],
+      "prices": {
+        "single": {"min": 50.00, "max": 80.00, "currency": "USD"},
+        "double": {"min": 60.00, "max": 100.00, "currency": "USD"},
+        "twin": {"min": 75.00, "max": 140.00, "currency": "USD"},
+        "family": {"min": 120.00, "max": 240.00, "currency": "USD"},
+        "suite": {"min": 60.00, "max": 100.00, "currency": "USD"}
+      },
+      "safety": {
+        "has_business_license": true,
+        "has_fire_safety": true,
+        "has_cctv": true,
+        "emergency_contact": "tigest mekete",
+        "emergency_phone": "0929901860"
+      },
+      "metadata": {
+        "import_source": "Excel Michot Marefiya Form",
+        "import_date": "2024-01-01",
+        "notes": "Includes restaurant and parking facilities"
+      }
+    },
+    {
+      "business_name": "Azzeman hotel",
+      "display_name": "Azzeman Hotel",
+      "type_of_property": "hotel",
+      "business_license_number": "mt/AA/14/673/127647/2007",
+      "tin": "0000032805",
+      "owner_manager": "Ayele gebere medhen",
+      "contact_phone": "0946767676",
+      "email": "marketing@azzemenhotel.com",
+      "website": "www.azzemanhotel.com",
+      "address": {
+        "street_line1": "namibiast AA",
+        "city": "Addis Ababa",
+        "country": "Ethiopia",
+        "sub_city": "",
+        "state": "",
+        "postal_code": ""
+      },
+      "total_rooms": 79,
+      "room_types": {
+        "single": 50,
+        "double": 9,
+        "twin": 11,
+        "family": 2,
+        "suite": 7
+      },
+      "amenities": [
+        "heating", "television", "mini_fridge", "telephone",
+        "safe_box", "closet", "private_bathroom", "balcony",
+        "shower", "wifi", "room_key_card", "daily_housekeeping",
+        "towels_toiletries", "restaurant", "conference_room",
+        "gym", "spa", "laundry", "business_center", "concierge", "bar"
+      ],
+      "prices": {
+        "single": {"min": 6000.00, "max": 7000.00, "currency": "ETB"},
+        "double": {"min": 7000.00, "max": 8000.00, "currency": "ETB"},
+        "twin": {"min": 8000.00, "max": 8000.00, "currency": "ETB"},
+        "family": {"min": 12000.00, "max": 14000.00, "currency": "ETB"},
+        "suite": {"min": 9000.00, "max": 10000.00, "currency": "ETB"}
+      },
+      "safety": {
+        "has_business_license": true,
+        "has_fire_safety": true,
+        "has_cctv": true,
+        "emergency_contact": "Ashenafi delelegen",
+        "emergency_phone": "251918785052"
+      },
+      "metadata": {
+        "import_source": "Excel Michot Marefiya Form",
+        "import_date": "2024-01-01",
+        "notes": "Includes multiple facilities: gym, spa, conference room, etc."
+      }
+    },
+    {
+      "business_name": "virajhote&restourant",
+      "display_name": "Viraj Hotel & Restaurant",
+      "type_of_property": "hotel",
+      "business_license_number": "MT/AA/2/0053118/2014",
+      "tin": "0079357388",
+      "owner_manager": "dulkit anora",
+      "contact_phone": "908767778",
+      "email": "vrajhotel25@gmail.com",
+      "website": "www.vrajhotel.com",
+      "address": {
+        "street_line1": "bole enfront of cargo",
+        "city": "Addis Ababa",
+        "country": "Ethiopia",
+        "sub_city": "Bole",
+        "state": "",
+        "postal_code": ""
+      },
+      "total_rooms": 13,
+      "room_types": {
+        "single": 2,
+        "double": 0,
+        "twin": 4,
+        "family": 7,
+        "suite": 0
+      },
+      "amenities": [
+        "air_conditioning", "television", "telephone",
+        "safe_box", "closet", "private_bathroom", "balcony",
+        "shower", "wifi", "room_key_card", "daily_housekeeping",
+        "towels_toiletries"
+      ],
+      "prices": {
+        "single": {"min": 2600.00, "max": 2800.00, "currency": "ETB"},
+        "twin": {"min": 3200.00, "max": 3500.00, "currency": "ETB"},
+        "family": {"min": 2800.00, "max": 3000.00, "currency": "ETB"}
+      },
+      "safety": {
+        "has_business_license": true,
+        "has_fire_safety": true,
+        "has_cctv": true,
+        "emergency_contact": "908767778",
+        "emergency_phone": "970767778"
+      },
+      "metadata": {
+        "import_source": "Excel Michot Marefiya Form",
+        "import_date": "2024-01-01",
+        "notes": "Hotel & restaurant combination"
+      }
+    },
+    {
+      "business_name": "park lane addis hotel",
+      "display_name": "Park Lane Addis Hotel",
+      "type_of_property": "hotel",
+      "business_license_number": "bl/AA/14/673/583995/2008",
+      "tin": "0049716965",
+      "owner_manager": "selamawit abebe",
+      "contact_phone": "0955044440",
+      "email": "info@parklaneaddishotel.com",
+      "website": "www.parklaneaddishotel.com",
+      "address": {
+        "street_line1": "bole atlas",
+        "city": "Addis Ababa",
+        "country": "Ethiopia",
+        "sub_city": "Bole",
+        "state": "",
+        "postal_code": ""
+      },
+      "total_rooms": 23,
+      "room_types": {
+        "single": 4,
+        "double": 6,
+        "twin": 2,
+        "family": 3,
+        "suite": 8
+      },
+      "amenities": [
+        "air_conditioning", "television", "mini_fridge", "telephone",
+        "safe_box", "private_bathroom", "balcony", "shower",
+        "wifi", "room_key_card", "daily_housekeeping",
+        "towels_toiletries", "laundry", "restaurant"
+      ],
+      "prices": {
+        "single": {"min": 2500.00, "max": 3000.00, "currency": "ETB"},
+        "double": {"min": 3800.00, "max": 4000.00, "currency": "ETB"},
+        "twin": {"min": 6000.00, "max": 6000.00, "currency": "ETB"},
+        "family": {"min": 10000.00, "max": 12000.00, "currency": "ETB"},
+        "suite": {"min": 4000.00, "max": 4300.00, "currency": "ETB"}
+      },
+      "safety": {
+        "has_business_license": true,
+        "has_fire_safety": true,
+        "has_cctv": true,
+        "emergency_contact": "selamawit abebe",
+        "emergency_phone": "0955044440"
+      },
+      "metadata": {
+        "import_source": "Excel Michot Marefiya Form",
+        "import_date": "2024-01-01",
+        "notes": "Includes laundry service"
+      }
+    },
+    {
+      "business_name": "Aya hotel",
+      "display_name": "Aya Hotel",
+      "type_of_property": "hotel",
+      "business_license_number": "mt/A/14/673/4692939/2016",
+      "tin": "0000013545",
+      "owner_manager": "meki fereie gezie",
+      "contact_phone": "0908814444",
+      "email": "info@ayaaddishotel.com",
+      "website": "www.ayaaddishotel.com",
+      "address": {
+        "street_line1": "A.A bole atlas",
+        "city": "Addis Ababa",
+        "country": "Ethiopia",
+        "sub_city": "Bole",
+        "state": "",
+        "postal_code": ""
+      },
+      "total_rooms": 120,
+      "room_types": {
+        "single": 34,
+        "double": 22,
+        "twin": 32,
+        "family": 10,
+        "suite": 11
+      },
+      "amenities": [
+        "air_conditioning", "heating", "television", "mini_fridge",
+        "telephone", "safe_box", "closet", "private_bathroom",
+        "balcony", "shower", "wifi", "room_key_card",
+        "daily_housekeeping", "towels_toiletries", "restaurant", "conference_room"
+      ],
+      "prices": {
+        "single": {"min": 60.00, "max": 75.00, "currency": "USD"},
+        "double": {"min": 70.00, "max": 85.00, "currency": "USD"},
+        "twin": {"min": 90.00, "max": 90.00, "currency": "USD"},
+        "family": {"min": 155.00, "max": 167.00, "currency": "USD"},
+        "suite": {"min": 111.00, "max": 123.00, "currency": "USD"}
+      },
+      "safety": {
+        "has_business_license": true,
+        "has_fire_safety": true,
+        "has_cctv": true,
+        "emergency_contact": "beruktawit damiel",
+        "emergency_phone": "0908814444"
+      },
+      "metadata": {
+        "import_source": "Excel Michot Marefiya Form",
+        "import_date": "2024-01-01",
+        "notes": "Large hotel with conference facilities"
+      }
+    },
+    {
+      "business_name": "yoly hotel",
+      "display_name": "Yoly Hotel",
+      "type_of_property": "hotel",
+      "business_license_number": "14/673/6734/2004",
+      "tin": "0003318864",
+      "owner_manager": "tesfaye lema",
+      "contact_phone": "0911631760",
+      "email": "yolyhotel@gmil.com",
+      "website": "yoly.hotel.gym",
+      "address": {
+        "street_line1": "bole atlas",
+        "city": "Addis Ababa",
+        "country": "Ethiopia",
+        "sub_city": "Bole",
+        "state": "",
+        "postal_code": ""
+      },
+      "total_rooms": 18,
+      "room_types": {
+        "semi_standard": 2,
+        "semi_standard_up_scale": 2,
+        "standard": 7,
+        "suit": 2,
+        "semi_suit": 2,
+        "suit_twin": 2,
+        "executive": 1
+      },
+      "amenities": [
+        "air_conditioning", "television", "mini_fridge", "telephone",
+        "safe_box", "closet", "private_bathroom", "balcony",
+        "shower", "wifi", "room_key_card", "daily_housekeeping",
+        "towels_toiletries", "laundry"
+      ],
+      "prices": {
+        "semi_standard": {"min": 24.00, "max": 24.00, "currency": "USD"},
+        "semi_standard_up_scale": {"min": 36.00, "max": 36.00, "currency": "USD"},
+        "standard": {"min": 30.00, "max": 30.00, "currency": "USD"},
+        "suit": {"min": 54.00, "max": 54.00, "currency": "USD"},
+        "semi_suit": {"min": 36.00, "max": 36.00, "currency": "USD"},
+        "suit_twin": {"min": 54.00, "max": 54.00, "currency": "USD"},
+        "executive": {"min": 73.00, "max": 73.00, "currency": "USD"}
+      },
+      "safety": {
+        "has_business_license": true,
+        "has_fire_safety": true,
+        "has_cctv": true,
+        "emergency_contact": "tesfaye lema",
+        "emergency_phone": "251930348584"
+      },
+      "metadata": {
+        "import_source": "Excel Michot Marefiya Form",
+        "import_date": "2024-01-01",
+        "notes": "Multiple room categories with laundry service"
+      }
+    },
+    {
+      "business_name": "wassamar hotel",
+      "display_name": "Wassamar Hotel",
+      "type_of_property": "hotel",
+      "business_license_number": "mi/AA/14/6/3/1218//2006",
+      "tin": "0000038487",
+      "owner_manager": "konjit ayalew",
+      "contact_phone": "0991259811",
+      "email": "info@wassamarhotel.com",
+      "website": "www.wassamarhotel.com",
+      "address": {
+        "street_line1": "bole japan",
+        "city": "Addis Ababa",
+        "country": "Ethiopia",
+        "sub_city": "Bole",
+        "state": "",
+        "postal_code": ""
+      },
+      "total_rooms": 74,
+      "room_types": {
+        "single": 25,
+        "double": 25,
+        "twin": 12,
+        "family": 6,
+        "suite": 6
+      },
+      "amenities": [
+        "air_conditioning", "heating", "television", "mini_fridge",
+        "telephone", "safe_box", "closet", "private_bathroom",
+        "balcony", "shower", "wifi", "room_key_card",
+        "daily_housekeeping", "towels_toiletries", "restaurant"
+      ],
+      "prices": {
+        "single": {"min": 50.00, "max": 50.00, "currency": "USD"},
+        "double": {"min": 65.00, "max": 65.00, "currency": "USD"},
+        "twin": {"min": 65.00, "max": 65.00, "currency": "USD"},
+        "family": {"min": 120.00, "max": 120.00, "currency": "USD"},
+        "suite": {"min": 80.00, "max": 100.00, "currency": "USD"}
+      },
+      "safety": {
+        "has_business_license": true,
+        "has_fire_safety": true,
+        "has_cctv": true,
+        "emergency_contact": "konjit ayalew",
+        "emergency_phone": "0991259811"
+      },
+      "metadata": {
+        "import_source": "Excel Michot Marefiya Form",
+        "import_date": "2024-01-01",
+        "notes": "Established hotel with restaurant"
+      }
+    }
+  ]
+}
