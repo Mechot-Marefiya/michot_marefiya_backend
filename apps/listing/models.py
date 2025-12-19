@@ -800,9 +800,12 @@ class StayAvailability(AbstractBaseModel):
         verbose_name_plural = _("Stay Availabilities")
         constraints = [
             models.UniqueConstraint(
-                fields=["date", "hotel"], name="hotel_date_idx"),
+                fields=["date", "hotel", "room"], name="hotel_date_room_idx"),
         ]
-        indexes = [models.Index(fields=["hotel", "date"])]
+        indexes = [
+            models.Index(fields=["hotel", "date"]),
+            models.Index(fields=["hotel", "room", "date"]),
+        ]
         
 
     def __str__(self) -> str:
