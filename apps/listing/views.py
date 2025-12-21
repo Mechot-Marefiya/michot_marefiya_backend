@@ -52,7 +52,7 @@ from apps.listing.models import (
     GuestHouseBookingItem
     
 )
-from apps.account.models import(CompanyProfile,IndividualOwnerProfile)
+from apps.account.models import(CompanyProfile,IndividualOwnerProfile,HotelProfile)
 from apps.listing.serializers import (
     AmenityResponseSSerializer,
     BookingSerializer,BookingResponseSerializer,
@@ -175,7 +175,36 @@ class RoomListingViewSet(AbstractModelViewSet):
     def get_serializer_context(self):
         context = super().get_serializer_context()
 
-        context["request"] = self.request
+        request = self.request
+
+        # Support both `check_in_date`/`check_out_date` (used by hotel availability)
+        # and `check_in`/`check_out` (used elsewhere)
+        check_in = request.query_params.get("check_in_date") or request.query_params.get("check_in")
+        check_out = request.query_params.get("check_out_date") or request.query_params.get("check_out")
+        hotel_id = request.query_params.get("hotel")
+
+        if check_in and check_out and hotel_id:
+            try:
+                check_in_date = parse_date(check_in)
+                check_out_date = parse_date(check_out)
+            except Exception:
+                check_in_date = None
+                check_out_date = None
+
+            if check_in_date and check_out_date and check_out_date > check_in_date:
+                try:
+                    hotel = get_object_or_404(HotelProfile, id=hotel_id)
+                    _, availability_qs = StayAvailabilityService.get_available_rooms(
+                        hotel, check_in_date, check_out_date
+                    )
+                    # availability_qs is a queryset of dicts with 'room' and 'min_available'
+                    availability_map = {row['room']: row['min_available'] for row in availability_qs}
+                    context['availability_map'] = availability_map
+                except Exception:
+                    # On any error, do not attach availability to avoid breaking existing responses
+                    pass
+
+        context["request"] = request
 
         return context
 

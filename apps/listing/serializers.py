@@ -36,6 +36,7 @@ class AmenityResponseSSerializer(serializers.ModelSerializer):
 class RoomListingResponseSerializer(serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     amenities = AmenityResponseSSerializer(many=True)
+    available_units = serializers.SerializerMethodField()
 
     class Meta:
         model = RoomListing
@@ -53,7 +54,20 @@ class RoomListingResponseSerializer(serializers.ModelSerializer):
             "smoking_allowed",
             "children_allowed",
             "refundable",
+            "available_units",
         ]
+
+    def get_available_units(self, obj):
+        availability_map = self.context.get("availability_map")
+        if availability_map is None:
+            return None
+        return availability_map.get(obj.id, 0)
+
+    def to_representation(self, instance):
+        ret = super().to_representation(instance)
+        if "availability_map" not in self.context:
+            ret.pop("available_units", None)
+        return ret
 
 
 class RoomListingSerializer(serializers.ModelSerializer):
