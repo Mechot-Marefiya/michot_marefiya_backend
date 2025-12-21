@@ -562,6 +562,42 @@ class BookingService:
                 price_per_unit=room.base_price,
             )
 
+            # Build item snapshot (capture display-ready fields at booking time)
+            try:
+                # collect up to 3 image urls from listing images (may be relative)
+                images_qs = list(room.images.all()[:3])
+                image_urls = [getattr(img.image, 'url', None) for img in images_qs if getattr(img, 'image', None)]
+            except Exception:
+                image_urls = []
+
+            # compute min available units across the stay period at booking moment
+            try:
+                from django.db.models import Min
+                min_av = StayAvailability.objects.filter(
+                    hotel=room.hotel,
+                    room=room,
+                    date__gte=booking.check_in_date,
+                    date__lt=booking.check_out_date,
+                ).aggregate(min_available=Min('available_rooms'))
+                available_units_at_booking = min_av.get('min_available') or 0
+            except Exception:
+                available_units_at_booking = None
+
+            item_snapshot = {
+                "room_id": str(room.id),
+                "title": room.title,
+                "images": image_urls,
+                "price_per_unit": str(booking_item.price_per_unit),
+                "units_booked": booking_item.units_booked,
+                "subtotal": str(booking_item.subtotal()),
+                "rate_id": None,
+                "available_units_at_booking_time": available_units_at_booking,
+            }
+
+            # store snapshot on booking item
+            booking_item.snapshot = item_snapshot
+            booking_item.save(update_fields=['snapshot'])
+
             # create per-night price lines if feature enabled
             if use_seasonal:
                 date_cursor = booking.check_in_date
@@ -599,6 +635,51 @@ class BookingService:
             booking.total_price = total_price
 
         booking.save()
+
+        # build booking-level snapshot and persist
+        try:
+            hotel_info = None
+            if rooms_info:
+                hotel_obj = rooms_info[0]['room'].hotel
+                try:
+                    hotel_image_qs = list(hotel_obj.images.all()[:1])
+                    hotel_image = getattr(hotel_image_qs[0].image, 'url', None) if hotel_image_qs else None
+                except Exception:
+                    hotel_image = None
+
+                hotel_info = {
+                    "id": str(hotel_obj.id),
+                    "name": getattr(hotel_obj.company, 'name', None) if getattr(hotel_obj, 'company', None) else None,
+                    "image": hotel_image,
+                }
+
+            items_snapshots = [
+                {
+                    "room_id": str(it.room.id),
+                    "title": it.room.title,
+                    "price_per_unit": str(it.price_per_unit),
+                    "units_booked": it.units_booked,
+                    "subtotal": str(it.subtotal()),
+                    "images": it.snapshot.get('images') if isinstance(it.snapshot, dict) else None,
+                }
+                for it in booking.items.all()
+            ]
+
+            booking_snapshot = {
+                "booking_id": str(booking.id),
+                "check_in_date": booking.check_in_date.isoformat(),
+                "check_out_date": booking.check_out_date.isoformat(),
+                "total_price": str(booking.total_price),
+                "hotel": hotel_info,
+                "items": items_snapshots,
+                "snapshot_version": 1,
+            }
+
+            booking.snapshot = booking_snapshot
+            booking.save(update_fields=['snapshot'])
+        except Exception:
+            # do not fail booking creation if snapshot generation fails
+            pass
         return booking
 
     @staticmethod

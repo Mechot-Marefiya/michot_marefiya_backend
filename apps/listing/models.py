@@ -693,6 +693,9 @@ class Booking(AbstractBaseModel):
         max_length=20, choices=BookingStatus.choices, default=BookingStatus.PENDING
     )
 
+    # Immutable snapshot of booking-level display data captured at creation time
+    snapshot = models.JSONField(null=True, blank=True)
+
     class Meta:
         verbose_name = _("Booking")
         verbose_name_plural = _("Bookings")
@@ -727,6 +730,9 @@ class BookingItem(AbstractBaseModel):
     units_booked = models.PositiveIntegerField(default=1)
 
     price_per_unit = models.DecimalField(max_digits=10, decimal_places=2)
+
+    # Immutable snapshot of item-level display data captured at booking time
+    snapshot = models.JSONField(null=True, blank=True)
 
     class Meta:
         verbose_name = _("Booking Item")

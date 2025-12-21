@@ -875,6 +875,7 @@ class BookingItemResponseSerializer(serializers.ModelSerializer):
     room_title = serializers.CharField(source="room.title", read_only=True)
     room_description = serializers.CharField(source="room.description", read_only=True)
     subtotal = serializers.SerializerMethodField()
+    snapshot = serializers.JSONField(read_only=True)
 
     class Meta:
         model = BookingItem
@@ -886,6 +887,7 @@ class BookingItemResponseSerializer(serializers.ModelSerializer):
             "units_booked",
             "price_per_unit",
             "subtotal",
+            "snapshot",
         ]
 
     def get_subtotal(self, obj):
@@ -894,6 +896,7 @@ class BookingItemResponseSerializer(serializers.ModelSerializer):
 
 class BookingResponseSerializer(serializers.ModelSerializer):
     items = BookingItemResponseSerializer(many=True, read_only=True)
+    snapshot = serializers.JSONField(read_only=True)
 
     class Meta:
         model = Booking
@@ -905,6 +908,7 @@ class BookingResponseSerializer(serializers.ModelSerializer):
             "total_price",
             "status",
             "items",
+            "snapshot",
         ]
 class BookingRatingSerializer(serializers.ModelSerializer):
     class Meta:
