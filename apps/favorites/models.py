@@ -13,6 +13,9 @@ class Favorite(AbstractBaseModel):
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
     object_id = models.CharField(max_length=255)
     content_object = GenericForeignKey("content_type", "object_id")
+    # store a small, best-effort snapshot of the target object to avoid N+1 calls
+    snapshot = models.JSONField(null=True, blank=True, default=dict)
+    snapshot_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         verbose_name = "Favorite"

@@ -13,7 +13,7 @@ class FavoriteViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        return Favorite.objects.filter(user=self.request.user).order_by("-created_at")
+        return Favorite.objects.filter(user=self.request.user).select_related("content_type").order_by("-created_at")
 
     def perform_create(self, serializer):
         serializer.save()
@@ -36,6 +36,9 @@ class FavoriteViewSet(viewsets.ModelViewSet):
             fav.delete()
             return Response({"detail": "removed"}, status=status.HTTP_200_OK)
         else:
-            fav = Favorite.objects.create(user=user, content_type=ct, object_id=str(object_id))
+            # use serializer to ensure snapshot persistence
+            serializer = self.get_serializer(data={"content_type": request.data.get("content_type"), "object_id": object_id})
+            serializer.is_valid(raise_exception=True)
+            fav = serializer.save()
             data = FavoriteSerializer(fav, context={"request": request}).data
             return Response(data, status=status.HTTP_201_CREATED)
