@@ -59,7 +59,7 @@ class InitiatePaymentView(APIView):
         result = ChapaPaymentService.initialize_payment(
             booking=booking,
             amount=serializer.validated_data['amount'],
-            currency=serializer.validated_data.get('currency', 'ETB'),
+            currency=serializer.validated_data.get('currency') or booking.currency or 'ETB',
             email=request.user.email,
             first_name=request.user.first_name,
             last_name=request.user.last_name

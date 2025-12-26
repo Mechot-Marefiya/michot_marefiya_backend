@@ -46,6 +46,7 @@ class RoomListingResponseSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "base_price",
+            "currency",
             "amenities",
             "number_of_guests",
             "total_units",
@@ -89,6 +90,7 @@ class RoomListingSerializer(serializers.ModelSerializer):
             "company_id",
             "description",
             "base_price",
+            "currency",
             "address",
             "amenities",
             "number_of_guests",
@@ -99,6 +101,14 @@ class RoomListingSerializer(serializers.ModelSerializer):
             "children_allowed",
             "refundable",
         ]
+
+    def validate_currency(self, value):
+        if not value:
+            return value
+        value = value.upper()
+        if len(value) != 3:
+            raise serializers.ValidationError("Currency must be a 3-letter ISO code.")
+        return value
 
     def validate_address(self, attr):
         serializer = AddressSerializer(data=attr)
@@ -127,6 +137,7 @@ class GuestHouseListingResponseSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "base_price",
+            "currency",
             "description",
             "images",
             "total_rooms",
@@ -148,6 +159,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             "title",
             "images",
             "base_price",
+            "currency",
             "individual_owner",
             "company",
             "description",
@@ -156,6 +168,14 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             "address",
             "facility"
         ]
+
+    def validate_currency(self, value):
+        if not value:
+            return value
+        value = value.upper()
+        if len(value) != 3:
+            raise serializers.ValidationError("Currency must be a 3-letter ISO code.")
+        return value
 
     def validate_address(self, attr):
         serializer = AddressSerializer(data=attr)
@@ -530,6 +550,7 @@ class CarListingSerializer(serializers.ModelSerializer):
             "description",
             "images",
             "base_price",
+            "currency",
             "individual_owner",
             "company",
             "brand",
@@ -544,6 +565,14 @@ class CarListingSerializer(serializers.ModelSerializer):
             "car_class",
             "quantity"
         ]
+
+    def validate_currency(self, value):
+        if not value:
+            return value
+        value = value.upper()
+        if len(value) != 3:
+            raise serializers.ValidationError("Currency must be a 3-letter ISO code.")
+        return value
     
     def validate(self, data):
         company = data.get("company")
@@ -624,7 +653,7 @@ class CarRentalSerializer(serializers.ModelSerializer):
         model = CarRental
         fields = [
             'id', 'renter', 'renter_name', 'start_date', 'end_date', 
-            'total_price', 'status', 'rental_items', 'items_details',
+            'total_price', 'currency', 'status', 'rental_items', 'items_details',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'status', 'created_at', 'updated_at']
@@ -633,22 +662,27 @@ class CarRentalSerializer(serializers.ModelSerializer):
         start_date = data.get('start_date')
         end_date = data.get('end_date')
         rental_items = data.get('rental_items', [])
-        
-        if start_date >= end_date:
+
+        if start_date and end_date:
+            if start_date >= end_date:
+                raise serializers.ValidationError({
+                    "end_date": "End date must be after start date."
+                })
+        else:
             raise serializers.ValidationError({
-                "end_date": "End date must be after start date."
+                "start_date": "Start date and end date are required."
             })
-        
-        if start_date < datetime.date.today():
+
+        if start_date < date.today():
             raise serializers.ValidationError({
                 "start_date": "Start date cannot be in the past."
             })
-        
+
         if not rental_items:
             raise serializers.ValidationError({
                 "rental_items": "At least one rental item is required."
             })
-        
+
         # ========== DAILY AVAILABILITY CHECK ==========
         for item in rental_items:
             listing = item["car_listing"]
@@ -661,12 +695,12 @@ class CarRentalSerializer(serializers.ModelSerializer):
                 quantity=units,
             )
 
-            if not result["available"]:
+            if not result.get("available", False):
                 raise serializers.ValidationError({
-                    "rental_items": f"{listing.title} is not available: {result['reason']}"
+                    "rental_items": f"{listing.title} is not available: {result.get('reason', 'unavailable')}"
                 })
 
-            if item["price_per_unit"] <= 0:
+            if item.get("price_per_unit", 0) <= 0:
                 raise serializers.ValidationError({
                     "rental_items": "Price per unit must be greater than 0."
                 })
@@ -799,6 +833,7 @@ class PropertyListingResponseSerializer(serializers.ModelSerializer):
             "description",
             "images",
             "base_price",
+            "currency",
             "address",
             "property_type",
             "bedrooms",
@@ -819,6 +854,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "description",
             "images",
             "base_price",
+            "currency",
             "individual_owner",
             "company",
             "address",
@@ -828,6 +864,14 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "square_meters",
             "is_furnished",
         ]
+
+    def validate_currency(self, value):
+        if not value:
+            return value
+        value = value.upper()
+        if len(value) != 3:
+            raise serializers.ValidationError("Currency must be a 3-letter ISO code.")
+        return value
 
     def validate(self, data):
         company_id = data.get("company")
@@ -906,6 +950,7 @@ class BookingResponseSerializer(serializers.ModelSerializer):
             "check_in_date",
             "check_out_date",
             "total_price",
+            "currency",
             "status",
             "items",
             "snapshot",
@@ -1028,6 +1073,7 @@ class EventSpaceListingResponseSerializer(serializers.ModelSerializer):
             "description",
             "number_of_guests",
             "base_price",
+            "currency",
             "amenities",
             "number_of_guests",
             "total_units",
@@ -1051,6 +1097,7 @@ class EventSpaceListingSerializer(serializers.ModelSerializer):
             "company_id",
             "description",
             "base_price",
+            "currency",
             "address",
             "amenities",
             "number_of_guests",
@@ -1059,6 +1106,14 @@ class EventSpaceListingSerializer(serializers.ModelSerializer):
             "floor_area_sqm",
             # Add other fields as needed for creation
         ]
+
+    def validate_currency(self, value):
+        if not value:
+            return value
+        value = value.upper()
+        if len(value) != 3:
+            raise serializers.ValidationError("Currency must be a 3-letter ISO code.")
+        return value
 
     # The Address validation is handled by the nested AddressSerializer
     # if you use the standard nested serializer structure (as shown above).

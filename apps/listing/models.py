@@ -55,6 +55,12 @@ class BaseListing(AbstractBaseModel):
         verbose_name=_("Price"),
         help_text=_("Price of the service/product (if applicable)."),
     )
+    currency = models.CharField(
+        max_length=3,
+        default="ETB",
+        verbose_name=_("Currency"),
+        help_text=_("ISO 4217 currency code for the price fields, e.g., 'ETB'."),
+    )
 
     is_active = models.BooleanField(
         default=True,
@@ -244,6 +250,7 @@ class CarRental(AbstractBaseModel):
         decimal_places=2,
         verbose_name=_("Total Rental Price"),
     )
+    currency = models.CharField(max_length=3, default="ETB")
 
     status = models.CharField(
          max_length=20, choices=RentStatus.choices, default=RentStatus.PENDING

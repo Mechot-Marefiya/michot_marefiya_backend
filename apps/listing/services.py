@@ -549,6 +549,18 @@ class BookingService:
         
         booking = Booking.objects.create(**validated_data)
 
+        # determine booking currency: inherit from first room's listing currency, fallback to ETB
+        try:
+            if rooms_info:
+                booking.currency = getattr(rooms_info[0]["room"], "currency", "ETB")
+            else:
+                booking.currency = "ETB"
+            booking.save(update_fields=["currency"])
+        except Exception:
+            # don't fail booking creation on currency propagation issues; default to ETB
+            booking.currency = "ETB"
+            booking.save(update_fields=["currency"]) 
+
         use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
 
         for item in items_data:
@@ -588,6 +600,7 @@ class BookingService:
                 "title": room.title,
                 "images": image_urls,
                 "price_per_unit": str(booking_item.price_per_unit),
+                "currency": str(booking.currency),
                 "units_booked": booking_item.units_booked,
                 "subtotal": str(booking_item.subtotal()),
                 "rate_id": None,
@@ -670,9 +683,10 @@ class BookingService:
                 "check_in_date": booking.check_in_date.isoformat(),
                 "check_out_date": booking.check_out_date.isoformat(),
                 "total_price": str(booking.total_price),
+                "currency": str(booking.currency),
                 "hotel": hotel_info,
                 "items": items_snapshots,
-                "snapshot_version": 1,
+                "snapshot_version": 2,
             }
 
             booking.snapshot = booking_snapshot

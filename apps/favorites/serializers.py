@@ -33,6 +33,13 @@ def _build_snapshot_for_object(ct, obj):
             except Exception:
                 pass
 
+    # include currency if present on object (generic)
+    try:
+        if hasattr(obj, "currency") and getattr(obj, "currency"):
+            snapshot["currency"] = str(getattr(obj, "currency"))
+    except Exception:
+        pass
+
     return snapshot
 
 

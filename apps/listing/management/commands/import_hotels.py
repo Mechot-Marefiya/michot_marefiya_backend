@@ -463,6 +463,7 @@ class Command(BaseCommand):
                 title=room_title,
                 description=self.generate_room_description(room_type, hotel_data),
                 base_price=base_price,
+                currency=("ETB" if price_info.get('currency') == 'USD' else price_info.get('currency', 'ETB')),
                 number_of_guests=config['guests'],
                 total_units=count,
                 bed_type=config['bed_type'],

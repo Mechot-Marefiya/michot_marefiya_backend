@@ -36,7 +36,7 @@ admin.site.register(CarRental)
 admin.site.register(CarRentalItem)
 @admin.register(EventSpaceListing)
 class EventSpaceListingAdmin(admin.ModelAdmin):
-    list_display = ("title", "hotel", "space_type", "base_price", "is_active")
+    list_display = ("title", "hotel", "space_type", "base_price", "currency", "is_active")
     search_fields = ("title", "description")
     list_filter = ("space_type", "is_active", "hotel")
     inlines = [ListingImageInline]
@@ -52,6 +52,7 @@ class PropertyListingAdmin(admin.ModelAdmin):
         "bathrooms",
         "square_meters",
         "is_furnished",
+        "currency",
         # "listing_type",
     )
     inlines = [ListingImageInline]
@@ -59,21 +60,29 @@ class PropertyListingAdmin(admin.ModelAdmin):
 
 @admin.register(RoomListing)
 class RoomListingAdmin(admin.ModelAdmin):
-    list_display = ("title", "hotel", "base_price", "is_active")
+    list_display = ("title", "hotel", "base_price", "currency", "is_active")
     search_fields = ("title", "description")
     list_filter = ("is_active", "hotel")
     inlines=[ListingImageInline]
 # admin.site.register(EventSpaceListing)
-admin.site.register(Booking)
+
+@admin.register(Booking)
+class BookingAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "check_in_date", "check_out_date", "total_price", "booking_currency", "status")
+    search_fields = ("user__email",)
+    list_filter = ("status",)
+    def booking_currency(self, obj):
+        return getattr(obj, "currency", "ETB")
+    booking_currency.short_description = "currency"
 admin.site.register(BookingItem)
 @admin.register(CarListing)
 class CarListingModelAdmin(admin.ModelAdmin):
-    list_display = ["brand", "company"]
+    list_display = ["brand", "company", "base_price", "currency"]
     inlines = [ListingImageInline]
 # admin.site.register(PropertyListing)
 @admin.register(GuestHouseListing)
 class GuestHouseListingModelAdmin(admin.ModelAdmin):
-    list_display=["company","title"]
+    list_display=["company","title","base_price","currency"]
     inlines=[ListingImageInline]
 admin.site.register(Amenity)
 
