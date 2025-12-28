@@ -9,7 +9,7 @@ from apps.account.services import ImageCreationService
 from apps.account.models import CompanyProfile
 from django.shortcuts import get_object_or_404
 from apps.account.serializers import AddressSerializer, ListingImageSerializer
-from apps.core.serializers import JsonSerializerField,FacilitySerializer
+from apps.core.serializers import JsonSerializerField,FacilitySerializer,FacilityResponseSerializer
 from apps.listing.exceptions import BookingConflict
 from apps.account.enums import RoleCode
 from apps.core.models import Address
@@ -1050,6 +1050,9 @@ class SearchResultSerializer(serializers.Serializer):
     hotel_name = serializers.CharField()
     city = serializers.CharField()
     stars = serializers.IntegerField(allow_null=True)
+    images = ListingImageSerializer(many=True)
+    facilities = FacilityResponseSerializer(many=True)
+    featured = serializers.BooleanField()
     is_favorite = serializers.SerializerMethodField()
     rooms = SearchRoomSerializer(many=True)
 

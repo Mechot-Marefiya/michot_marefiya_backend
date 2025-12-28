@@ -280,7 +280,7 @@ class StayAvailabilityService:
         qs = (
             StayAvailability.objects
             .filter(
-                hotel__company__address__city=city,
+                hotel__company__address__city__icontains=city,
                 room__number_of_guests__gte=number_of_guests,
                 date__gte=check_in_date,
                 date__lt=check_out_date,
@@ -297,35 +297,32 @@ class StayAvailabilityService:
         hotel_ids = list(set([row["hotel"] for row in qs]))
         hotels = HotelProfile.objects.filter(id__in=hotel_ids).select_related(
             "company", "company__address"
-        ).prefetch_related("room_listings")
+        ).prefetch_related("room_listings", "images", "facilities")
 
         availability_data = list(qs)
+        
+        # Optimize: Fetch all relevant rooms in one query
+        all_room_ids = [row["room"] for row in availability_data]
+        all_rooms = RoomListing.objects.filter(id__in=all_room_ids).select_related("hotel", "address")
+        rooms_by_id = {r.id: r for r in all_rooms}
         
         results = []
         for hotel in hotels:
             hotel_rooms_data = [row for row in availability_data if row["hotel"] == hotel.id]
-            room_ids = [row["room"] for row in hotel_rooms_data]
-            rooms = RoomListing.objects.filter(id__in=room_ids).select_related("hotel", "address")
-            
-            room_availability_map = {
-                row["room"]: {
-                    "min_available": row["min_available"],
-                    "total_days": row["total_days"]
-                }
-                for row in hotel_rooms_data
-            }
             
             hotel_data = {
                 "hotel": hotel,
                 "rooms": []
             }
             
-            for room in rooms:
-                availability_info = room_availability_map.get(room.id, {})
-                hotel_data["rooms"].append({
-                    "room": room,
-                    "available_units": availability_info.get("min_available", 0)
-                })
+            for row in hotel_rooms_data:
+                room_id = row["room"]
+                room = rooms_by_id.get(room_id)
+                if room:
+                    hotel_data["rooms"].append({
+                        "room": room,
+                        "available_units": row["min_available"]
+                    })
             
             if hotel_data["rooms"]:
                 results.append(hotel_data)
@@ -669,6 +666,7 @@ class BookingService:
             items_snapshots = [
                 {
                     "room_id": str(it.room.id),
+                    "room_size_sqm": it.room.room_size_sqm,
                     "title": it.room.title,
                     "price_per_unit": str(it.price_per_unit),
                     "units_booked": it.units_booked,
