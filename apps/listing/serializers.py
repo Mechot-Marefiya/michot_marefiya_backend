@@ -1050,7 +1050,18 @@ class SearchResultSerializer(serializers.Serializer):
     hotel_name = serializers.CharField()
     city = serializers.CharField()
     stars = serializers.IntegerField(allow_null=True)
+    is_favorite = serializers.SerializerMethodField()
     rooms = SearchRoomSerializer(many=True)
+
+    def get_is_favorite(self, obj):
+        # pure serializer logic; expects `favorite_object_ids` in context
+        fav_ids = self.context.get("favorite_object_ids") if self.context is not None else None
+        if not fav_ids:
+            return False
+        try:
+            return str(obj.get("hotel_id")) in fav_ids
+        except Exception:
+            return False
 class StayAvailabilityUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = StayAvailability

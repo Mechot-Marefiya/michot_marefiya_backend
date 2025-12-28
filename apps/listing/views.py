@@ -18,6 +18,8 @@ from django.db import transaction
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from apps.account.serializers import HotelProfileResponseSerializer
+from django.contrib.contenttypes.models import ContentType
+from apps.favorites.services import get_favorite_object_ids
 from apps.listing.docs.schema import search_schema
 from apps.core.views import AbstractModelViewSet
 from rest_framework import viewsets
@@ -1104,8 +1106,16 @@ class StaySearchView(APIView):
             
             results.append(hotel_result)
 
-        serializer = SearchResultSerializer(results, many=True)
-        return Response(serializer.data)
+            # Resolve favorites once per request for hotel search results
+            try:
+                ct = ContentType.objects.get(app_label="account", model="hotelprofile")
+            except Exception:
+                ct = None
+
+            fav_ids = get_favorite_object_ids(request.user, ct) if ct is not None else set()
+
+            serializer = SearchResultSerializer(results, many=True, context={"request": request, "favorite_object_ids": fav_ids})
+            return Response(serializer.data)
 class StayAvailabilityUpdateView(APIView):
     def get_permissions(self):
         """

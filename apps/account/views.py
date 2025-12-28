@@ -26,6 +26,8 @@ from apps.account.models import (
     IndividualOwnerProfile,
     User,
 )
+from django.contrib.contenttypes.models import ContentType
+from apps.favorites.services import get_favorite_object_ids
 from apps.account.models import Role
 from apps.account.serializers import (
     CompanyProfileResponseSerializer,
@@ -249,6 +251,18 @@ class CompanyProfileViewSet(AbstractModelViewSet):
     def get_queryset(self):
         return super().get_queryset()
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # resolve favorites for hotel responses
+        try:
+            ct = ContentType.objects.get(app_label="account", model="hotelprofile")
+        except Exception:
+            ct = None
+
+        fav_ids = get_favorite_object_ids(self.request.user, ct) if ct is not None else set()
+        context["favorite_object_ids"] = fav_ids
+        return context
+
     @action(detail=False, methods=["post"], url_path="apply", permission_classes=[IsAuthenticated])
     def apply(self, request):
         """Authenticated users apply to create a company profile (status=PENDING)."""
@@ -329,6 +343,18 @@ class HotelProfileViewSet(AbstractModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset()
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # resolve favorites for hotel responses
+        try:
+            ct = ContentType.objects.get(app_label="account", model="hotelprofile")
+        except Exception:
+            ct = None
+
+        fav_ids = get_favorite_object_ids(self.request.user, ct) if ct is not None else set()
+        context["favorite_object_ids"] = fav_ids
+        return context
 
     @check__room_availability_schema
     @action(

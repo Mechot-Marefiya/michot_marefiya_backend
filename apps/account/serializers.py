@@ -414,10 +414,11 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
     company = CompanyProfileResponseSerializer()
     images = ListingImageSerializer(many=True)
     facilities = FacilityResponseSerializer(many=True)
+    is_favorite = serializers.SerializerMethodField()
 
     class Meta:
         model = HotelProfile
-        fields = ["id", "company", "images", "stars", "featured","facilities"]
+        fields = ["id", "company", "images", "stars", "featured","facilities", "is_favorite"]
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
@@ -425,6 +426,19 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
         # Avoiding the actual hotel id override by company id
         company_data.pop("id")
         return {**rep, **company_data}
+
+    def get_is_favorite(self, instance):
+        """
+        Pure serializer logic: uses only `self.context` and does not perform DB queries.
+        Expects `favorite_object_ids` in context as a set of string ids. Defaults to False.
+        """
+        fav_ids = self.context.get("favorite_object_ids")
+        if not fav_ids:
+            return False
+        try:
+            return str(instance.id) in fav_ids
+        except Exception:
+            return False
 
 
 class HotelProfileSerializer(serializers.Serializer):
