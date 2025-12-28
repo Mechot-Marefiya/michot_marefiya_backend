@@ -131,6 +131,7 @@ class GuestHouseListingResponseSerializer(serializers.ModelSerializer):
     address = AddressSerializer()
     amenities = AmenityResponseSSerializer(many=True)
     facility=FacilitySerializer()
+    is_favorite = serializers.SerializerMethodField()
     class Meta:
         model = GuestHouseListing
         fields = [
@@ -145,7 +146,14 @@ class GuestHouseListingResponseSerializer(serializers.ModelSerializer):
             "address",
             "rating",
             "facility",
+            "is_favorite",
         ]
+
+    def get_is_favorite(self, obj):
+        fav_ids = self.context.get("favorite_object_ids")
+        if not fav_ids:
+            return False
+        return str(obj.id) in fav_ids
 
 
 class GuestHouseListingSerializer(serializers.ModelSerializer):
@@ -156,6 +164,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
     class Meta:
         model = GuestHouseListing
         fields = [
+            "id",
             "title",
             "images",
             "base_price",
@@ -1061,10 +1070,10 @@ class SearchResultSerializer(serializers.Serializer):
         fav_ids = self.context.get("favorite_object_ids") if self.context is not None else None
         if not fav_ids:
             return False
-        try:
-            return str(obj.get("hotel_id")) in fav_ids
-        except Exception:
-            return False
+            
+        # obj is usually a dict here from StaySearchView
+        hid = obj.get("hotel_id") if isinstance(obj, dict) else getattr(obj, "id", None)
+        return str(hid) in fav_ids
 class StayAvailabilityUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = StayAvailability

@@ -122,3 +122,50 @@ def test_stay_search_includes_is_favorite_and_uses_one_fav_query(
 
     fav_queries = [q for q in ctx.captured_queries if "favorites_favorite" in q["sql"]]
     assert len(fav_queries) == 1
+
+
+@pytest.mark.django_db
+def test_guesthouse_list_includes_is_favorite(
+    authenticated_hotel_profile_client, company_user, hotel_profile
+):
+    from apps.listing.models import GuestHouseListing
+    from apps.core.models import Address
+    client = authenticated_hotel_profile_client
+
+    # create an address
+    addr = Address.objects.create(
+        street_line1="gh street",
+        city="Addis",
+        country="Ethiopia",
+    )
+
+    # create a guesthouse
+    gh = GuestHouseListing.objects.create(
+        title="Test GH",
+        base_price=500,
+        total_rooms=5,
+        is_active=True,
+        address=addr,
+        company=hotel_profile.company # satisfy constraint
+    )
+
+    # create favorite
+    ct = ContentType.objects.get(app_label="listing", model="guesthouselisting")
+    Favorite.objects.create(user=company_user, content_type=ct, object_id=str(gh.id))
+
+    url = "/api/v1/listing/guest-houses/"
+
+    with CaptureQueriesContext(connection) as ctx:
+        resp = client.get(url)
+
+    assert resp.status_code == 200
+    data = resp.json()
+    entries = data if isinstance(data, list) else data.get("results", [])
+    
+    target = next((item for item in entries if item["id"] == str(gh.id)), None)
+    assert target is not None
+    assert target.get("is_favorite") is True
+
+    fav_queries = [q for q in ctx.captured_queries if "favorites_favorite" in q["sql"]]
+    assert len(fav_queries) == 1
+

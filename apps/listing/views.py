@@ -320,6 +320,11 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
         else:
             return [IsListingOwner()]
 
+    def get_serializer_class(self):
+        if self.action in ["list", "retrieve", "check_availability"]:
+            return GuestHouseListingResponseSerializer
+        return GuestHouseListingSerializer
+
     def get_queryset(self):
         """Filter queryset - show all active to public, all to companies/admin."""
         queryset = super().get_queryset()
@@ -342,9 +347,17 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
-
         context["request"] = self.request
+        
+        # resolve favorites for guesthouse responses
+        try:
+            ct = ContentType.objects.get(app_label="listing", model="guesthouselisting")
+        except Exception:
+            ct = None
 
+        fav_ids = get_favorite_object_ids(self.request.user, ct) if ct is not None else set()
+        context["favorite_object_ids"] = fav_ids
+        
         return context
     @extend_schema(
             parameters=[
