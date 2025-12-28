@@ -464,6 +464,17 @@ class HotelProfileSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         company_data = attrs.pop("company")
+        
+        # Enforce Hotel-Category Consistency
+        # HotelProfile should only be created for HOTEL or PENSION categories.
+        category = company_data.get("category")
+        allowed_categories = [CompanyProfile.CategoryChoice.HOTEL, CompanyProfile.CategoryChoice.PENSION]
+        
+        if category not in allowed_categories:
+            raise serializers.ValidationError(
+                {"company": {"category": "HotelProfile creation is restricted to 'hotel' or 'pension' categories."}}
+            )
+
         email = company_data.get("email")
         
         if User.objects.filter(email=email).exists():
