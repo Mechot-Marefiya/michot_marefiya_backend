@@ -23,6 +23,7 @@ from django.contrib.contenttypes.models import ContentType
 from apps.favorites.services import get_favorite_object_ids
 from apps.listing.docs.schema import search_schema
 from apps.core.views import AbstractModelViewSet
+from apps.core.utils import get_display_currency
 from rest_framework import viewsets
 from apps.listing.utils import ParseDatesAndQuantity
 from apps.listing.filters import PropertyFilter, RoomFilter, BookingFilter,EventSpaceFilter,EventSpaceBookingFilter
@@ -90,6 +91,11 @@ class RoomListingViewSet(AbstractModelViewSet):
     queryset = RoomListing.objects.all()
     filter_backends = [DjangoFilterBackend]
     filterset_class = RoomFilter
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["display_currency"] = get_display_currency(self.request)
+        return context
 
     def get_permissions(self):
         """
@@ -355,8 +361,8 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
         except Exception:
             ct = None
 
-        fav_ids = get_favorite_object_ids(self.request.user, ct) if ct is not None else set()
         context["favorite_object_ids"] = fav_ids
+        context["display_currency"] = get_display_currency(self.request)
         
         return context
     @extend_schema(
@@ -662,6 +668,11 @@ class CarRentalViewSet(AbstractModelViewSet):
     ordering_fields = ['start_date', 'end_date', 'total_price', 'created_at']
     ordering = ['-created_at']
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["display_currency"] = get_display_currency(self.request)
+        return context
+
     def get_permissions(self):
         if self.action == 'create':
             return [IsAuthenticated()]
@@ -913,6 +924,11 @@ class BookingViewSet(AbstractModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_class = BookingFilter
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["display_currency"] = get_display_currency(self.request)
+        return context
+
     def get_permissions(self):
         """
         - CREATE: Authenticated users can create bookings
@@ -1131,7 +1147,16 @@ class StaySearchView(APIView):
 
         fav_ids = get_favorite_object_ids(request.user, ct) if ct is not None else set()
 
-        serializer = SearchResultSerializer(results, many=True, context={"request": request, "favorite_object_ids": fav_ids})
+        display_currency = get_display_currency(request)
+        serializer = SearchResultSerializer(
+            results, 
+            many=True, 
+            context={
+                "request": request, 
+                "favorite_object_ids": fav_ids,
+                "display_currency": display_currency
+            }
+        )
         return Response(serializer.data)
 class StayAvailabilityUpdateView(APIView):
     def get_permissions(self):
@@ -1262,6 +1287,7 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context["request"] = self.request
+        context["display_currency"] = get_display_currency(self.request)
         return context
 
     # --- Retrieve (Detail) Action ---
@@ -1438,6 +1464,11 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
     # Only allow GET (list/retrieve) and POST (create)
     http_method_names = ["get", "post"] 
     serializer_class = EventSpaceBookingSerializer
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["display_currency"] = get_display_currency(self.request)
+        return context
     
     # Prefetch related data for efficiency
     queryset = EventSpaceBooking.objects.prefetch_related(

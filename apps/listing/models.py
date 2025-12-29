@@ -548,6 +548,7 @@ class GuestHouseBooking(AbstractBaseModel):
     start_date = models.DateField()
     end_date = models.DateField()
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3, default="ETB")
     status = models.CharField(max_length=20, choices=RentStatus.choices, default=RentStatus.PENDING)
     def __str__(self):
         return f"Booking #{self.id} ({self.start_date} → {self.end_date})"
@@ -983,6 +984,7 @@ class BookingBase(AbstractBaseModel):
 
     total_price = models.DecimalField(
         max_digits=10, decimal_places=2, default=0, verbose_name=_("Total Price"))
+    currency = models.CharField(max_length=3, default="ETB", verbose_name=_("Currency"))
 
     status = models.CharField(
         max_length=20, choices=BookingStatus.choices, default=BookingStatus.PENDING, verbose_name=_("Status")

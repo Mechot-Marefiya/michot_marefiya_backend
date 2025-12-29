@@ -27,13 +27,47 @@ from apps.listing.models import (
 )
 from apps.listing.exceptions import RatingException
 from .services import CarAvailabilityService
+from apps.core.utils import convert_currency
+
+class CurrencyConversionMixin(metaclass=serializers.SerializerMetaclass):
+    converted_price = serializers.SerializerMethodField()
+    converted_currency = serializers.SerializerMethodField()
+
+    def get_converted_price(self, obj):
+        target_currency = self.context.get("display_currency")
+        if not target_currency:
+            return None
+        
+        # Determine source price and currency
+        # Supports both model instances (getattr) and dictionaries (bracket access)
+        def get_val(o, attr, default=None):
+            if isinstance(o, dict):
+                return o.get(attr, default)
+            return getattr(o, attr, default)
+
+        source_price = get_val(obj, "base_price")
+        if source_price is None:
+            source_price = get_val(obj, "total_price")
+            
+        source_currency = get_val(obj, "currency", "ETB")
+
+        if source_price is None:
+            return None
+
+        try:
+            return convert_currency(source_price, source_currency, target_currency)
+        except Exception:
+            return None
+
+    def get_converted_currency(self, obj):
+        return self.context.get("display_currency")
 class AmenityResponseSSerializer(serializers.ModelSerializer):
     class Meta:
         model = Amenity
         fields = ["id", "name", "icon"]
 
 
-class RoomListingResponseSerializer(serializers.ModelSerializer):
+class RoomListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     amenities = AmenityResponseSSerializer(many=True)
     available_units = serializers.SerializerMethodField()
@@ -121,12 +155,12 @@ class RoomListingSerializer(serializers.ModelSerializer):
         return ListingService.create_room_listing(validated_data)
 
     def to_representation(self, instance):
-        return RoomListingResponseSerializer(instance, self.context).to_representation(
+        return RoomListingResponseSerializer(instance, context=self.context).to_representation(
             instance
         )
 
 
-class GuestHouseListingResponseSerializer(serializers.ModelSerializer):
+class GuestHouseListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     address = AddressSerializer()
     amenities = AmenityResponseSSerializer(many=True)
@@ -256,7 +290,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         return GuestHouseListingResponseSerializer(
-            instance, self.context
+            instance, context=self.context
         ).to_representation(instance)
 class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
     class Meta:
@@ -830,7 +864,7 @@ class CarAvailabilityUpdateSerializer(serializers.Serializer):
         instance.save()
         return instance
     
-class PropertyListingResponseSerializer(serializers.ModelSerializer):
+class PropertyListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     address = AddressSerializer()
 
@@ -849,6 +883,8 @@ class PropertyListingResponseSerializer(serializers.ModelSerializer):
             "bathrooms",
             "square_meters",
             "is_furnished",
+            "converted_price",
+            "converted_currency",
         ]
 
 
@@ -919,7 +955,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         return PropertyListingResponseSerializer(
-            instance, self.context
+            instance, context=self.context
         ).to_representation(instance)
 
 
@@ -947,7 +983,7 @@ class BookingItemResponseSerializer(serializers.ModelSerializer):
         return obj.subtotal()
 
 
-class BookingResponseSerializer(serializers.ModelSerializer):
+class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     items = BookingItemResponseSerializer(many=True, read_only=True)
     snapshot = serializers.JSONField(read_only=True)
 
@@ -963,6 +999,8 @@ class BookingResponseSerializer(serializers.ModelSerializer):
             "status",
             "items",
             "snapshot",
+            "converted_price",
+            "converted_currency",
         ]
 class BookingRatingSerializer(serializers.ModelSerializer):
     class Meta:
@@ -1030,7 +1068,7 @@ class BookingSerializer(serializers.ModelSerializer):
         return BookingService.create_booking(validated_data, user=user)
 
     def to_representation(self, instance):
-        return BookingResponseSerializer(instance, self.context).to_representation(
+        return BookingResponseSerializer(instance, context=self.context).to_representation(
             instance
         )
 class PartialCancelSerializer(serializers.Serializer):
@@ -1038,11 +1076,12 @@ class PartialCancelSerializer(serializers.Serializer):
     units_to_cancel = serializers.IntegerField(min_value=1)
 
 
-class SearchRoomSerializer(serializers.Serializer):
+class SearchRoomSerializer(CurrencyConversionMixin, serializers.Serializer):
     id = serializers.UUIDField()
     title = serializers.CharField()
     description = serializers.CharField()
     base_price = serializers.DecimalField(max_digits=10, decimal_places=2)
+    currency = serializers.CharField(required=False, default="ETB")
     number_of_guests = serializers.IntegerField()
     bed_type = serializers.CharField()
     room_size_sqm = serializers.IntegerField()
@@ -1054,7 +1093,7 @@ class SearchRoomSerializer(serializers.Serializer):
     preview_has_discount = serializers.BooleanField(required=False)
 
 
-class SearchResultSerializer(serializers.Serializer):
+class SearchResultSerializer(CurrencyConversionMixin, serializers.Serializer):
     hotel_id = serializers.UUIDField()
     hotel_name = serializers.CharField()
     city = serializers.CharField()
@@ -1083,7 +1122,7 @@ class StayAvailabilityUpdateSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("available_rooms must be non-negative.")
         return value
-class EventSpaceListingResponseSerializer(serializers.ModelSerializer):
+class EventSpaceListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     amenities = AmenityResponseSSerializer(many=True)
 
@@ -1102,6 +1141,8 @@ class EventSpaceListingResponseSerializer(serializers.ModelSerializer):
             "total_units",
             "space_type",
             "floor_area_sqm",
+            "converted_price",
+            "converted_currency",
         ]
 class EventSpaceListingSerializer(serializers.ModelSerializer):
     """Serializer used for POST/PUT operations, relying on the service layer."""
@@ -1158,7 +1199,7 @@ class EventSpaceListingSerializer(serializers.ModelSerializer):
         """
         Uses the Response Serializer for the representation of the created/updated object.
         """
-        return EventSpaceListingResponseSerializer(instance, self.context).to_representation(
+        return EventSpaceListingResponseSerializer(instance, context=self.context).to_representation(
             instance
         )
 from rest_framework import serializers
@@ -1190,7 +1231,7 @@ class EventSpaceBookingItemResponseSerializer(serializers.ModelSerializer):
         return obj.subtotal()
 
 
-class EventSpaceBookingResponseSerializer(serializers.ModelSerializer):
+class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     """Serializer for reading/outputting a complete Event Space Booking."""
     # Related_name is simply 'items' on EventSpaceBooking
     items = EventSpaceBookingItemResponseSerializer(many=True, read_only=True) 
@@ -1205,7 +1246,9 @@ class EventSpaceBookingResponseSerializer(serializers.ModelSerializer):
             "total_price",
             "status",
             "items",
-            "event_type"
+            "event_type",
+            "converted_price",
+            "converted_currency",
         ]
 
 # --- Write (Create) Serializers ---
@@ -1264,6 +1307,6 @@ class EventSpaceBookingSerializer(serializers.ModelSerializer):
         return EventSpaceBookingService.create_booking(validated_data, user=user)
 
     def to_representation(self, instance):
-        return EventSpaceBookingResponseSerializer(instance, self.context).to_representation(
+        return EventSpaceBookingResponseSerializer(instance, context=self.context).to_representation(
             instance
         )
