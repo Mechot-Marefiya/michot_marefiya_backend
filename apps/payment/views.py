@@ -12,6 +12,7 @@ from apps.listing.models import Booking
 from apps.account.enums import RoleCode
 from .services import ChapaPaymentService
 from .serializers import PaymentInitializeSerializer, PaymentTransactionSerializer
+from apps.core.utils import convert_currency
 from .models import PaymentTransaction
 
 class InitiatePaymentView(APIView):
@@ -56,16 +57,46 @@ class InitiatePaymentView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
+        # Determine the target currency for payment
+        payment_currency = serializer.validated_data.get('currency') or booking.currency or 'ETB'
+        
+        # This acts as our PRICE GUARD: Calculate the correct amount on the server 
+        # We ignore the frontend's 'amount' if provided, or use it for validation only.
+        try:
+            expected_amount = convert_currency(
+                amount=booking.total_price,
+                source_currency=booking.currency or 'ETB',
+                target_currency=payment_currency
+            )
+            
+            # Optional: Logger(to warn us) if there's a significant mismatch between Frontend requested amount and Backend calculated amount(for debugging)
+            fe_amount = serializer.validated_data.get('amount')
+            if fe_amount and abs(float(fe_amount) - float(expected_amount)) > 0.01:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.warning(
+                    f"Price Mismatch in Payment Init for Booking {booking.id}. "
+                    f"FE sent: {fe_amount}, BE calculated: {expected_amount}"
+                )
+        except Exception as e:
+            return Response(
+                {"error": f"Currency conversion failed: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
         result = ChapaPaymentService.initialize_payment(
             booking=booking,
-            amount=serializer.validated_data['amount'],
-            currency=serializer.validated_data.get('currency') or booking.currency or 'ETB',
+            amount=expected_amount,
+            currency=payment_currency,
             email=request.user.email,
             first_name=request.user.first_name,
             last_name=request.user.last_name
         )
         
         if result["success"]:
+            # Inject the calculated amount into response so Frontend knows what was actually locked in
+            result["calculated_amount"] = str(expected_amount)
+            result["payment_currency"] = payment_currency
             return Response(result, status=status.HTTP_200_OK)
         else:
             return Response(result, status=status.HTTP_400_BAD_REQUEST)

@@ -309,6 +309,7 @@ class GuestHouseBookingSerializer(serializers.ModelSerializer):
             "start_date",
             "end_date",
             "total_price",
+            "currency",
             "items",
             
         ]
@@ -1033,7 +1034,7 @@ class BookingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Booking
-        fields = ["items", "check_in_date", "check_out_date","status"]
+        fields = ["items", "check_in_date", "check_out_date", "currency", "status"]
         read_only_fields = ["status"]
     def validate(self, data):
         check_in = data.get("check_in_date")
@@ -1266,7 +1267,7 @@ class EventSpaceBookingSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = EventSpaceBooking # Mapped to the dedicated model
-        fields = ["items", "check_in_date", "check_out_date","event_type"]
+        fields = ["items", "check_in_date", "check_out_date", "currency", "event_type"]
         read_only_fields = ["status"]
 
     def validate(self, data):

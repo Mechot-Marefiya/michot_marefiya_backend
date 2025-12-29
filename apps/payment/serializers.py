@@ -7,7 +7,7 @@ class PaymentInitializeSerializer(serializers.Serializer):
     email = serializers.EmailField(required=False, allow_blank=True)
     first_name = serializers.CharField(required=False, allow_blank=True)
     last_name = serializers.CharField(required=False, allow_blank=True)
-    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     currency = serializers.CharField(default="ETB")
 
     def validate_currency(self, value):
