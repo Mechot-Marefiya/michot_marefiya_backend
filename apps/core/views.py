@@ -1,4 +1,5 @@
 from rest_framework.viewsets import ModelViewSet, ViewSet
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.core.exceptions import ObjectDoesNotExist
 from decimal import Decimal
@@ -6,7 +7,7 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from apps.core.models import Facility
-from apps.core.serializers import FacilityResponseSerializer,ConversionInputSerializer
+from apps.core.serializers import FacilityResponseSerializer,ConversionInputSerializer, CurrencyRateSerializer
 from apps.core.utils import convert_currency
 from apps.core.enums import CurrencyEnum
 from apps.core.models import CurrencyRate
@@ -29,6 +30,27 @@ class CurrencyViewSet(ViewSet):
         res = [{"code": c.name, "name": c.value} for c in CurrencyEnum]
 
         return Response(data=res, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"])
+    def rates(self, request):
+        """
+        Returns the latest exchange rates for all currencies against USD.
+        Format: {"USD": 1.0, "ETB": 152.9, ...}
+        """
+        from django.db.models import Max
+        latest_date = CurrencyRate.objects.aggregate(Max('date'))['date__max']
+        
+        if not latest_date:
+            return Response({"detail": "No rate data available."}, status=status.HTTP_404_NOT_FOUND)
+            
+        rates = CurrencyRate.objects.filter(base="USD", date=latest_date)
+        rate_dict = {rate.target: float(rate.rate) for rate in rates}
+        
+        # Ensure USD is included as 1.0 if not explicitly in DB
+        if "USD" not in rate_dict:
+            rate_dict["USD"] = 1.0
+            
+        return Response(rate_dict, status=status.HTTP_200_OK)
 class CurrencyConvertAPIView(APIView):
     """
     API endpoint for performing currency conversion based on stored rates.

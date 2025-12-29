@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from apps.core.models import Address, Facility
+from apps.core.models import Address, Facility, CurrencyRate
 from decimal import Decimal
 
 class AddressSerializer(serializers.ModelSerializer):
@@ -70,3 +70,10 @@ class ConversionInputSerializer(serializers.Serializer):
         required=True,
         help_text="The amount to be converted."
     )
+
+
+class CurrencyRateSerializer(serializers.ModelSerializer):
+    """Serializer for the CurrencyRate model."""
+    class Meta:
+        model = CurrencyRate
+        fields = ["target", "rate"]

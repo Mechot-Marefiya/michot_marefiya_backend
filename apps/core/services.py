@@ -20,8 +20,8 @@ class CurrencyService:
     consistency and quick access throughout the app.
     """
 
-    APP_ID = env("OPEN_EXCHANGE_RATE_APP_ID")
-    BASE_URL = env("OPEN_EXCHANGE_RATE_BASE_URL")
+    APP_ID = env("OPEN_EXCHANGE_RATE_APP_ID", default=None)
+    BASE_URL = env("OPEN_EXCHANGE_RATE_BASE_URL", default="https://openexchangerates.org/api")
 
     @classmethod
     def get_request_template(cls, url: str):
@@ -71,6 +71,24 @@ class CurrencyService:
         CurrencyRate.objects.bulk_create(rate_objs)
 
         return rate_objs
+
+    @classmethod
+    def seed_from_local_json(cls):
+        """
+        Seeds the database using the local rate_data.json file.
+        Useful for development when no API key is available.
+        """
+        import json
+        json_path = BASE_DIR / "apps" / "core" / "rate_data.json"
+        
+        if not json_path.exists():
+            print(f"File not found: {json_path}")
+            return
+            
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+            
+        return cls.store_exchange_rates(data)
 
 
 # CurrencyService.get_currencies()

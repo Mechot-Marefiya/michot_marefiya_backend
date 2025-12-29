@@ -1,5 +1,6 @@
 import uuid
 from django.db import models
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 
@@ -103,7 +104,7 @@ class CurrencyRate(AbstractBaseModel):
 
     date = models.DateField(
         verbose_name=_("rate date"),
-        auto_now_add=True,
+        default=timezone.now,
         help_text=_("The date when this rate was recorded."),
     )
 
