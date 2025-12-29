@@ -696,6 +696,13 @@ class Booking(AbstractBaseModel):
     total_price = models.DecimalField(
         max_digits=10, decimal_places=2, default=0)
 
+    currency = models.CharField(
+        max_length=3,
+        default="ETB",
+        verbose_name=_("Currency"),
+        help_text=_("ISO 4217 currency code for the price fields, e.g., 'ETB'."),
+    )
+
     status = models.CharField(
         max_length=20, choices=BookingStatus.choices, default=BookingStatus.PENDING
     )
