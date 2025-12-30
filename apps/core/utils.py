@@ -89,6 +89,7 @@ def get_display_currency(request) -> str:
         
     currency = (
         request.query_params.get('display_currency') or 
+        request.query_params.get('?display_currency') or # Handle malformed URL typo
         request.headers.get('X-Display-Currency') or
         request.query_params.get('X-Display-Currency') # Common mistake
     )

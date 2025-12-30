@@ -92,10 +92,6 @@ class RoomListingViewSet(AbstractModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_class = RoomFilter
 
-    def get_serializer_context(self):
-        context = super().get_serializer_context()
-        context["display_currency"] = get_display_currency(self.request)
-        return context
 
     def get_permissions(self):
         """
@@ -214,6 +210,7 @@ class RoomListingViewSet(AbstractModelViewSet):
                     pass
 
         context["request"] = request
+        context["display_currency"] = get_display_currency(request)
 
         return context
 
@@ -361,6 +358,8 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
         except Exception:
             ct = None
 
+        fav_ids = get_favorite_object_ids(self.request.user, ct) if ct is not None else set()
+
         context["favorite_object_ids"] = fav_ids
         context["display_currency"] = get_display_currency(self.request)
         
@@ -442,7 +441,11 @@ class GuestHouseBookingAPIView(APIView):
         else:
             bookings = GuestHouseBooking.objects.filter(renter=user)
 
-        serializer = GuestHouseBookingSerializer(bookings, many=True)
+        serializer = GuestHouseBookingSerializer(
+            bookings, 
+            many=True, 
+            context={"display_currency": get_display_currency(request)}
+        )
         return Response(serializer.data)
 
     @transaction.atomic
@@ -493,7 +496,10 @@ class GuestHouseBookingAPIView(APIView):
         )
 
         return Response(
-            GuestHouseBookingSerializer(booking).data,
+            GuestHouseBookingSerializer(
+                booking, 
+                context={"display_currency": get_display_currency(request)}
+            ).data,
             status=status.HTTP_201_CREATED
         )
 # Car Listing ViewSet
@@ -506,6 +512,11 @@ class CarListingViewSet(AbstractModelViewSet):
     search_fields = ['title', 'description', 'brand', 'model']
     ordering_fields = ['base_price', 'year', 'mileage', 'created_at']
     ordering = ['-created_at']
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["display_currency"] = get_display_currency(self.request)
+        return context
 
     def get_permissions(self):
         if self.action == 'create':
@@ -876,6 +887,11 @@ class PropertyListingViewSet(AbstractModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_class = PropertyFilter
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["display_currency"] = get_display_currency(self.request)
+        return context
+
     def get_permissions(self):
         """
         - CREATE: Company users can create properties, admin can create all
@@ -1136,6 +1152,15 @@ class StaySearchView(APIView):
                     "room_size_sqm": room.room_size_sqm,
                     "available_units": room_data["available_units"]
                 })
+
+            # Populate hotel-level base_price using the cheapest room's display_price or base_price
+            # to enable converted_price calculation in SearchResultSerializer
+            if hotel_result["rooms"]:
+                hotel_result["base_price"] = min(r["display_price"] for r in hotel_result["rooms"])
+                # We assume currency is consistent across rooms of the same hotel
+                # or we default to the first room's currency.
+                first_room = stay_data["rooms"][0]["room"]
+                hotel_result["currency"] = getattr(first_room, "currency", "ETB")
             
             results.append(hotel_result)
 

@@ -90,6 +90,8 @@ class RoomListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSe
             "children_allowed",
             "refundable",
             "available_units",
+            "converted_price",
+            "converted_currency",
         ]
 
     def get_available_units(self, obj):
@@ -181,6 +183,8 @@ class GuestHouseListingResponseSerializer(CurrencyConversionMixin, serializers.M
             "rating",
             "facility",
             "is_favorite",
+            "converted_price",
+            "converted_currency",
         ]
 
     def get_is_favorite(self, obj):
@@ -299,7 +303,7 @@ class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
             "room",
             "units_booked",
         ]
-class GuestHouseBookingSerializer(serializers.ModelSerializer):
+class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     items = GuestHouseBookingItemSerializer(many=True, write_only=True)
     class Meta:
         model = GuestHouseBooking
@@ -311,7 +315,8 @@ class GuestHouseBookingSerializer(serializers.ModelSerializer):
             "total_price",
             "currency",
             "items",
-            
+            "converted_price",
+            "converted_currency",
         ]
         read_only_fields = ["id", "status", "created_at", "updated_at"]
     def validate(self, data):
@@ -530,7 +535,7 @@ class CarAvailabilitySerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
 
-class CarListingResponseSerializer(serializers.ModelSerializer):
+class CarListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True, read_only=True)
     availabilities = CarAvailabilitySerializer(many=True, read_only=True)
     current_availability = serializers.SerializerMethodField()
@@ -560,7 +565,9 @@ class CarListingResponseSerializer(serializers.ModelSerializer):
             "availabilities",
             "current_availability",
             "created_at",
-            "updated_at"
+            "updated_at",
+            "converted_price",
+            "converted_currency",
         ]
     
     def get_current_availability(self, obj):
@@ -684,7 +691,7 @@ class CarRentalItemSerializer(serializers.ModelSerializer):
         }
 
 
-class CarRentalSerializer(serializers.ModelSerializer):
+class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     rental_items = CarRentalItemSerializer(many=True, write_only=True)
     items_details = CarRentalItemSerializer(
         source='rental_items', many=True, read_only=True
@@ -698,7 +705,7 @@ class CarRentalSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'renter', 'renter_name', 'start_date', 'end_date', 
             'total_price', 'currency', 'status', 'rental_items', 'items_details',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at', 'converted_price', 'converted_currency',
         ]
         read_only_fields = ['id', 'status', 'created_at', 'updated_at']
     
