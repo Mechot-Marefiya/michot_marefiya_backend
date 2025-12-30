@@ -32,7 +32,7 @@ class ChapaPaymentService:
         }
 
     @staticmethod
-    def initialize_payment(booking, email, first_name, last_name, amount, currency="ETB"):
+    def initialize_payment(booking, email, first_name, last_name, amount, currency="ETB", metadata=None):
         tx_ref = ChapaPaymentService.generate_tx_ref()
 
         callback_url = getattr(settings, "CHAPA_CALLBACK_URL", None)
@@ -73,7 +73,8 @@ class ChapaPaymentService:
                 tx_ref=tx_ref,
                 amount=amount,
                 currency=currency,
-                status=PaymentTransaction.PaymentStatus.PENDING
+                status=PaymentTransaction.PaymentStatus.PENDING,
+                metadata=metadata or {}
             )
 
             try:
@@ -110,12 +111,18 @@ class ChapaPaymentService:
                         logger.debug("Chapa initialize response (retry): %s", response_data)
                     except Exception as e2:
                         payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
-                        payment_tx.metadata = {"error": str(e2)}
+                        if isinstance(payment_tx.metadata, dict):
+                            payment_tx.metadata["error"] = str(e2)
+                        else:
+                            payment_tx.metadata = {"error": str(e2)}
                         payment_tx.save()
                         return {"success": False, "error": str(e2), "tx_ref": tx_ref}
             except Exception as e:
                 payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
-                payment_tx.metadata = {"error": str(e)}
+                if isinstance(payment_tx.metadata, dict):
+                    payment_tx.metadata["error"] = str(e)
+                else:
+                    payment_tx.metadata = {"error": str(e)}
                 payment_tx.save()
                 return {"success": False, "error": str(e), "tx_ref": tx_ref}
 
@@ -127,7 +134,10 @@ class ChapaPaymentService:
                 }
 
             payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
-            payment_tx.metadata = response_data
+            if isinstance(payment_tx.metadata, dict):
+                payment_tx.metadata["chapa_response"] = response_data
+            else:
+                payment_tx.metadata = response_data
             payment_tx.save()
             return {"success": False, "error": response_data, "tx_ref": tx_ref}
 
@@ -164,25 +174,35 @@ class ChapaPaymentService:
 
         if verification.get("status") != "success":
             payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
-            payment_tx.metadata = verification
+            if isinstance(payment_tx.metadata, dict):
+                payment_tx.metadata["verification_error"] = verification
+            else:
+                payment_tx.metadata = verification
             payment_tx.save()
             return {"success": False, "message": "Verification failed"}
 
         chapa_data = verification["data"]
 
-        verified_amount = Decimal(chapa_data.get("amount", "0"))
+        # Use str() before Decimal() to prevent floating point precision issues from JSON float conversion
+        verified_amount = Decimal(str(chapa_data.get("amount", "0")))
         verified_currency = chapa_data.get("currency")
 
         if Decimal(str(payment_tx.amount)) != verified_amount or payment_tx.currency != verified_currency:
             payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
-            payment_tx.metadata = {"error": "Amount/currency mismatch", "chapa": chapa_data}
+            if isinstance(payment_tx.metadata, dict):
+                payment_tx.metadata.update({"error": "Amount/currency mismatch", "chapa_verification": chapa_data})
+            else:
+                payment_tx.metadata = {"error": "Amount/currency mismatch", "chapa_verification": chapa_data}
             payment_tx.save()
             return {"success": False, "message": "Amount or currency mismatch"}
 
         payment_tx.status = PaymentTransaction.PaymentStatus.SUCCESS
         payment_tx.chapa_transaction_id = chapa_data.get("id")
         payment_tx.payment_method = chapa_data.get("payment_method", "unknown")
-        payment_tx.metadata = {"verification": chapa_data}
+        if isinstance(payment_tx.metadata, dict):
+            payment_tx.metadata["verification_success"] = chapa_data
+        else:
+            payment_tx.metadata = {"verification_success": chapa_data}
         payment_tx.save()
 
         try:

@@ -40,22 +40,23 @@ def get_rate_to_reference(currency_code: str, rate_date: date) -> Decimal:
     raise ObjectDoesNotExist(
         f"No exchange rate found for {currency_code} (Base) and {REFERENCE_CURRENCY} (Target)."
     )
-def convert_currency(amount: Decimal, source_currency: str, target_currency: str, rate_date: date = date.today()) -> Decimal:
-    """
-    Converts amount from source_currency to target_currency using USD triangulation.
-    """
+from typing import Union, Tuple
+
+def convert_currency(amount: Decimal, source_currency: str, target_currency: str, rate_date: date = date.today(), return_rate: bool = False) -> Union[Decimal, Tuple[Decimal, Decimal]]:
+    # Converts amount from source_currency to target_currency using USD triangulation.
     if not amount:
-        return Decimal('0.00')
+        return (Decimal('0.00'), Decimal('1.0')) if return_rate else Decimal('0.00')
         
     # Ensure amount is Decimal
     if not isinstance(amount, Decimal):
         try:
             amount = Decimal(str(amount))
         except (TypeError, ValueError):
-            return Decimal('0.00')
+            return (Decimal('0.00'), Decimal('1.0')) if return_rate else Decimal('0.00')
 
     if source_currency == target_currency:
-        return amount.quantize(Decimal('0.01'))
+        res = amount.quantize(Decimal('0.01'))
+        return (res, Decimal('1.0')) if return_rate else res
 
     try:
 
@@ -70,7 +71,12 @@ def convert_currency(amount: Decimal, source_currency: str, target_currency: str
         rate_usd_to_target = 1 / rate_target_to_usd 
 
         converted_amount = amount_in_usd * rate_usd_to_target
-        
+
+        if return_rate:
+            # The effective rate is the multiplier used to go from source to target
+            effective_rate = rate_source_to_usd * rate_usd_to_target
+            return converted_amount.quantize(Decimal('0.01')), effective_rate
+
         return converted_amount.quantize(Decimal('0.01'))
         
     except ObjectDoesNotExist as e:

@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.views import APIView
 from django.conf import settings
+from django.utils import timezone
 from apps.listing.models import Booking
 from apps.account.enums import RoleCode
 from .services import ChapaPaymentService
@@ -60,23 +61,31 @@ class InitiatePaymentView(APIView):
         # Determine the target currency for payment
         payment_currency = serializer.validated_data.get('currency') or booking.currency or 'ETB'
         
-        # This acts as our PRICE GUARD: Calculate the correct amount on the server 
-        # We ignore the frontend's 'amount' if provided, or use it for validation only.
+        # PRICE GUARD & RATE LOCK: Calculate and lock the correct amount on the server
         try:
-            expected_amount = convert_currency(
+            expected_amount, exchange_rate = convert_currency(
                 amount=booking.total_price,
                 source_currency=booking.currency or 'ETB',
-                target_currency=payment_currency
+                target_currency=payment_currency,
+                return_rate=True
             )
             
-            # Optional: Logger(to warn us) if there's a significant mismatch between Frontend requested amount and Backend calculated amount(for debugging)
+            # Locked metadata for audit trail
+            locked_metadata = {
+                "original_amount": str(booking.total_price),
+                "original_currency": booking.currency or 'ETB',
+                "exchange_rate_locked": str(exchange_rate),
+                "locked_at": timezone.now().isoformat(),
+                "triangulation_reference": "USD"
+            }
+
             fe_amount = serializer.validated_data.get('amount')
             if fe_amount and abs(float(fe_amount) - float(expected_amount)) > 0.01:
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.warning(
                     f"Price Mismatch in Payment Init for Booking {booking.id}. "
-                    f"FE sent: {fe_amount}, BE calculated: {expected_amount}"
+                    f"Client sent: {fe_amount}, Server calculated: {expected_amount}"
                 )
         except Exception as e:
             return Response(
@@ -90,13 +99,17 @@ class InitiatePaymentView(APIView):
             currency=payment_currency,
             email=request.user.email,
             first_name=request.user.first_name,
-            last_name=request.user.last_name
+            last_name=request.user.last_name,
+            metadata=locked_metadata
         )
         
         if result["success"]:
-            # Inject the calculated amount into response so Frontend knows what was actually locked in
+            # Inject audit data into response for frontend disclosure
             result["calculated_amount"] = str(expected_amount)
             result["payment_currency"] = payment_currency
+            result["exchange_rate"] = str(exchange_rate)
+            result["original_amount"] = str(booking.total_price)
+            result["original_currency"] = booking.currency or 'ETB'
             return Response(result, status=status.HTTP_200_OK)
         else:
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
