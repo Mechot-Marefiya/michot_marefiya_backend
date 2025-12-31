@@ -260,4 +260,9 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(hour=0, minute=5),  # Runs once a day at 12:05 AM
         "args": (),
     },
+    "cleanup-expired-bookings-every-5-minutes": {
+        "task": "apps.listing.tasks.cancel_all_expired_bookings",
+        "schedule": 60.0 * 5,  # Every 5 minutes
+        "args": (),
+    },
 }

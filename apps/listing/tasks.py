@@ -1,6 +1,9 @@
 import logging
+from datetime import timedelta
+from django.utils import timezone
 from apps.listing.services import StayAvailabilityService
 from django.db import transaction
+from django.conf import settings
 from config.celery import app
 from apps.listing.models import Booking 
 from apps.listing.services import BookingService
@@ -14,7 +17,7 @@ def track_availability(days_ahead=180):
 def auto_cancel_pending_booking(booking_id):
     """
     Task to cancel a booking if it is still in the PENDING status 
-    15 minutes after creation.
+    15 minutes (or BOOKING_PENDING_TIMEOUT_MINUTES) after creation.
     """
     logger.info(f"Starting auto-cancellation check for booking {booking_id}")
     try:
@@ -34,3 +37,27 @@ def auto_cancel_pending_booking(booking_id):
         logger.warning(f"Booking {booking_id} not found for auto-cancellation.")
     except Exception as e:
         logger.exception(f"Unexpected error while auto-cancelling booking {booking_id}: {e}")
+
+@app.task
+def cancel_all_expired_bookings():
+    """
+    Periodic task to clean up all bookings that have been in PENDING 
+    status longer than the allowed timeout. This acts as a safety net 
+    for the signal-based individual tasks.
+    """
+    timeout_minutes = getattr(settings, 'BOOKING_PENDING_TIMEOUT_MINUTES', 15)
+    threshold = timezone.now() - timedelta(minutes=timeout_minutes)
+    
+    expired_bookings = Booking.objects.filter(
+        status=Booking.BookingStatus.PENDING,
+        created_at__lte=threshold
+    )
+    
+    count = expired_bookings.count()
+    if count > 0:
+        logger.info(f"Found {count} expired pending bookings. Starting mass cancellation...")
+        for booking in expired_bookings:
+            # We call the individual task asynchronously for each to reuse the locking logic
+            auto_cancel_pending_booking.delay(booking.id)
+    else:
+        logger.debug("No expired pending bookings found during periodic sweep.")
