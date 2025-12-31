@@ -179,6 +179,14 @@ class ChapaPaymentService:
             else:
                 payment_tx.metadata = verification
             payment_tx.save()
+            
+            # Phase 4: Immediate release on definitive failure
+            try:
+                from apps.listing.services import BookingService
+                BookingService.cancel_booking(payment_tx.booking)
+            except Exception as e:
+                logger.error(f"Failed to auto-cancel booking {payment_tx.booking.id} after payment failure: {e}")
+                
             return {"success": False, "message": "Verification failed"}
 
         chapa_data = verification["data"]
@@ -194,6 +202,14 @@ class ChapaPaymentService:
             else:
                 payment_tx.metadata = {"error": "Amount/currency mismatch", "chapa_verification": chapa_data}
             payment_tx.save()
+            
+            # Phase 4: Immediate release on amount/currency mismatch (potential fraud or error)
+            try:
+                from apps.listing.services import BookingService
+                BookingService.cancel_booking(payment_tx.booking)
+            except Exception as e:
+                logger.error(f"Failed to auto-cancel booking {payment_tx.booking.id} after mismatch: {e}")
+                
             return {"success": False, "message": "Amount or currency mismatch"}
 
         payment_tx.status = PaymentTransaction.PaymentStatus.SUCCESS

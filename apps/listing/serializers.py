@@ -995,6 +995,8 @@ class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerial
     items = BookingItemResponseSerializer(many=True, read_only=True)
     snapshot = serializers.JSONField(read_only=True)
 
+    is_resumable = serializers.SerializerMethodField()
+
     class Meta:
         model = Booking
         fields = [
@@ -1009,7 +1011,19 @@ class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerial
             "snapshot",
             "converted_price",
             "converted_currency",
+            "is_resumable",
         ]
+
+    def get_is_resumable(self, obj):
+        from django.conf import settings
+        from django.utils.timezone import now
+        from datetime import timedelta
+        
+        if obj.status != Booking.BookingStatus.PENDING:
+            return False
+            
+        timeout = getattr(settings, 'BOOKING_PENDING_TIMEOUT_MINUTES', 15)
+        return obj.created_at >= now() - timedelta(minutes=timeout)
 class BookingRatingSerializer(serializers.ModelSerializer):
     class Meta:
         model = BookingRating

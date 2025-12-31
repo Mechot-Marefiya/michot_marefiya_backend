@@ -3,7 +3,8 @@ from datetime import timedelta
 from django.utils import timezone
 from django.db.models import F
 from django.conf import settings
-# Import your Celery app instance from the new location
+from django.db import transaction
+
 from config.celery import app
 
 from apps.listing.models import Booking 
@@ -18,30 +19,19 @@ def auto_cancel_pending_booking(booking_id):
     15 minutes after creation.
     """
     try:
-        booking = Booking.objects.get(id=booking_id)
-        time_limit = getattr(settings, 'BOOKING_PENDING_TIMEOUT_MINUTES', 15)
-        
-        if booking.status == Booking.BookingStatus.PENDING and \
-           booking.created_at < timezone.now() - timedelta(minutes=time_limit):
-           
-            # Update availability first (like in BookingService.cancel_booking)
-            for item in booking.items.all():
-                
-                StayAvailabilityService.update_availability( 
-                    hotel=item.room.hotel,
-                    rooms_info=[
-                        {"room": item.room, "quantity": item.units_booked}],
-                    check_in_date=booking.check_in_date,
-                    check_out_date=booking.check_out_date,
-                    increment=True,
-                )
+        with transaction.atomic():
+            booking = Booking.objects.select_for_update().get(id=booking_id)
             
-            # Set status to CANCELLED and save
-            booking.status = Booking.BookingStatus.CANCELLED
-            booking.save()
-            print(f"Auto-cancelled booking {booking_id}")
+            # Use the status from the object we just locked
+            if booking.status != Booking.BookingStatus.PENDING:
+                print(f"Booking {booking_id} is no longer PENDING (status: {booking.status}), skipping.")
+                return
+
+            # Call the centralized cancellation service which handles inventory release
+            BookingService.cancel_booking(booking)
+            print(f"Successfully auto-cancelled abandoned booking {booking_id}")
             
-        else:
+    except Booking.DoesNotExist:
             print(f"Booking {booking_id} status is {booking.status}, skipping auto-cancellation.")
             
     except Booking.DoesNotExist:

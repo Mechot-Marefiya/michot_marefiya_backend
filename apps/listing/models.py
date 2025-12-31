@@ -822,6 +822,10 @@ class StayAvailability(AbstractBaseModel):
         constraints = [
             models.UniqueConstraint(
                 fields=["date", "hotel", "room"], name="hotel_date_room_idx"),
+            models.CheckConstraint(
+                check=models.Q(available_rooms__gte=0),
+                name="stay_availability_non_negative"
+            ),
         ]
         indexes = [
             models.Index(fields=["hotel", "date"]),
