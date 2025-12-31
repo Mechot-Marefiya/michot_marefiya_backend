@@ -1,9 +1,15 @@
-from pprint import pprint
-import requests
 import os
+import requests
+import logging
+from pprint import pprint
 from pathlib import Path
+from decimal import Decimal
 from environ import Env
+from django.db import transaction
+from django.utils import timezone
 from apps.core.models import CurrencyRate
+
+logger = logging.getLogger(__name__)
 
 env = Env()
 
@@ -31,10 +37,9 @@ class CurrencyService:
             res = requests.get(url, params=params, timeout=10)
             res.raise_for_status()
             return res.json()
-            # pprint(data)
-            # return {"status": "success", "base": data.get("base"), "count": len(data.get("rates", {}))}
         except requests.RequestException as e:
-            raise RuntimeError(f"Failed to fetch data: {e}")
+            logger.error(f"Failed to fetch exchange rates from {url}: {e}")
+            raise RuntimeError(f"Failed to fetch currency data: {e}")
 
     @classmethod
     def get_daily_exchange_rate(cls):
@@ -59,16 +64,40 @@ class CurrencyService:
         pprint(data)
 
     @staticmethod
+    @transaction.atomic
     def store_exchange_rates(json_res: dict):
         base = json_res.get("base")
         rates: dict = json_res.get("rates", {})
+        
+        if not base or not rates:
+            logger.warning("Empty or malformed exchange rate data received.")
+            return []
+
+        # Use the current date for the record (or extract from JSON if available)
+        today = timezone.now().date()
 
         rate_objs = [
-            CurrencyRate(base=base, target=target, rate=rate)
+            CurrencyRate(
+                base=base, 
+                target=target, 
+                rate=Decimal(str(rate)), 
+                date=today
+            )
             for target, rate in rates.items()
         ]
 
-        CurrencyRate.objects.bulk_create(rate_objs)
+        # Use bulk_create with update_conflicts for idempotency and efficiency
+        try:
+            CurrencyRate.objects.bulk_create(
+                rate_objs,
+                update_conflicts=True,
+                unique_fields=['base', 'target', 'date'],
+                update_fields=['rate']
+            )
+            logger.info(f"Successfully stored {len(rate_objs)} exchange rates for {base} on {today}.")
+        except Exception as e:
+            logger.error(f"Failed to bulk store exchange rates: {e}")
+            raise
 
         return rate_objs
 

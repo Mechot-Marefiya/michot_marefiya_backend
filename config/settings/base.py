@@ -16,6 +16,9 @@ from pathlib import Path
 import dj_database_url
 from environ import Env
 
+# Celery Beat Schedule Configuration
+from celery.schedules import crontab
+
 
 env = Env()
 
@@ -249,13 +252,12 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 BOOKING_PENDING_TIMEOUT_MINUTES = 15
-# Celery Beat Schedule Configuration
-from celery.schedules import crontab
+
 
 CELERY_BEAT_SCHEDULE = {
     "fetch-daily-exchange-rates-every-1-day": {
         "task": "apps.core.tasks.fetch_daily_exchange_rates",
-        "schedule": crontab(minute="*/5"),  # <-- RUN EVERY 1 day
+        "schedule": crontab(hour=0, minute=5),  # Runs once a day at 12:05 AM
         "args": (),
     },
 }
