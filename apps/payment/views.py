@@ -21,6 +21,7 @@ from .serializers import (
 )
 from apps.core.utils import convert_currency
 from .models import PaymentTransaction
+from .services import ChapaPaymentService
 
 @extend_schema(tags=["Payments"])
 class InitiatePaymentView(APIView):
