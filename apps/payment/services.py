@@ -163,70 +163,81 @@ class ChapaPaymentService:
             return {"success": False, "message": "Missing tx_ref in callback"}
 
         try:
-            payment_tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
+            with db_transaction.atomic():
+                # Use select_for_update to handle concurrent callbacks/webhooks safely
+                payment_tx = PaymentTransaction.objects.select_for_update().get(tx_ref=tx_ref)
+                
+                # Check for booking status even if payment is already success (idempotency recovery)
+                if payment_tx.status == PaymentTransaction.PaymentStatus.SUCCESS:
+                    from apps.listing.models import Booking
+                    if payment_tx.booking.status == Booking.BookingStatus.PENDING:
+                        logger.info(f"Transaction {tx_ref} is SUCCESS but Booking {payment_tx.booking.id} is PENDING. Recovering...")
+                        BookingService.confirm_booking(payment_tx.booking)
+                        return {"success": True, "message": "Booking confirmed via recovery path"}
+                    return {"success": True, "message": "Already processed"}
+
+                verification = ChapaPaymentService.verify_payment(tx_ref)
+
+                if verification.get("status") != "success":
+                    payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
+                    if isinstance(payment_tx.metadata, dict):
+                        payment_tx.metadata["verification_error"] = verification
+                    else:
+                        payment_tx.metadata = verification
+                    payment_tx.save()
+                    
+                    # Phase 4: Immediate release on definitive failure
+                    try:
+                        BookingService.cancel_booking(payment_tx.booking)
+                    except Exception as e:
+                        logger.error(f"Failed to auto-cancel booking {payment_tx.booking.id} after payment failure: {e}")
+                        
+                    return {"success": False, "message": "Verification failed"}
+
+                chapa_data = verification["data"]
+
+                # Use str() before Decimal() to prevent floating point precision issues
+                verified_amount = Decimal(str(chapa_data.get("amount", "0")))
+                verified_currency = chapa_data.get("currency")
+
+                if Decimal(str(payment_tx.amount)) != verified_amount or payment_tx.currency != verified_currency:
+                    payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
+                    error_info = {"error": "Amount/currency mismatch", "chapa_verification": chapa_data}
+                    if isinstance(payment_tx.metadata, dict):
+                        payment_tx.metadata.update(error_info)
+                    else:
+                        payment_tx.metadata = error_info
+                    payment_tx.save()
+                    
+                    try:
+                        BookingService.cancel_booking(payment_tx.booking)
+                    except Exception as e:
+                        logger.error(f"Failed to auto-cancel booking {payment_tx.booking.id} after mismatch: {e}")
+                        
+                    return {"success": False, "message": "Amount or currency mismatch"}
+
+                # Update Transaction
+                payment_tx.status = PaymentTransaction.PaymentStatus.SUCCESS
+                # Map ID robustly: Chapa sometimes uses 'id' or 'reference' in the data block
+                payment_tx.chapa_transaction_id = chapa_data.get("id") or chapa_data.get("reference")
+                payment_tx.payment_method = chapa_data.get("payment_method", "unknown")
+                
+                if isinstance(payment_tx.metadata, dict):
+                    payment_tx.metadata["verification_success"] = chapa_data
+                else:
+                    payment_tx.metadata = {"verification_success": chapa_data}
+                payment_tx.save()
+
+                # Confirm Booking (Now inside the same transaction)
+                BookingService.confirm_booking(payment_tx.booking)
+
+            return {"success": True, "message": "Payment verified and booking confirmed"}
+
         except PaymentTransaction.DoesNotExist:
-            return {"success": False, "message": "Transaction not found"}
-
-        if payment_tx.status == PaymentTransaction.PaymentStatus.SUCCESS:
-            return {"success": True, "message": "Already processed"}
-
-        verification = ChapaPaymentService.verify_payment(tx_ref)
-
-        if verification.get("status") != "success":
-            payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
-            if isinstance(payment_tx.metadata, dict):
-                payment_tx.metadata["verification_error"] = verification
-            else:
-                payment_tx.metadata = verification
-            payment_tx.save()
-            
-            # Phase 4: Immediate release on definitive failure
-            try:
-                from apps.listing.services import BookingService
-                BookingService.cancel_booking(payment_tx.booking)
-            except Exception as e:
-                logger.error(f"Failed to auto-cancel booking {payment_tx.booking.id} after payment failure: {e}")
-                
-            return {"success": False, "message": "Verification failed"}
-
-        chapa_data = verification["data"]
-
-        # Use str() before Decimal() to prevent floating point precision issues from JSON float conversion
-        verified_amount = Decimal(str(chapa_data.get("amount", "0")))
-        verified_currency = chapa_data.get("currency")
-
-        if Decimal(str(payment_tx.amount)) != verified_amount or payment_tx.currency != verified_currency:
-            payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
-            if isinstance(payment_tx.metadata, dict):
-                payment_tx.metadata.update({"error": "Amount/currency mismatch", "chapa_verification": chapa_data})
-            else:
-                payment_tx.metadata = {"error": "Amount/currency mismatch", "chapa_verification": chapa_data}
-            payment_tx.save()
-            
-            # Phase 4: Immediate release on amount/currency mismatch (potential fraud or error)
-            try:
-                from apps.listing.services import BookingService
-                BookingService.cancel_booking(payment_tx.booking)
-            except Exception as e:
-                logger.error(f"Failed to auto-cancel booking {payment_tx.booking.id} after mismatch: {e}")
-                
-            return {"success": False, "message": "Amount or currency mismatch"}
-
-        payment_tx.status = PaymentTransaction.PaymentStatus.SUCCESS
-        payment_tx.chapa_transaction_id = chapa_data.get("id")
-        payment_tx.payment_method = chapa_data.get("payment_method", "unknown")
-        if isinstance(payment_tx.metadata, dict):
-            payment_tx.metadata["verification_success"] = chapa_data
-        else:
-            payment_tx.metadata = {"verification_success": chapa_data}
-        payment_tx.save()
-
-        try:
-            BookingService.confirm_booking(payment_tx.booking)
+            return {"success": False, "message": f"Transaction {tx_ref} not found"}
         except Exception as e:
-            logger.exception("Booking confirmation failure: %s", e)
-
-        return {"success": True, "message": "Payment verified and booking confirmed"}
+            logger.exception(f"Callback processing error for {tx_ref}: {e}")
+            return {"success": False, "message": str(e)}
 
     @staticmethod
     def handle_webhook(request):

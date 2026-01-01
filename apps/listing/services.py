@@ -1,3 +1,4 @@
+import logging
 from datetime import date, timedelta, datetime
 from django.conf import settings
 from django.db import transaction
@@ -35,6 +36,8 @@ from apps.listing.models import (
     SeasonalRate,
     RoomInventory
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ListingService:
@@ -779,25 +782,21 @@ class BookingService:
 
     @staticmethod
     def confirm_booking(booking: Booking):
-        """Called when the user complete payment.
+        """Called when the user complete payment."""
+        if booking.status == Booking.BookingStatus.CONFIRMED:
+            logger.info(f"Booking {booking.id} is already CONFIRMED, skipping.")
+            return booking
 
-        Args:
-            booking (Booking): Booking instance.
-
-        Returns:
-            Booking: Confirmed Booking instance.
-        """
-        if booking.status in [
-            Booking.BookingStatus.CANCELLED,
-            Booking.BookingStatus.CONFIRMED
-        ]:
+        if booking.status == Booking.BookingStatus.CANCELLED:
+             # If it was cancelled by the timer just as they paid, we might need a recovery path
+             # but for now, we follow the "finalized" rule unless explicitly asked to revive.
             raise BookingConflict(
-                "Booking is already finalized and cannot be changed."
+                f"Booking {booking.id} was already CANCELLED and cannot be confirmed."
             )
 
         booking.status = booking.BookingStatus.CONFIRMED
         booking.save()
-
+        logger.info(f"Booking {booking.id} status updated to CONFIRMED.")
         return booking
     
     @staticmethod
