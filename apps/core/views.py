@@ -6,6 +6,7 @@ from decimal import Decimal
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
+from drf_spectacular.utils import extend_schema
 from apps.core.models import Facility
 from apps.core.serializers import FacilityResponseSerializer,ConversionInputSerializer, CurrencyRateSerializer
 from apps.core.utils import convert_currency
@@ -16,6 +17,7 @@ class AbstractModelViewSet(ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete"]
 
 
+@extend_schema(tags=["Accommodations"])
 class FacilityViewSet(AbstractModelViewSet):
     http_method_names = ["get"]
     permission_classes = [AllowAny]
@@ -23,6 +25,7 @@ class FacilityViewSet(AbstractModelViewSet):
     queryset = Facility.objects.all()
 
 
+@extend_schema(tags=["Debug & Utils"])
 class CurrencyViewSet(ViewSet):
     permission_classes = [AllowAny]
 
@@ -51,6 +54,7 @@ class CurrencyViewSet(ViewSet):
             rate_dict["USD"] = 1.0
             
         return Response(rate_dict, status=status.HTTP_200_OK)
+@extend_schema(tags=["Debug & Utils"])
 class CurrencyConvertAPIView(APIView):
     """
     API endpoint for performing currency conversion based on stored rates.

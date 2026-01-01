@@ -20,6 +20,18 @@ class PaymentInitializeSerializer(serializers.Serializer):
         return value
 
 
+class PaymentInitializeResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    message = serializers.CharField()
+    checkout_url = serializers.URLField(required=False, allow_null=True)
+    tx_ref = serializers.CharField(required=False)
+    calculated_amount = serializers.CharField(required=False)
+    payment_currency = serializers.CharField(required=False)
+    exchange_rate = serializers.CharField(required=False)
+    original_amount = serializers.CharField(required=False)
+    original_currency = serializers.CharField(required=False)
+
+
 class PaymentTransactionSerializer(serializers.ModelSerializer):
     class Meta:
         model = PaymentTransaction

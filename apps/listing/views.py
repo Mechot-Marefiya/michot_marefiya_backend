@@ -85,7 +85,7 @@ from apps.listing.serializers import (
 from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService,PriceService,GuestHouseAvailabilityService,EventSpaceAvailabilityService
 from rest_framework.exceptions import PermissionDenied
 
-@extend_schema(responses=RoomListingResponseSerializer)
+@extend_schema(tags=["Accommodations"])
 class RoomListingViewSet(AbstractModelViewSet):
     serializer_class = RoomListingSerializer
     queryset = RoomListing.objects.all()
@@ -137,6 +137,15 @@ class RoomListingViewSet(AbstractModelViewSet):
         
         return queryset.filter(is_active=True)
 
+    @extend_schema(
+        summary="Price Preview for specific dates",
+        description="Get a daily breakdown of prices for a room between check-in and check-out.",
+        parameters=[
+            OpenApiParameter("check_in", OpenApiTypes.DATE, required=True),
+            OpenApiParameter("check_out", OpenApiTypes.DATE, required=True),
+        ],
+        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT}
+    )
     @action(detail=True, methods=['get'], url_path='price-preview')
     def price_preview(self, request, pk=None):
         room = self.get_object()
@@ -305,7 +314,7 @@ class RoomListingViewSet(AbstractModelViewSet):
         return Response(serialized)
 
 
-@extend_schema(responses=GuestHouseListingResponseSerializer)
+@extend_schema(tags=["Accommodations"])
 class GuestHouseListingViewSet(AbstractModelViewSet):
     serializer_class = GuestHouseListingSerializer
     queryset = GuestHouseListing.objects.all()
@@ -425,9 +434,15 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
                 "results": serializer.data
             })
 
-@extend_schema(request=GuestHouseBookingSerializer,responses=GuestHouseBookingSerializer)
+@extend_schema(tags=["Accommodations"])
 class GuestHouseBookingAPIView(APIView):
     permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="List/Create Guest House Bookings",
+        request=GuestHouseBookingSerializer,
+        responses={200: GuestHouseBookingSerializer(many=True), 201: GuestHouseBookingSerializer}
+    )
 
     def get(self, request):
         """
@@ -503,7 +518,7 @@ class GuestHouseBookingAPIView(APIView):
             status=status.HTTP_201_CREATED
         )
 # Car Listing ViewSet
-@extend_schema(responses=CarListingResponseSerializer)
+@extend_schema(tags=["Car Rentals"])
 class CarListingViewSet(AbstractModelViewSet):
     serializer_class = CarListingSerializer
     queryset = CarListing.objects.all()
@@ -670,7 +685,7 @@ class CarListingViewSet(AbstractModelViewSet):
         serializer = CarListingResponseSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
 # Car Rental ViewSet
-@extend_schema(responses=CarRentalSerializer)
+@extend_schema(tags=["Car Rentals"])
 class CarRentalViewSet(AbstractModelViewSet):
     serializer_class = CarRentalSerializer
     queryset = CarRental.objects.all()

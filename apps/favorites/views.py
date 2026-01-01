@@ -3,11 +3,13 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
+from drf_spectacular.utils import extend_schema
 
 from .models import Favorite
 from .serializers import FavoriteSerializer
 
 
+@extend_schema(tags=["Favorites"])
 class FavoriteViewSet(viewsets.ModelViewSet):
     serializer_class = FavoriteSerializer
     permission_classes = [IsAuthenticated]

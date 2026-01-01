@@ -199,10 +199,29 @@ SIMPLE_JWT = {
 }
 
 SPECTACULAR_SETTINGS = {
-    "TITLE": "",
-    "DESCRIPTION": "Y",
+    "TITLE": "Michot Marefiya Backend API",
+    "DESCRIPTION": """
+API documentation for the Michot Marefiya platform.
+This API handles accommodations (Hotels, Guest Houses), transport (Car Rentals), 
+secure payments via Chapa, and user identity management.
+
+### Authentication
+Most endpoints require a JWT Bearer token. 
+Obtain your token from `/api/v1/auth/token/`.
+    """,
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "COMPONENT_SPLIT_PATCH": True,
+    "COMPONENT_SPLIT_REQUEST": True,
+    "TAGS": [
+        {"name": "Identity & Auth", "description": "User registration, profiles, and JWT management."},
+        {"name": "Accommodations", "description": "Hotels, Guest Houses, and Room management."},
+        {"name": "Car Rentals", "description": "Car listings and rental bookings."},
+        {"name": "Payments", "description": "Payment initiation, verification, and webhooks."},
+        {"name": "Analytics", "description": "Core platform statistics and reports."},
+        {"name": "Favorites", "description": "User saved lists and preferences."},
+        {"name": "Debug & Utils", "description": "Testing and utility endpoints (Internal use)."},
+    ],
 }
 
 JAZZMIN_SETTINGS = {

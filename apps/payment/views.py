@@ -11,14 +11,52 @@ from django.conf import settings
 from django.utils import timezone
 from apps.listing.models import Booking
 from apps.account.enums import RoleCode
-from .services import ChapaPaymentService
-from .serializers import PaymentInitializeSerializer, PaymentTransactionSerializer
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample
+from .serializers import (
+    PaymentInitializeSerializer, 
+    PaymentTransactionSerializer, 
+    PaymentInitializeResponseSerializer,
+    ChapaCallbackSerializer,
+    ChapaWebhookSerializer
+)
 from apps.core.utils import convert_currency
 from .models import PaymentTransaction
 
+@extend_schema(tags=["Payments"])
 class InitiatePaymentView(APIView):
     permission_classes = [IsAuthenticated]
     
+    @extend_schema(
+        summary="Initiate payment for a booking",
+        description="""
+        Initiates a payment transaction via Chapa for a specific booking.
+        The server calculates and locks the exchange rate at the moment of initiation 
+        to ensure price consistency throughout the payment flow.
+        """,
+        request=PaymentInitializeSerializer,
+        responses={
+            200: PaymentInitializeResponseSerializer,
+            400: OpenApiTypes.OBJECT,
+            403: OpenApiTypes.OBJECT,
+            404: OpenApiTypes.OBJECT
+        },
+        examples=[
+            OpenApiExample(
+                "Successful Initiation",
+                value={
+                    "success": True,
+                    "message": "Payment initialized",
+                    "checkout_url": "https://checkout.chapa.co/checkout/payment/...",
+                    "tx_ref": "marefiya-booking-123-abc",
+                    "calculated_amount": "5000.00",
+                    "payment_currency": "ETB",
+                    "exchange_rate": "1.0",
+                    "original_amount": "5000.00",
+                    "original_currency": "ETB"
+                }
+            )
+        ]
+    )
     def post(self, request):
         """
         Initiate payment for a booking.
@@ -114,6 +152,16 @@ class InitiatePaymentView(APIView):
         else:
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
 
+@extend_schema(
+    tags=["Payments"],
+    summary="Chapa Payment Callback (Internal)",
+    description="Handle GET callback from Chapa after user completes payment.",
+    parameters=[
+        OpenApiParameter("tx_ref", OpenApiTypes.STR, description="Transaction reference"),
+        OpenApiParameter("status", OpenApiTypes.STR, description="Payment status")
+    ],
+    responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT}
+)
 @api_view(['GET'])
 @csrf_exempt
 def chapa_callback(request):
@@ -144,6 +192,13 @@ def chapa_callback(request):
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
 
+@extend_schema(
+    tags=["Payments"],
+    summary="Chapa Payment Webhook (Internal)",
+    description="Handle POST webhook from Chapa for async payment status updates.",
+    request=ChapaWebhookSerializer,
+    responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT}
+)
 @api_view(['POST'])
 @csrf_exempt
 def chapa_webhook(request):
@@ -154,6 +209,20 @@ def chapa_webhook(request):
     else:
         return JsonResponse({"error": result["message"]}, status=400)
 
+@extend_schema(
+    tags=["Payments"],
+    summary="Verify payment status",
+    description="""
+    Verify the status of a payment transaction using its reference.
+    Returns transaction details and Chapa verification result if found, 
+    otherwise returns only the Chapa verification result.
+    """,
+    responses={
+        200: OpenApiTypes.OBJECT,
+        400: OpenApiTypes.OBJECT,
+        403: OpenApiTypes.OBJECT
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def verify_payment(request, tx_ref):
@@ -194,6 +263,15 @@ def verify_payment(request, tx_ref):
         return Response({"error": f"Verification failed: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema(
+    tags=["Payments"],
+    summary="Publicly verify payment status",
+    description="Verify the status of a payment transaction without authentication.",
+    responses={
+        200: OpenApiTypes.OBJECT,
+        400: OpenApiTypes.OBJECT
+    }
+)
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def verify_payment_public(request, tx_ref):
@@ -213,6 +291,12 @@ def verify_payment_public(request, tx_ref):
     except Exception as e:
         return Response({"error": f"Verification failed: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
+@extend_schema(
+    tags=["Payments"],
+    summary="Cancel a pending payment",
+    description="Cancel a payment transaction that is still in PENDING status.",
+    responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT}
+)
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
 def cancel_payment(request, tx_ref):
@@ -263,6 +347,7 @@ def cancel_payment(request, tx_ref):
             status=status.HTTP_404_NOT_FOUND
         )
 
+@extend_schema(tags=["Debug & Utils"], summary="Test Chapa Key", description="Verify if the Chapa API key is valid by initiating a test transaction.")
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def test_chapa_key(request):
@@ -302,6 +387,7 @@ def test_chapa_key(request):
     except Exception as e:
         return Response({"error": str(e)}, status=500)
 
+@extend_schema(tags=["Debug & Utils"], summary="Debug Config", description="Internal configuration check.")
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def debug_config(request):
@@ -313,6 +399,7 @@ def debug_config(request):
         "ngrok_url": "https://4a74b1285b13.ngrok-free.app"
     })
 
+@extend_schema(tags=["Debug & Utils"], summary="Direct Chapa Test")
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def test_chapa_direct(request):
@@ -354,6 +441,7 @@ def test_chapa_direct(request):
     except Exception as e:
         return Response({"error": str(e)}, status=500)
 
+@extend_schema(tags=["Debug & Utils"], summary="Test Email Format Acceptance")
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def test_email_format(request):

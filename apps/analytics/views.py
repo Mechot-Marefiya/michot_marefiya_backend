@@ -11,6 +11,7 @@ from apps.analytics.serializers import OverviewSerializer, TimeseriesItemSeriali
 from apps.account.enums import RoleCode
 
 
+@extend_schema(tags=["Analytics"])
 class CompanyOverviewView(APIView):
     permission_classes = [IsCompany]
 
@@ -67,6 +68,7 @@ class CompanyOverviewView(APIView):
         return Response(serializer.data)
 
 
+@extend_schema(tags=["Analytics"])
 class CompanyRevenueView(APIView):
     permission_classes = [IsCompany]
 

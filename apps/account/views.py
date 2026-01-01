@@ -13,7 +13,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiTypes
 from apps.listing.models import Booking, RoomListing
 from apps.listing.services import StayAvailabilityService
 from apps.account.docs.schemas import HotelProfileDocSerializer
@@ -55,10 +55,19 @@ from apps.account.permissions import (
 )
 
 
+@extend_schema(tags=["Identity & Auth"])
 class CustomTokenObtainPairView(TokenObtainPairView):
     permission_classes = [AllowAny]
     serializer_class = CustomTokenObtainPairSerializer
 
+    @extend_schema(
+        summary="Obtain JWT Token",
+        description="Login with email and password to receive access and refresh tokens.",
+        responses={
+            200: CustomTokenObtainPairSerializer,
+            401: OpenApiTypes.OBJECT
+        }
+    )
     def post(self, request, *args, **kwargs):
         try:
             return super().post(request, *args, **kwargs)
@@ -80,10 +89,17 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             return Response({"detail": "Invalid email or password."}, status=status.HTTP_401_UNAUTHORIZED)
 
 
+@extend_schema(tags=["Identity & Auth"])
 class LogoutView(APIView):
 
     permission_classes = [AllowAny]
 
+    @extend_schema(
+        summary="Logout (Blacklist token)",
+        description="Blacklist a refresh token to end the session.",
+        request=OpenApiTypes.OBJECT,
+        responses={205: None, 400: OpenApiTypes.OBJECT}
+    )
     def post(self, request, *args, **kwargs):
         refresh_token = request.data.get("refresh")
         if not refresh_token:
@@ -108,14 +124,21 @@ class LogoutView(APIView):
         return Response(status=status.HTTP_205_RESET_CONTENT)
 
 
+@extend_schema(tags=["Identity & Auth"])
 class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="Current user profile (legacy)",
+        description="Retrieve the profile of the currently authenticated user.",
+        responses={200: UserResponseSerializer}
+    )
     def get(self, request, *args, **kwargs):
         serializer = UserResponseSerializer(request.user)
         return Response(serializer.data)
 
 
+@extend_schema(tags=["Identity & Auth"])
 class UserViewSet(AbstractModelViewSet):
     queryset = User.objects.all()
 
@@ -236,6 +259,7 @@ class UserViewSet(AbstractModelViewSet):
 
 
 @extend_schema(responses=CompanyProfileResponseSerializer)
+@extend_schema(tags=["Identity & Auth"])
 class CompanyProfileViewSet(AbstractModelViewSet):
     serializer_class = CompanyProfileSerializer
     queryset = CompanyProfile.objects.all()
@@ -310,6 +334,7 @@ class CompanyProfileViewSet(AbstractModelViewSet):
 
 
 @extend_schema(responses=IndividualOwnerProfileResponseSerializer)
+@extend_schema(tags=["Identity & Auth"])
 class IndividualOwnerProfileViewSet(AbstractModelViewSet):
     serializer_class = IndividualOwnerProfileSerializer
     queryset = IndividualOwnerProfile.objects.all()
@@ -327,6 +352,7 @@ class IndividualOwnerProfileViewSet(AbstractModelViewSet):
 
 
 @extend_schema(responses=HotelProfileDocSerializer)
+@extend_schema(tags=["Accommodations"])
 class HotelProfileViewSet(AbstractModelViewSet):
     serializer_class = HotelProfileSerializer
     queryset = HotelProfile.objects.all()
