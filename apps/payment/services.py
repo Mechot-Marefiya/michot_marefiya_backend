@@ -67,6 +67,44 @@ class ChapaPaymentService:
             }
         }
 
+        # SPLIT PAYMENT LOGIC        
+        try:
+            # Helper to find subaccount from booking items
+            subaccount_id = None
+            if hasattr(booking, 'items') and booking.items.exists():
+                first_item = booking.items.first()
+                # 1. Standard Room Booking (Booking -> BookingItem -> RoomListing)
+                if hasattr(first_item, 'room') and first_item.room:
+                    room = first_item.room
+                    if hasattr(room, 'hotel') and room.hotel and room.hotel.company:
+                        subaccount_id = room.hotel.company.chapa_subaccount_id
+                    elif hasattr(room, 'company') and room.company:
+                        # Handles Guesthouse/Property if they link company directly
+                        subaccount_id = room.company.chapa_subaccount_id
+                
+                # 2. Event Space Booking (EventSpaceBooking -> EventSpaceBookingItem -> EventSpaceListing)
+                elif hasattr(first_item, 'event_space') and first_item.event_space:
+                    space = first_item.event_space
+                    if hasattr(space, 'hotel') and space.hotel and space.hotel.company:
+                        subaccount_id = space.hotel.company.chapa_subaccount_id
+
+            if subaccount_id:
+                # Total amount includes 5% fee. 
+                # We want to send the Original Hotel Price to the subaccount.
+                
+                total_dec = Decimal(str(amount))
+                hotel_share = total_dec / Decimal("1.05")
+                
+                hotel_share_fixed = hotel_share.quantize(Decimal("0.01"))
+                
+                payload["subaccount_id"] = subaccount_id
+                logger.info(f"Split payment configured for {tx_ref}: Subaccount {subaccount_id}")
+                
+        except Exception as e:
+            logger.error(f"Failed to configure split payment for {tx_ref}: {e}")
+            # Proceed without split (all money to main account) as fallback
+
+
         with db_transaction.atomic():
             payment_tx = PaymentTransaction.objects.create(
                 booking=booking,

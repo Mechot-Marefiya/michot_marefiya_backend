@@ -632,20 +632,8 @@ class BookingService:
                 increment=False,
             )
 
-        if use_seasonal:
-            # compute total from BookingItemPrice rows (per-night prices already stored)
-            total_price = Decimal('0.00')
-            for pip in BookingItemPrice.objects.filter(booking_item__booking=booking):
-                total_price += (Decimal(pip.price_per_unit) * Decimal(pip.units))
-            booking.total_price = total_price
-        else:
-            # Non-seasonal: price_per_unit on BookingItem is stored as per-night base price.
-            # Multiply by number of nights and units booked to get the total.
-            nights = (booking.check_out_date - booking.check_in_date).days
-            total_price = Decimal('0.00')
-            for item in booking.items.all():
-                total_price += (Decimal(item.price_per_unit) * Decimal(item.units_booked) * Decimal(nights))
-            booking.total_price = total_price
+        # Calculate total using the shared logic (Base + 5% Fee)
+        booking.total_price = BookingService.get_booking_total(booking)
 
         booking.save()
 
@@ -800,24 +788,30 @@ class BookingService:
         return booking
     
     @staticmethod
+    @staticmethod
     def get_booking_total(booking):
-        """Return booking total considering seasonal pricing if enabled.
+        """Return booking total considering seasonal pricing if enabled, plus 5% service fee.
 
         - When `FEATURE_SEASONAL_PRICING` is enabled, sums `BookingItemPrice` rows (per-night).
         - Otherwise, multiplies booking item per-night price by nights and units.
+        - Adds 5% service fee to the result.
         """
         use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
-        if use_seasonal:
-            total = Decimal('0.00')
-            for pip in BookingItemPrice.objects.filter(booking_item__booking=booking):
-                total += (Decimal(pip.price_per_unit) * Decimal(pip.units))
-            return total
+        base_total = Decimal('0.00')
 
-        nights = (booking.check_out_date - booking.check_in_date).days
-        total = Decimal('0.00')
-        for item in booking.items.all():
-            total += (Decimal(item.price_per_unit) * Decimal(item.units_booked) * Decimal(nights))
-        return total
+        if use_seasonal:
+            for pip in BookingItemPrice.objects.filter(booking_item__booking=booking):
+                base_total += (Decimal(pip.price_per_unit) * Decimal(pip.units))
+        else:
+            nights = (booking.check_out_date - booking.check_in_date).days
+            for item in booking.items.all():
+                base_total += (Decimal(item.price_per_unit) * Decimal(item.units_booked) * Decimal(nights))
+        
+        # Calculate 5% service fee - The Platform Fee
+        # Hotels get base_total, Platform gets service_fee
+        service_fee = base_total * Decimal('0.05')
+        
+        return base_total + service_fee
 class EventSpaceBookingService:
     @transaction.atomic()
     @staticmethod

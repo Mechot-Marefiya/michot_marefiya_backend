@@ -163,6 +163,14 @@ class CompanyProfile(AbstractBaseModel):
     def __str__(self) -> str:
         return f"{self.name}::{self.category}"
 
+    chapa_subaccount_id = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        verbose_name=_("Chapa Subaccount ID"),
+        help_text=_("The subaccount ID for split payments (e.g., specific to this company)."),
+    )
+
     @property
     def is_approved(self) -> bool:
         return self.status == CompanyProfile.StatusChoice.APPROVED
@@ -208,6 +216,14 @@ class IndividualOwnerProfile(AbstractBaseModel):
 
     def __str__(self) -> str:
         return f"{self.first_name} {self.last_name}"
+
+    chapa_subaccount_id = models.CharField(
+        max_length=100,
+        null=True,
+        blank=True,
+        verbose_name=_("Chapa Subaccount ID"),
+        help_text=_("The subaccount ID for split payments (e.g., specific to this owner)."),
+    )
 
 
 class HotelProfile(AbstractBaseModel):
