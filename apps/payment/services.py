@@ -89,16 +89,29 @@ class ChapaPaymentService:
                         subaccount_id = space.hotel.company.chapa_subaccount_id
 
             if subaccount_id:
-                # Total amount includes 5% fee. 
-                # We want to send the Original Hotel Price to the subaccount.
+                # Calculate split amounts for Chapa subaccounts
+                # Hotel should receive exactly their base price (before 5% platform markup)
+                # Platform keeps the 5% markup we added
                 
                 total_dec = Decimal(str(amount))
-                hotel_share = total_dec / Decimal("1.05")
+                hotel_share = total_dec / Decimal("1.05")  # Reverse the 5% markup
+                platform_share = total_dec - hotel_share    # Platform's 5% cut
                 
+                # Round to 2 decimal places
                 hotel_share_fixed = hotel_share.quantize(Decimal("0.01"))
+                platform_share_fixed = platform_share.quantize(Decimal("0.01"))
                 
+                # Chapa split payment structure with per-transaction override
+                # Use top-level fields instead of subaccounts array
                 payload["subaccount_id"] = subaccount_id
-                logger.info(f"Split payment configured for {tx_ref}: Subaccount {subaccount_id}")
+                payload["split_type"] = "flat"
+                payload["split_value"] = float(platform_share_fixed)  # Platform keeps markup
+
+                logger.info(
+                    f"Split payment configured for {tx_ref}: "
+                    f"Platform keeps {platform_share_fixed}, Hotel receives {hotel_share_fixed} (Subaccount {subaccount_id})"
+                )
+
                 
         except Exception as e:
             logger.error(f"Failed to configure split payment for {tx_ref}: {e}")
