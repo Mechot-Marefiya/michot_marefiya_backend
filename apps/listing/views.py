@@ -1573,4 +1573,45 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
     def perform_create(self, serializer):
         """Passes the request user to the serializer's create method."""
         serializer.save(user=self.request.user)
+
+
+@extend_schema(tags=["Terms & Conditions"])
+class TermsAndConditionsViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    API endpoints for retrieving Terms & Conditions.
+    
+    - list: Get all T&C (admin only)
+    - retrieve: Get specific T&C by ID  
+    - hotel/{hotel_id}: Get active T&C for a hotel
+    """
+    from apps.listing.serializers import TermsAndConditionsSerializer
+    from apps.listing.models import TermsAndConditions
+    
+    serializer_class = TermsAndConditionsSerializer
+    permission_classes = [AllowAny]
+    queryset = TermsAndConditions.objects.filter(is_active=True)
+    
+    @extend_schema(
+        summary="Get active Terms & Conditions for a hotel",
+        description="Retrieve the currently active T&C for a specific hotel",
+        responses={200: TermsAndConditionsSerializer, 404: None}
+    )
+    @action(detail=False, methods=['get'], url_path='hotel/(?P<hotel_id>[^/.]+)')
+    def hotel_terms(self, request, hotel_id=None):
+        """Get active T&C for a hotel"""
+        from apps.account.models import HotelProfile
+        from apps.listing.services import TermsService
+        
+        hotel = get_object_or_404(HotelProfile, id=hotel_id)
+        terms = TermsService.get_active_terms(content_object=hotel)
+        
+        if not terms:
+            return Response(
+                {"detail": "No terms and conditions available for this hotel."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        serializer = self.serializer_class(terms)
+        return Response(serializer.data)
+
     

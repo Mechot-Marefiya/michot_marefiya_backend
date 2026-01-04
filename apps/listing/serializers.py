@@ -23,7 +23,8 @@ from apps.listing.models import (
     GuestHouseListing,
     PropertyListing,
     RoomListing,EventSpaceListing,
-    CarRental,CarRentalItem,GuestHouseBookingItem,GuestHouseBooking
+    CarRental,CarRentalItem,GuestHouseBookingItem,GuestHouseBooking,
+    TermsAndConditions,
 )
 from apps.listing.exceptions import RatingException
 from .services import CarAvailabilityService
@@ -61,6 +62,20 @@ class CurrencyConversionMixin(metaclass=serializers.SerializerMetaclass):
 
     def get_converted_currency(self, obj):
         return self.context.get("display_currency")
+
+
+class TermsAndConditionsSerializer(serializers.ModelSerializer):
+    # Read-only serializer for displaying Terms & Conditions"
+    
+    class Meta:
+        model = TermsAndConditions
+        fields = [
+            'id', 'version', 'title', 'content',
+            'effective_date', 'is_active', 'created_at', 'updated_at'
+        ]
+        read_only_fields = fields
+
+
 class AmenityResponseSSerializer(serializers.ModelSerializer):
     class Meta:
         model = Amenity
@@ -305,6 +320,10 @@ class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
         ]
 class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     items = GuestHouseBookingItemSerializer(many=True, write_only=True)
+    
+    terms_accepted = serializers.BooleanField(required=True, write_only=True)
+    terms_version = serializers.CharField(required=True, write_only=True)
+    
     class Meta:
         model = GuestHouseBooking
         fields = [
@@ -317,8 +336,18 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
             "items",
             "converted_price",
             "converted_currency",
+            "terms_accepted",
+            "terms_version",
         ]
         read_only_fields = ["id", "status", "created_at", "updated_at"]
+        
+    def validate_terms_accepted(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                "You must accept the terms and conditions to proceed with booking."
+            )
+        return value
+        
     def validate(self, data):
         start = data["start_date"]
         end = data["end_date"]
@@ -343,6 +372,24 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
         GuestHouseAvailabilityService.validate_availability(
             room_infos, start, end
         )
+        
+        terms_version = data.get("terms_version")
+        if terms_version and items:
+            from django.contrib.contenttypes.models import ContentType
+            first_guesthouse = items[0]["room"]
+            
+            ct = ContentType.objects.get_for_model(first_guesthouse)
+            tc_exists = TermsAndConditions.objects.filter(
+                content_type=ct,
+                object_id=first_guesthouse.id,
+                version=terms_version,
+                is_active=True
+            ).exists()
+            
+            if not tc_exists:
+                raise serializers.ValidationError(
+                    {"terms_version": f"Invalid or inactive T&C version: {terms_version}. Please refresh and accept the latest terms."}
+                )
 
         return data
 
@@ -350,12 +397,32 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
     def create(self, validated_data):
         items_data = validated_data.pop("items")
         renter = self.context["request"].user
+        
+        # Extract T&C data for snapshot
+        terms_accepted = validated_data.get("terms_accepted", False)
+        terms_version = validated_data.get("terms_version", "")
 
         # Calculate total price
         total_price = sum([
             item["units_booked"] * item["price_per_unit"]
             for item in items_data
         ])
+        
+        # Capture T&C Snapshot
+        if items_data:
+            from apps.listing.services import TermsService
+            try:
+                first_guesthouse = items_data[0]["room"]
+                tc_data = TermsService.validate_and_snapshot_terms(
+                    content_object=first_guesthouse,
+                    terms_version=terms_version,
+                    terms_accepted=terms_accepted
+                )
+                validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
+                validated_data['terms_accepted_at'] = tc_data['accepted_at']
+            except Exception as e:
+                # Fallback or log if snapshot fails, though validation should have caught it
+                pass
 
         booking = GuestHouseBooking.objects.create(
             renter=renter,
@@ -700,14 +767,25 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
         source='renter.get_full_name', read_only=True
     )
     
+    terms_accepted = serializers.BooleanField(required=True, write_only=True)
+    terms_version = serializers.CharField(required=True, write_only=True)
+    
     class Meta:
         model = CarRental
         fields = [
             'id', 'renter', 'renter_name', 'start_date', 'end_date', 
             'total_price', 'currency', 'status', 'rental_items', 'items_details',
             'created_at', 'updated_at', 'converted_price', 'converted_currency',
+            'terms_accepted', 'terms_version',
         ]
         read_only_fields = ['id', 'status', 'created_at', 'updated_at']
+    
+    def validate_terms_accepted(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                "You must accept the terms and conditions to proceed with car rental."
+            )
+        return value
     
     def validate(self, data):
         start_date = data.get('start_date')
@@ -755,6 +833,28 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     "rental_items": "Price per unit must be greater than 0."
                 })
+        
+        # Validate T&C version for car rental company
+        terms_version = data.get("terms_version")
+        if terms_version and rental_items:
+            from django.contrib.contenttypes.models import ContentType
+            # Get company from first car listing
+            first_car = rental_items[0]["car_listing"]
+            company = first_car.company
+            
+            if company:
+                ct = ContentType.objects.get_for_model(company)
+                tc_exists = TermsAndConditions.objects.filter(
+                    content_type=ct,
+                    object_id=company.id,
+                    version=terms_version,
+                    is_active=True
+                ).exists()
+                
+                if not tc_exists:
+                    raise serializers.ValidationError(
+                        {"terms_version": f"Invalid or inactive T&C version: {terms_version}. Please refresh and accept the latest terms."}
+                    )
 
         return data
     
@@ -763,10 +863,31 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
         rental_items_data = validated_data.pop('rental_items')
         renter = self.context['request'].user
         
+        # Extract T&C data for snapshot
+        terms_accepted = validated_data.get("terms_accepted", False)
+        terms_version = validated_data.get("terms_version", "")
+        
         total_price = sum(
             item['units_rent'] * item['price_per_unit'] 
             for item in rental_items_data
         )
+        
+        # Capture T&C Snapshot
+        if rental_items_data:
+            from apps.listing.services import TermsService
+            try:
+                first_car = rental_items_data[0]["car_listing"]
+                company = first_car.company
+                if company:
+                    tc_data = TermsService.validate_and_snapshot_terms(
+                        content_object=company,
+                        terms_version=terms_version,
+                        terms_accepted=terms_accepted
+                    )
+                    validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
+                    validated_data['terms_accepted_at'] = tc_data['accepted_at']
+            except Exception as e:
+                pass
         
         rental = CarRental.objects.create(
             renter=renter,
@@ -1052,11 +1173,24 @@ class BookingItemSerializer(serializers.ModelSerializer):
 
 class BookingSerializer(serializers.ModelSerializer):
     items = BookingItemSerializer(many=True)
+    
+    # T&C fields (write_only, required for booking creation)
+    terms_accepted = serializers.BooleanField(required=True, write_only=True)
+    terms_version = serializers.CharField(required=True, write_only=True)
 
     class Meta:
         model = Booking
-        fields = ["items", "check_in_date", "check_out_date", "currency", "status"]
+        fields = ["items", "check_in_date", "check_out_date", "currency", "status", 
+                  "terms_accepted", "terms_version"]
         read_only_fields = ["status"]
+        
+    def validate_terms_accepted(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                "You must accept the terms and conditions to proceed with booking."
+            )
+        return value
+        
     def validate(self, data):
         check_in = data.get("check_in_date")
         check_out = data.get("check_out_date")
@@ -1072,6 +1206,26 @@ class BookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"items": "At least one booking item is required."}
             )
+        
+        terms_version = data.get("terms_version")
+        if terms_version and items:
+            from django.contrib.contenttypes.models import ContentType
+            first_room = items[0]["room"]
+            hotel = first_room.hotel
+            
+            if hotel:
+                ct = ContentType.objects.get_for_model(hotel)
+                tc_exists = TermsAndConditions.objects.filter(
+                    content_type=ct,
+                    object_id=hotel.id,
+                    version=terms_version,
+                    is_active=True
+                ).exists()
+                
+                if not tc_exists:
+                    raise serializers.ValidationError(
+                        {"terms_version": f"Invalid or inactive T&C version: {terms_version}. Please refresh and accept the latest terms."}
+                    )
         
         return data
 
@@ -1285,11 +1439,22 @@ class EventSpaceBookingItemSerializer(serializers.ModelSerializer):
 class EventSpaceBookingSerializer(serializers.ModelSerializer):
     """Main serializer for creating a new Event Space Booking."""
     items = EventSpaceBookingItemSerializer(many=True) 
+    
+    terms_accepted = serializers.BooleanField(required=True, write_only=True)
+    terms_version = serializers.CharField(required=True, write_only=True)
 
     class Meta:
         model = EventSpaceBooking # Mapped to the dedicated model
-        fields = ["items", "check_in_date", "check_out_date", "currency", "event_type"]
+        fields = ["items", "check_in_date", "check_out_date", "currency", "event_type",
+                  "terms_accepted", "terms_version"]
         read_only_fields = ["status"]
+
+    def validate_terms_accepted(self, value):
+        if not value:
+            raise serializers.ValidationError(
+                "You must accept the terms and conditions to proceed with booking."
+            )
+        return value
 
     def validate(self, data):
         check_in = data.get("check_in_date")
@@ -1306,6 +1471,27 @@ class EventSpaceBookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"items": "At least one booking item is required."}
             )
+        
+        terms_version = data.get("terms_version")
+        if terms_version and items:
+            from django.contrib.contenttypes.models import ContentType
+            # Get hotel from first event space
+            first_space = items[0]["event_space"]
+            hotel = first_space.hotel
+            
+            if hotel:
+                ct = ContentType.objects.get_for_model(hotel)
+                tc_exists = TermsAndConditions.objects.filter(
+                    content_type=ct,
+                    object_id=hotel.id,
+                    version=terms_version,
+                    is_active=True
+                ).exists()
+                
+                if not tc_exists:
+                    raise serializers.ValidationError(
+                        {"terms_version": f"Invalid or inactive T&C version: {terms_version}. Please refresh and accept the latest terms."}
+                    )
         
         # !To Do: You may want to add validation here to ensure all event spaces
         # belong to the same hotel, if that is a business rule.

@@ -6,6 +6,19 @@ from django.contrib.contenttypes.fields import GenericRelation
 from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import ValidationError
 
+from apps.core.models import AbstractBaseModel, Address
+from apps.core.models import AbstractBaseModel, Address,Facility
+from apps.account.models import (
+    CompanyProfile,
+    HotelProfile,
+    IndividualOwnerProfile,
+    ListingImage,
+)
+
+# Terms and Conditions Model
+from django.contrib.contenttypes.models import ContentType
+from django.contrib.contenttypes.fields import GenericForeignKey
+
 
 def validate_days_of_week(value):
     """Validator to ensure `days_of_week` is a list of integers 0..6.
@@ -21,14 +34,6 @@ def validate_days_of_week(value):
             raise ValidationError("each entry in days_of_week must be an integer 0..6")
         if v < 0 or v > 6:
             raise ValidationError("each entry in days_of_week must be between 0 and 6 (Mon=0..Sun=6)")
-from apps.core.models import AbstractBaseModel, Address
-from apps.core.models import AbstractBaseModel, Address,Facility
-from apps.account.models import (
-    CompanyProfile,
-    HotelProfile,
-    IndividualOwnerProfile,
-    ListingImage,
-)
 
 
 class BaseListing(AbstractBaseModel):
@@ -254,6 +259,34 @@ class CarRental(AbstractBaseModel):
 
     status = models.CharField(
          max_length=20, choices=RentStatus.choices, default=RentStatus.PENDING
+    )
+
+    # Terms and Conditions tracking
+    terms_accepted = models.BooleanField(
+        default=False,
+        verbose_name=_("Terms Accepted"),
+        help_text=_("Whether the user confirmed they read and accepted the T&C")
+    )
+    
+    terms_version = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name=_("T&C Version"),
+        help_text=_("Version of T&C that user accepted")
+    )
+    
+    terms_accepted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Terms Accepted At"),
+        help_text=_("Timestamp when user accepted T&C")
+    )
+    
+    terms_content_snapshot = models.TextField(
+        null=True,
+        blank=True,
+        verbose_name=_("T&C Content Snapshot"),
+        help_text=_("Full T&C content at time of booking (for legal record)")
     )
 
     class Meta:
@@ -550,6 +583,35 @@ class GuestHouseBooking(AbstractBaseModel):
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=3, default="ETB")
     status = models.CharField(max_length=20, choices=RentStatus.choices, default=RentStatus.PENDING)
+    
+    # Terms and Conditions tracking
+    terms_accepted = models.BooleanField(
+        default=False,
+        verbose_name=_("Terms Accepted"),
+        help_text=_("Whether the user confirmed they read and accepted the T&C")
+    )
+    
+    terms_version = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name=_("T&C Version"),
+        help_text=_("Version of T&C that user accepted")
+    )
+    
+    terms_accepted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Terms Accepted At"),
+        help_text=_("Timestamp when user accepted T&C")
+    )
+    
+    terms_content_snapshot = models.TextField(
+        null=True,
+        blank=True,
+        verbose_name=_("T&C Content Snapshot"),
+        help_text=_("Full T&C content at time of booking (for legal record)")
+    )
+    
     def __str__(self):
         return f"Booking #{self.id} ({self.start_date} → {self.end_date})"
 class GuestHouseBookingItem(AbstractBaseModel):
@@ -710,6 +772,34 @@ class Booking(AbstractBaseModel):
 
     # Immutable snapshot of booking-level display data captured at creation time
     snapshot = models.JSONField(null=True, blank=True)
+
+    # Terms and Conditions tracking
+    terms_accepted = models.BooleanField(
+        default=False,
+        verbose_name=_("Terms Accepted"),
+        help_text=_("Whether the user confirmed they read and accepted the T&C")
+    )
+    
+    terms_version = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name=_("T&C Version"),
+        help_text=_("Version of T&C that user accepted")
+    )
+    
+    terms_accepted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Terms Accepted At"),
+        help_text=_("Timestamp when user accepted T&C")
+    )
+    
+    terms_content_ref = models.TextField(
+        null=True,
+        blank=True,
+        verbose_name=_("T&C Content Snapshot"),
+        help_text=_("Full T&C content at time of booking (for legal record)")
+    )
 
     class Meta:
         verbose_name = _("Booking")
@@ -1028,6 +1118,34 @@ class EventSpaceBooking(BookingBase):
         default=EventType.MEETING,
     ) 
     
+    # Terms and Conditions tracking
+    terms_accepted = models.BooleanField(
+        default=False,
+        verbose_name=_("Terms Accepted"),
+        help_text=_("Whether the user confirmed they read and accepted the T&C")
+    )
+    
+    terms_version = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name=_("T&C Version"),
+        help_text=_("Version of T&C that user accepted")
+    )
+    
+    terms_accepted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Terms Accepted At"),
+        help_text=_("Timestamp when user accepted T&C")
+    )
+    
+    terms_content_snapshot = models.TextField(
+        null=True,
+        blank=True,
+        verbose_name=_("T&C Content Snapshot"),
+        help_text=_("Full T&C content at time of booking (for legal record)")
+    )
+    
     class Meta:
         verbose_name = _("Event Space Booking")
         verbose_name_plural = _("Event Space Bookings")
@@ -1069,3 +1187,84 @@ class EventSpaceBookingItem(AbstractBaseModel):
 
     def __str__(self) -> str:
         return f"Space {self.event_space.title} booked for {self.booking.check_in_date}"
+
+
+
+class TermsAndConditions(AbstractBaseModel):
+    """
+    Stores Terms & Conditions documents for hotels, event spaces, and guesthouses.
+    Each object (hotel/space/guesthouse) can have multiple versions with only one active.
+    """
+    # Polymorphic relationship: can be linked to Hotel, EventSpace, or GuestHouse
+    content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.CASCADE,
+        verbose_name=_("Content Type"),
+        help_text=_("Type of object these terms apply to (Hotel, EventSpace, etc.)")
+    )
+    object_id = models.UUIDField(
+        verbose_name=_("Object ID"),
+        help_text=_("ID of the specific hotel/space/guesthouse")
+    )
+    content_object = GenericForeignKey('content_type', 'object_id')
+    
+    version = models.CharField(
+        max_length=50,
+        verbose_name=_("Version"),
+        help_text=_("Version identifier (e.g., '1.0', '2024-Q1', 'v2.5')")
+    )
+    
+    title = models.CharField(
+        max_length=255,
+        default="Terms and Conditions",
+        verbose_name=_("Title"),
+        help_text=_("Title of the terms document")
+    )
+    
+    content = models.TextField(
+        verbose_name=_("Content"),
+        help_text=_("Full T&C text in HTML or Markdown format")
+    )
+    
+    effective_date = models.DateField(
+        verbose_name=_("Effective Date"),
+        help_text=_("Date when this version becomes active")
+    )
+    
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name=_("Is Active"),
+        help_text=_("Only one version should be active at a time per object")
+    )
+    
+    class Meta:
+        verbose_name = _("Terms and Conditions")
+        verbose_name_plural = _("Terms and Conditions")
+        db_table = "terms_and_conditions"
+        ordering = ['-effective_date', '-created_at']
+        constraints = [
+            # Ensure unique version per object
+            models.UniqueConstraint(
+                fields=['content_type', 'object_id', 'version'],
+                name='unique_tc_version_per_object'
+            )
+        ]
+        indexes = [
+            models.Index(fields=['content_type', 'object_id', 'is_active']),
+            models.Index(fields=['effective_date']),
+        ]
+    
+    def __str__(self) -> str:
+        obj_name = str(self.content_object) if self.content_object else f"{self.content_type}:{self.object_id}"
+        return f"T&C v{self.version} for {obj_name}"
+    
+    def save(self, *args, **kwargs):
+        """Override save to ensure only one active version per object"""
+        if self.is_active:
+            # Deactivate all other versions for this object
+            TermsAndConditions.objects.filter(
+                content_type=self.content_type,
+                object_id=self.object_id,
+                is_active=True
+            ).exclude(id=self.id).update(is_active=False)
+        super().save(*args, **kwargs)

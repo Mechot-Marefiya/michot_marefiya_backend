@@ -36,6 +36,9 @@ from apps.listing.models import (
     SeasonalRate,
     RoomInventory
 )
+from django.contrib.contenttypes.models import ContentType
+from django.core.exceptions import ValidationError as DjangoValidationError
+from apps.listing.models import TermsAndConditions
 
 logger = logging.getLogger(__name__)
 
@@ -157,6 +160,55 @@ class ListingService:
     @staticmethod
     def create_address(address_data) -> Address:
         return Address.objects.create(**address_data)
+
+
+class TermsService:
+    
+    @staticmethod
+    def get_active_terms(content_object):
+        # Get active T&C for a hotel/guesthouse/event space/company.
+        
+        from django.contrib.contenttypes.models import ContentType
+        from apps.listing.models import TermsAndConditions
+        
+        ct = ContentType.objects.get_for_model(content_object)
+        
+        terms = TermsAndConditions.objects.filter(
+            content_type=ct,
+            object_id=content_object.id,
+            is_active=True
+        ).order_by('-effective_date').first()
+        
+        return terms
+    
+    @staticmethod
+    def validate_and_snapshot_terms(
+        content_object,
+        terms_version: str,
+        terms_accepted: bool
+    ) -> dict:
+        
+        if not terms_accepted:
+            raise DjangoValidationError("Terms and conditions must be accepted.")
+        
+        ct = ContentType.objects.get_for_model(content_object)
+        terms = TermsAndConditions.objects.filter(
+            content_type=ct,
+            object_id=content_object.id,
+            version=terms_version,
+            is_active=True
+        ).first()
+        
+        if not terms:
+            raise DjangoValidationError(
+                f"Terms and conditions version '{terms_version}' not found or inactive."
+            )
+        
+        return {
+            'version': terms.version,
+            'content_snapshot': terms.content,
+            'accepted_at': timezone.now()
+        }
 
 
 class StayAvailabilityService:
@@ -529,6 +581,11 @@ class BookingService:
     @staticmethod
     def create_booking(validated_data, user=None):
         items_data = validated_data.pop("items")
+        
+        # Extract T&C data
+        terms_accepted = validated_data.pop("terms_accepted", False)
+        terms_version = validated_data.pop("terms_version", "")
+        
         if user:
             validated_data["user"] = user
         
@@ -546,6 +603,23 @@ class BookingService:
             StayAvailabilityService.validate_availability(
                 hotel, rooms_info, check_in_date, check_out_date
             )
+            
+            # Validate and snapshot T&C
+            try:
+                tc_data = TermsService.validate_and_snapshot_terms(
+                    content_object=hotel,
+                    terms_version=terms_version,
+                    terms_accepted=terms_accepted
+                )
+                
+                # Add T&C data to booking
+                validated_data['terms_accepted'] = True
+                validated_data['terms_version'] = tc_data['version']
+                validated_data['terms_accepted_at'] = tc_data['accepted_at']
+                validated_data['terms_content_ref'] = tc_data['content_snapshot']
+            except Exception as e:
+                logger.error(f"T&C validation failed: {e}")
+                raise
         
         booking = Booking.objects.create(**validated_data)
 
@@ -822,6 +896,9 @@ class EventSpaceBookingService:
         """
         items_data = validated_data.pop("items")
         
+        terms_accepted = validated_data.pop("terms_accepted", False)
+        terms_version = validated_data.pop("terms_version", "")
+        
         if user:
             validated_data["user"] = user
         
@@ -839,6 +916,22 @@ class EventSpaceBookingService:
             EventSpaceAvailabilityService.validate_availability(
                 spaces_info, check_in_date, check_out_date
             )
+            
+            try:
+                hotel = spaces_info[0]["space_listing"].hotel
+                tc_data = TermsService.validate_and_snapshot_terms(
+                    content_object=hotel,
+                    terms_version=terms_version,
+                    terms_accepted=terms_accepted
+                )
+                
+                validated_data['terms_accepted'] = True
+                validated_data['terms_version'] = tc_data['version']
+                validated_data['terms_accepted_at'] = tc_data['accepted_at']
+                validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
+            except Exception as e:
+                logger.error(f"T&C validation failed for EventSpace booking: {e}")
+                raise
         
         # 2. Create the parent Booking object
         booking = EventSpaceBooking.objects.create(**validated_data)

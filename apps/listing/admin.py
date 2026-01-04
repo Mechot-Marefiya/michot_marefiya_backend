@@ -23,6 +23,7 @@ from apps.listing.models import (
 )
 from apps.listing.models import Amenity
 from apps.listing.models import Season, SeasonalRate, BookingItemPrice
+from apps.listing.admin_terms import TermsAndConditionsAdmin
 
 
 class ListingImageInline(GenericTabularInline):
