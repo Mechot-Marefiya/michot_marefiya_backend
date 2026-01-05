@@ -1685,3 +1685,128 @@ class GuestHouseAvailabilityService:
             created += len(batch)
 
         return created
+
+
+class GuestHouseBookingService:
+    @transaction.atomic()
+    @staticmethod
+    def create_booking(validated_data, user=None):
+        """
+        Creates a Guest House Booking, validates availability, 
+        captures T&C snapshots, and updates inventory.
+        """
+        items_data = validated_data.pop("items")
+        terms_accepted = validated_data.pop("terms_accepted", False)
+        terms_version = validated_data.pop("terms_version", "")
+
+        if user:
+            validated_data["renter"] = user
+
+        # T&C Validation & Snapshot
+        if items_data:
+            from apps.listing.services import TermsService
+            try:
+                # Get first room listing to identify the entity (Guest House Profile)
+                first_guesthouse = items_data[0]["room"]
+                tc_data = TermsService.validate_and_snapshot_terms(
+                    content_object=first_guesthouse,
+                    terms_version=terms_version,
+                    terms_accepted=terms_accepted
+                )
+                validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
+                validated_data['terms_accepted_at'] = tc_data['accepted_at']
+                validated_data['terms_version'] = tc_data['version']
+                validated_data['terms_accepted'] = True
+            except Exception as e:
+                logger.error(f"T&C validation failed for GuestHouse booking: {e}")
+                raise
+
+        # Calculate Total Price
+        total_price = sum([
+            item["units_booked"] * item["price_per_unit"]
+            for item in items_data
+        ])
+        validated_data["total_price"] = total_price
+
+        # Create Booking Object
+        from apps.listing.models import GuestHouseBooking, GuestHouseBookingItem
+        booking = GuestHouseBooking.objects.create(**validated_data)
+
+        # Create Items & Prep Availability Update
+        room_infos = []
+        for item in items_data:
+            obj = GuestHouseBookingItem.objects.create(booking=booking, **item)
+            room_infos.append({
+                "guesthouse_listing": obj.room,
+                "quantity": obj.units_booked
+            })
+
+        # Decrement Availability
+        GuestHouseAvailabilityService.update_availability(
+            room_infos,
+            booking.start_date,
+            booking.end_date
+        )
+
+        return booking
+
+
+class CarRentalService:
+    @transaction.atomic()
+    @staticmethod
+    def create_booking(validated_data, user=None):
+        rental_items_data = validated_data.pop('rental_items')
+        terms_accepted = validated_data.pop("terms_accepted", False)
+        terms_version = validated_data.pop("terms_version", "")
+
+        if user:
+            validated_data["renter"] = user
+
+        # T&C Validation & Snapshot
+        if rental_items_data:
+            from apps.listing.services import TermsService
+            try:
+                # Get company from first car listing
+                first_car = rental_items_data[0]["car_listing"]
+                company = first_car.company
+                if company:
+                    tc_data = TermsService.validate_and_snapshot_terms(
+                        content_object=company,
+                        terms_version=terms_version,
+                        terms_accepted=terms_accepted
+                    )
+                    validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
+                    validated_data['terms_accepted_at'] = tc_data['accepted_at']
+                    validated_data['terms_version'] = tc_data['version']
+                    validated_data['terms_accepted'] = True
+            except Exception as e:
+                logger.error(f"T&C validation failed for CarRental: {e}")
+                raise
+
+        # Calculate Total Price
+        total_price = sum(
+            item['units_rent'] * item['price_per_unit'] 
+            for item in rental_items_data
+        )
+        validated_data["total_price"] = total_price
+
+        # Create Rental Object
+        from apps.listing.models import CarRental, CarRentalItem
+        rental = CarRental.objects.create(**validated_data)
+
+        # Create Rental Objects & Reserve Availability
+        from apps.listing.services import CarAvailabilityService
+        for item in rental_items_data:
+            listing = item["car_listing"]
+            units = item["units_rent"]
+
+            CarRentalItem.objects.create(
+                car_rental=rental, **item
+            )
+
+            # decrement daily availability
+            CarAvailabilityService.reserve_daily_units(
+                listing, rental.start_date, rental.end_date, units
+            )
+
+        return rental

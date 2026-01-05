@@ -29,6 +29,10 @@ from apps.listing.models import (
 from apps.listing.exceptions import RatingException
 from .services import CarAvailabilityService
 from apps.core.utils import convert_currency
+from apps.listing.services import CarRentalService
+from apps.listing.services import GuestHouseBookingService
+
+
 
 class CurrencyConversionMixin(metaclass=serializers.SerializerMetaclass):
     converted_price = serializers.SerializerMethodField()
@@ -395,64 +399,10 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
 
     @transaction.atomic
     def create(self, validated_data):
-        items_data = validated_data.pop("items")
-        renter = self.context["request"].user
-        
-        # Extract T&C data for snapshot
-        terms_accepted = validated_data.get("terms_accepted", False)
-        terms_version = validated_data.get("terms_version", "")
-
-        # Calculate total price
-        total_price = sum([
-            item["units_booked"] * item["price_per_unit"]
-            for item in items_data
-        ])
-        
-        # Capture T&C Snapshot
-        if items_data:
-            from apps.listing.services import TermsService
-            try:
-                first_guesthouse = items_data[0]["room"]
-                tc_data = TermsService.validate_and_snapshot_terms(
-                    content_object=first_guesthouse,
-                    terms_version=terms_version,
-                    terms_accepted=terms_accepted
-                )
-                validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
-                validated_data['terms_accepted_at'] = tc_data['accepted_at']
-            except Exception as e:
-                # Fallback or log if snapshot fails, though validation should have caught it
-                pass
-
-        booking = GuestHouseBooking.objects.create(
-            renter=renter,
-            total_price=total_price,
-            **validated_data
+        return GuestHouseBookingService.create_booking(
+            validated_data, 
+            user=self.context["request"].user
         )
-
-        # Build space_infos for update
-        room_infos = []
-
-        for item in items_data:
-            obj = GuestHouseBookingItem.objects.create(
-                booking=booking,
-                **item
-            )
-
-            room_infos.append({
-                "guesthouse_listing": obj.room,
-                "quantity": obj.units_booked
-            })
-
-        # Decrement availability
-        GuestHouseAvailabilityService.update_availability(
-            room_infos,
-            booking.start_date,
-            booking.end_date,
-            increment=False
-        )
-
-        return booking
 
     @transaction.atomic
     def update(self, instance, validated_data):
@@ -860,55 +810,10 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     
     @transaction.atomic
     def create(self, validated_data):
-        rental_items_data = validated_data.pop('rental_items')
-        renter = self.context['request'].user
-        
-        # Extract T&C data for snapshot
-        terms_accepted = validated_data.get("terms_accepted", False)
-        terms_version = validated_data.get("terms_version", "")
-        
-        total_price = sum(
-            item['units_rent'] * item['price_per_unit'] 
-            for item in rental_items_data
+        return CarRentalService.create_booking(
+            validated_data, 
+            user=self.context["request"].user
         )
-        
-        # Capture T&C Snapshot
-        if rental_items_data:
-            from apps.listing.services import TermsService
-            try:
-                first_car = rental_items_data[0]["car_listing"]
-                company = first_car.company
-                if company:
-                    tc_data = TermsService.validate_and_snapshot_terms(
-                        content_object=company,
-                        terms_version=terms_version,
-                        terms_accepted=terms_accepted
-                    )
-                    validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
-                    validated_data['terms_accepted_at'] = tc_data['accepted_at']
-            except Exception as e:
-                pass
-        
-        rental = CarRental.objects.create(
-            renter=renter,
-            total_price=total_price,
-            **validated_data
-        )
-        
-        for item in rental_items_data:
-            listing = item["car_listing"]
-            units = item["units_rent"]
-
-            CarRentalItem.objects.create(
-                car_rental=rental, **item
-            )
-
-            # decrement daily availability
-            CarAvailabilityService.reserve_daily_units(
-                listing, rental.start_date, rental.end_date, units
-            )
-        
-        return rental
     
     @transaction.atomic
     def update(self, instance, validated_data):
