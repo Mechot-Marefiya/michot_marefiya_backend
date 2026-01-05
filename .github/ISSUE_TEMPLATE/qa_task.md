@@ -3,7 +3,7 @@ name: "🧪 QA Task / Test Plan"
 about: "Assign a specific testing task or audit to QA"
 title: "[QA] "
 labels: ["qa-verification"]
-assignees: ""
+assignees: "Bsrat06"
 ---
 
 ## 🎯 Objective

@@ -3,7 +3,7 @@ name: "💡 Feature Request / Improvement"
 about: "Propose a new idea or improvement for the project"
 title: "[FEATURE] "
 labels: ["enhancement"]
-assignees: ""
+assignees: "Bsrat06"
 ---
 
 **Is your feature request related to a problem? Please describe.**
