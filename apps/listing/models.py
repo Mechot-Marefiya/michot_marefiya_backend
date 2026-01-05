@@ -289,6 +289,10 @@ class CarRental(AbstractBaseModel):
         help_text=_("Full T&C content at time of booking (for legal record)")
     )
 
+    @property
+    def is_legacy(self):
+        return not self.terms_accepted and not self.terms_version
+
     class Meta:
         verbose_name = _("Car Rental")
         verbose_name_plural = _("Car Rentals")
@@ -611,7 +615,11 @@ class GuestHouseBooking(AbstractBaseModel):
         verbose_name=_("T&C Content Snapshot"),
         help_text=_("Full T&C content at time of booking (for legal record)")
     )
-    
+
+    @property
+    def is_legacy(self):
+        return not self.terms_accepted and not self.terms_version
+
     def __str__(self):
         return f"Booking #{self.id} ({self.start_date} → {self.end_date})"
 class GuestHouseBookingItem(AbstractBaseModel):
@@ -800,6 +808,10 @@ class Booking(AbstractBaseModel):
         verbose_name=_("T&C Content Snapshot"),
         help_text=_("Full T&C content at time of booking (for legal record)")
     )
+
+    @property
+    def is_legacy(self):
+        return not self.terms_accepted and not self.terms_version
 
     class Meta:
         verbose_name = _("Booking")
@@ -1146,6 +1158,10 @@ class EventSpaceBooking(BookingBase):
         help_text=_("Full T&C content at time of booking (for legal record)")
     )
     
+    @property
+    def is_legacy(self):
+        return not self.terms_accepted and not self.terms_version
+
     class Meta:
         verbose_name = _("Event Space Booking")
         verbose_name_plural = _("Event Space Bookings")

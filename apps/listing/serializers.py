@@ -344,6 +344,7 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
             "terms_version",
             "terms_accepted_at",
             "terms_content_snapshot",
+            "is_legacy",
         ]
         read_only_fields = ["id", "status", "created_at", "updated_at"]
         
@@ -729,6 +730,7 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
             'total_price', 'currency', 'status', 'rental_items', 'items_details',
             'created_at', 'updated_at', 'converted_price', 'converted_currency',
             'terms_accepted', 'terms_version', 'terms_accepted_at', 'terms_content_snapshot',
+            'is_legacy',
         ]
         read_only_fields = ['id', 'status', 'created_at', 'updated_at']
     
@@ -1044,6 +1046,7 @@ class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerial
             "terms_version",
             "terms_accepted_at",
             "terms_content_ref",
+            "is_legacy",
         ]
 
     def get_is_resumable(self, obj):
@@ -1340,6 +1343,7 @@ class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.M
             "terms_version",
             "terms_accepted_at",
             "terms_content_snapshot",
+            "is_legacy",
         ]
 
 # --- Write (Create) Serializers ---

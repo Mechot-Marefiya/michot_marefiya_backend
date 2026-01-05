@@ -33,7 +33,12 @@ class ListingImageInline(GenericTabularInline):
 
 admin.site.register(CarAvailability)
 admin.site.register(EventSpaceAvailability)
-admin.site.register(CarRental)
+@admin.register(CarRental)
+class CarRentalAdmin(admin.ModelAdmin):
+    list_display = ("id", "renter", "start_date", "end_date", "total_price", "currency", "status", "is_legacy")
+    list_filter = ("status",)
+    search_fields = ("renter__email", "renter__first_name", "renter__last_name")
+
 admin.site.register(CarRentalItem)
 @admin.register(EventSpaceListing)
 class EventSpaceListingAdmin(admin.ModelAdmin):
@@ -42,9 +47,19 @@ class EventSpaceListingAdmin(admin.ModelAdmin):
     list_filter = ("space_type", "is_active", "hotel")
     inlines = [ListingImageInline]
 admin.site.register(EventSpaceBookingItem)
-admin.site.register(EventSpaceBooking)
+
+@admin.register(EventSpaceBooking)
+class EventSpaceBookingAdmin(admin.ModelAdmin):
+    list_display = ("id", "user", "check_in_date", "check_out_date", "total_price", "currency", "status", "is_legacy")
+    list_filter = ("status",)
+    search_fields = ("user__email",)
 admin.site.register(GuestHouseAvailability)
-admin.site.register(GuestHouseBooking)
+
+@admin.register(GuestHouseBooking)
+class GuestHouseBookingAdmin(admin.ModelAdmin):
+    list_display = ("id", "renter", "start_date", "end_date", "total_price", "currency", "status", "is_legacy")
+    list_filter = ("status",)
+    search_fields = ("renter__email",)
 @admin.register(PropertyListing)
 class PropertyListingAdmin(admin.ModelAdmin):
     list_display = (
@@ -69,7 +84,7 @@ class RoomListingAdmin(admin.ModelAdmin):
 
 @admin.register(Booking)
 class BookingAdmin(admin.ModelAdmin):
-    list_display = ("id", "user", "check_in_date", "check_out_date", "total_price", "booking_currency", "status")
+    list_display = ("id", "user", "check_in_date", "check_out_date", "total_price", "booking_currency", "status", "is_legacy")
     search_fields = ("user__email",)
     list_filter = ("status",)
     def booking_currency(self, obj):
