@@ -222,7 +222,7 @@ class CarListing(BaseListing):
         constraints = [
             # * Enforcing either one of the owners(company, or individual) must exist
             models.CheckConstraint(
-                check=(
+                condition=(
                     (Q(individual_owner__isnull=False) & Q(company__isnull=True))
                     | (Q(individual_owner__isnull=True) & Q(company__isnull=False))
                 ),
@@ -480,7 +480,7 @@ class PropertyListing(BaseListing):
         constraints = [
             # * Enforcing either one of the owners(company, or individual) must exist
             models.CheckConstraint(
-                check=(
+                condition=(
                     (Q(individual_owner__isnull=False) & Q(company__isnull=True))
                     | (Q(individual_owner__isnull=True) & Q(company__isnull=False))
                 ),
@@ -545,7 +545,7 @@ class GuestHouseListing(BaseListing):
         constraints = [
             # * Enforcing either one of the owners(company, or individual) must exist
             models.CheckConstraint(
-                check=(
+                condition=(
                     (Q(individual_owner__isnull=False) & Q(company__isnull=True))
                     | (Q(individual_owner__isnull=True) & Q(company__isnull=False))
                 ),
@@ -808,7 +808,7 @@ class Booking(AbstractBaseModel):
         constraints = [
             # Valid date range
             models.CheckConstraint(
-                check=Q(check_in_date__lt=F("check_out_date")),
+                condition=Q(check_in_date__lt=F("check_out_date")),
                 name="booking_valid_dates",
             ),
         ]
@@ -913,7 +913,7 @@ class StayAvailability(AbstractBaseModel):
             models.UniqueConstraint(
                 fields=["date", "hotel", "room"], name="hotel_date_room_idx"),
             models.CheckConstraint(
-                check=models.Q(available_rooms__gte=0),
+                condition=models.Q(available_rooms__gte=0),
                 name="stay_availability_non_negative"
             ),
         ]
@@ -1089,7 +1089,7 @@ class BookingBase(AbstractBaseModel):
         constraints = [
             # Valid date range
             models.CheckConstraint(
-                check=Q(check_in_date__lt=F("check_out_date")),
+                condition=Q(check_in_date__lt=F("check_out_date")),
                 name="booking_valid_dates",
             ),
         ]
