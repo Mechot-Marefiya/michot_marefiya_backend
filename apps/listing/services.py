@@ -47,49 +47,36 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_room_listing(validated_data: dict):
-        company_id = validated_data.pop("company_id")
+        hotel_id = validated_data.pop("hotel_id")
         images = validated_data.pop("images")
-        # TODO: Do some way of handling the duplicate address creation
-        # TODO: by maybe asking hotels to fill how many branches they have on
-        # TODO: registration then avoid listing address fill form the UI and
-        # TODO:  also make it optional here as well so that we can reuse the HQ address.
         address_data = validated_data.pop("address", None)
         amenity_ids = validated_data.pop("amenities")
 
-        if company_id:
-            company = get_object_or_404(CompanyProfile, id=company_id)
-            if company.status != CompanyProfile.StatusChoice.APPROVED:
-                raise ValidationError("Company profile is not approved.")
+        # Get hotel instance (validation already done in serializer)
+        hotel_profile = get_object_or_404(HotelProfile, id=hotel_id)
 
-        print("------->", company)
-        # else:
-        #     company = get_object_or_404(
-        #         CompanyProfile, user=validated_data.pop('user'))
-
-        hotel_profile = get_object_or_404(HotelProfile, company=company_id)
-
-        address_instance = None
-
+        # Handle address: use branch address if provided, otherwise use company HQ address
         if address_data:
             address_instance = ListingService.create_address(address_data)
         else:
-            address_instance = company.address
+            address_instance = hotel_profile.company.address
 
+        # Create room listing
         room_listing_instance = RoomListing.objects.create(
             hotel=hotel_profile, address=address_instance, **validated_data
         )
 
+        # Set amenities
         amenities = []
-        for id in amenity_ids:
-            instance = get_object_or_404(Amenity, id=id)
+        for amenity_id in amenity_ids:
+            instance = get_object_or_404(Amenity, id=amenity_id)
             amenities.append(instance)
-
-        # M2M to amenities
         room_listing_instance.amenities.set(amenities)
 
+        # Create images
         ImageCreationService.create_images(room_listing_instance, images)
 
-        # creating availability for the room created
+        # Create availability records for the room
         StayAvailabilityService.create_availability(
             hotel_profile,
             room_listing_instance,

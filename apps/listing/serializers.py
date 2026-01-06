@@ -127,22 +127,17 @@ class RoomListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSe
 
 
 class RoomListingSerializer(serializers.ModelSerializer):
-    # TODO: Handle HQ or branch address cases.
-    # TODO: We only expect the address from the payload if it's for branch
     address = JsonSerializerField(required=False)
     images = serializers.ListField(child=serializers.ImageField())
     amenities = JsonSerializerField()
-    # TODO: We need this to handle registration by michot admin
-    # TODO: where the admin passes the hotel id.
-    # hotel_id = serializers.UUIDField(required=False)
-    company_id = serializers.UUIDField()
+    hotel_id = serializers.UUIDField()
 
     class Meta:
         model = RoomListing
         fields = [
             "images",
             "title",
-            "company_id",
+            "hotel_id",
             "description",
             "base_price",
             "currency",
@@ -170,9 +165,20 @@ class RoomListingSerializer(serializers.ModelSerializer):
         serializer.is_valid(raise_exception=True)
         return serializer.validated_data
 
+    def validate_hotel_id(self, value):
+        """Ensure the hotel exists and belongs to an approved company."""
+        try:
+            hotel = HotelProfile.objects.select_related('company').get(id=value)
+            if hotel.company.status != CompanyProfile.StatusChoice.APPROVED:
+                raise serializers.ValidationError(
+                    "Cannot create rooms for hotels with non-approved company profiles."
+                )
+            return value
+        except HotelProfile.DoesNotExist:
+            raise serializers.ValidationError(f"Hotel with id {value} does not exist.")
+
     @transaction.atomic()
     def create(self, validated_data):
-        # TODO: Proper Error handling
         return ListingService.create_room_listing(validated_data)
 
     def to_representation(self, instance):

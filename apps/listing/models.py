@@ -668,16 +668,20 @@ class RoomListing(BaseListing):
         HotelProfile,
         on_delete=models.CASCADE,
         related_name="room_listings",
-        verbose_name=_("Company"),
-        help_text=_("The company that owns this listing."),
-        null=True,
-        blank=True,
+        verbose_name=_("Hotel"),
+        help_text=_("The hotel that owns this room type."),
+        null=False,
+        blank=False,
     )
 
-    # * This is needed here cause we might have hotels
-    # * with many branches in d/t location
+    # Branch-specific address for hotels with multiple locations.
+    # This address should correspond to the specific branch where this room type is available.
     address = models.ForeignKey(
-        Address, on_delete=models.RESTRICT, related_name="+")
+        Address,
+        on_delete=models.RESTRICT,
+        related_name="+",
+        help_text=_("Branch address for this room type. Must correspond to a hotel branch location."),
+    )
 
     amenities = models.ManyToManyField(
         Amenity,
@@ -709,8 +713,14 @@ class RoomListing(BaseListing):
 
     class Meta:
         verbose_name = _("Room Listing")
-        verbose_name_plural = _("Room Listing")
+        verbose_name_plural = _("Room Listings")
         db_table = "room_listings"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(hotel__isnull=False),
+                name="room_must_have_hotel",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.title}"
