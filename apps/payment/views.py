@@ -96,6 +96,41 @@ class InitiatePaymentView(APIView):
                 {"error": "Booking is already processed"},
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        if booking.is_legacy:
+            return Response(
+                {
+                    "error": "This is a legacy booking. Please contact support or re-book to accept current Terms & Conditions.",
+                    "code": "LEGACY_BOOKING_NOT_PAYABLE"
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Verify the version accepted is still the active one for this property
+        # Use TermsService to get the current active version
+        from apps.listing.services import TermsService
+        
+        # Determine content object (Hotel, EventSpace, etc.)
+        content_object = None
+        if hasattr(booking, 'items') and booking.items.exists():
+            first_item = booking.items.first()
+            if hasattr(first_item, 'room') and first_item.room:
+                content_object = first_item.room.hotel
+            elif hasattr(first_item, 'event_space') and first_item.event_space:
+                content_object = first_item.event_space.hotel
+        
+        if content_object:
+            active_tc = TermsService.get_active_terms(content_object)
+            if active_tc and booking.terms_version != active_tc.version:
+                return Response(
+                    {
+                        "error": "The Terms & Conditions have been updated since you booked. Please review and accept the latest version before paying.",
+                        "code": "TERMS_UPDATED",
+                        "current_version": active_tc.version,
+                        "accepted_version": booking.terms_version
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         
         # Determine the target currency for payment
         payment_currency = serializer.validated_data.get('currency') or booking.currency or 'ETB'

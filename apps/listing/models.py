@@ -802,7 +802,7 @@ class Booking(AbstractBaseModel):
         help_text=_("Timestamp when user accepted T&C")
     )
     
-    terms_content_ref = models.TextField(
+    terms_content_snapshot = models.TextField(
         null=True,
         blank=True,
         verbose_name=_("T&C Content Snapshot"),

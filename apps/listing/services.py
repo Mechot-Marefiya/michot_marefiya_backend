@@ -616,7 +616,7 @@ class BookingService:
                 validated_data['terms_accepted'] = True
                 validated_data['terms_version'] = tc_data['version']
                 validated_data['terms_accepted_at'] = tc_data['accepted_at']
-                validated_data['terms_content_ref'] = tc_data['content_snapshot']
+                validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
             except Exception as e:
                 logger.error(f"T&C validation failed: {e}")
                 raise
@@ -856,6 +856,13 @@ class BookingService:
                 f"Booking {booking.id} was already CANCELLED and cannot be confirmed."
             )
 
+        # FINAL INTEGRITY CHECK: Ensure legal record exists before confirmation
+        if not booking.terms_accepted or not booking.terms_version or not booking.terms_content_snapshot:
+            logger.error(f"CRITICAL: Booking {booking.id} is being confirmed but lacks T&C snapshot!")
+            # We still allow legacy bookings to be confirmed if they were created before this system
+            if not booking.is_legacy:
+                 raise ValidationError("Legal integrity check failed: Missing T&C snapshot for non-legacy booking.")
+
         booking.status = booking.BookingStatus.CONFIRMED
         booking.save()
         logger.info(f"Booking {booking.id} status updated to CONFIRMED.")
@@ -1062,6 +1069,11 @@ class EventSpaceBookingService:
             raise BookingConflict(
                 "Booking is already finalized and cannot be changed."
             )
+
+        if not booking.terms_accepted or not booking.terms_version or not booking.terms_content_snapshot:
+            logger.error(f"CRITICAL: EventSpaceBooking {booking.id} confirmed without T&C snapshot!")
+            if not booking.is_legacy:
+                raise ValidationError("Legal integrity check failed: Missing T&C snapshot.")
 
         booking.status = booking.BookingStatus.CONFIRMED
         booking.save()
@@ -1750,6 +1762,23 @@ class GuestHouseBookingService:
 
         return booking
 
+    @staticmethod
+    def confirm_booking(booking):
+        if booking.status == booking.RentStatus.CONFIRMED:
+            return booking
+
+        if booking.status == booking.RentStatus.CANCELLED:
+            raise BookingConflict(f"GuestHouseBooking {booking.id} was cancelled.")
+
+        if not booking.terms_accepted or not booking.terms_version or not booking.terms_content_snapshot:
+            logger.error(f"CRITICAL: GuestHouseBooking {booking.id} confirmed without T&C snapshot!")
+            if not booking.is_legacy:
+                raise ValidationError("Legal integrity check failed: Missing T&C snapshot.")
+
+        booking.status = booking.RentStatus.CONFIRMED
+        booking.save()
+        return booking
+
 
 class CarRentalService:
     @transaction.atomic()
@@ -1809,4 +1838,21 @@ class CarRentalService:
                 listing, rental.start_date, rental.end_date, units
             )
 
+        return rental
+
+    @staticmethod
+    def confirm_booking(rental):
+        if rental.status == rental.RentStatus.CONFIRMED:
+            return rental
+
+        if rental.status == rental.RentStatus.CANCELLED:
+            raise BookingConflict(f"CarRental {rental.id} was cancelled.")
+
+        if not rental.terms_accepted or not rental.terms_version or not rental.terms_content_snapshot:
+            logger.error(f"CRITICAL: CarRental {rental.id} confirmed without T&C snapshot!")
+            if not rental.is_legacy:
+                raise ValidationError("Legal integrity check failed: Missing T&C snapshot.")
+
+        rental.status = rental.RentStatus.CONFIRMED
+        rental.save()
         return rental

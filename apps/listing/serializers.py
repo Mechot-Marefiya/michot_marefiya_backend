@@ -1045,7 +1045,7 @@ class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerial
             "terms_accepted",
             "terms_version",
             "terms_accepted_at",
-            "terms_content_ref",
+            "terms_content_snapshot",
             "is_legacy",
         ]
 

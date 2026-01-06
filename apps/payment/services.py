@@ -63,7 +63,13 @@ class ChapaPaymentService:
             "return_url": return_url,
             "customization": {
                 "title": "Michot Marefiya",
-                "description": "Booking payment",
+                "description": f"Booking payment - Terms {getattr(booking, 'terms_version', 'unknown')}",
+            },
+            "meta": {
+                "tc_version": getattr(booking, "terms_version", "unknown"),
+                "tc_accepted_at": booking.terms_accepted_at.isoformat() if hasattr(booking, "terms_accepted_at") and booking.terms_accepted_at else None,
+                "booking_id": str(booking.id),
+                "is_legacy": getattr(booking, "is_legacy", False),
             }
         }
 
@@ -271,7 +277,7 @@ class ChapaPaymentService:
                 payment_tx.status = PaymentTransaction.PaymentStatus.SUCCESS
                 # Map ID robustly: Chapa sometimes uses 'id' or 'reference' in the data block
                 payment_tx.chapa_transaction_id = chapa_data.get("id") or chapa_data.get("reference")
-                payment_tx.payment_method = chapa_data.get("payment_method", "unknown")
+                payment_tx.payment_method = chapa_data.get("method") or chapa_data.get("payment_method", "unknown")
                 
                 if isinstance(payment_tx.metadata, dict):
                     payment_tx.metadata["verification_success"] = chapa_data
