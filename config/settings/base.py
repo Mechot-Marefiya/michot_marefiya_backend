@@ -47,6 +47,7 @@ ALLOWED_HOSTS = [
     '.ngrok-free.app',              # Allows all subdomains ending in .ngrok-free.app
     'michotmarefia.com',
     'www.michotmarefia.com',
+    '188.245.91.56'
     ]
 
 # CORS_ALLOWED_ORIGINS = [
