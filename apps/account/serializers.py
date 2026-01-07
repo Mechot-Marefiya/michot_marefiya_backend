@@ -21,6 +21,7 @@ from apps.core.models import Facility
 from apps.core.serializers import (
     AddressSerializer,
     FacilityResponseSerializer,
+    FlexibleAddressField,
     JsonSerializerField,
 )
 
@@ -255,7 +256,7 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
     # * We created this custom field because our payload for address is a JSOn string not a dict.
     # * We made it JSOn string cause we sent the form as a multipart not a JSON and multipart doesn't allow nesting
     # * And we made it multipart cause we need to send both file and JSON.
-    address = JsonSerializerField()
+    address = FlexibleAddressField()
     email = serializers.EmailField()
 
     class Meta:
@@ -321,7 +322,7 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
 
 
 class CompanyApplicationSerializer(serializers.ModelSerializer):
-    address = JsonSerializerField()
+    address = FlexibleAddressField()
 
     class Meta:
         model = CompanyProfile

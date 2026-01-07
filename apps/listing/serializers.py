@@ -9,7 +9,12 @@ from apps.account.services import ImageCreationService
 from apps.account.models import CompanyProfile
 from django.shortcuts import get_object_or_404
 from apps.account.serializers import AddressSerializer, ListingImageSerializer
-from apps.core.serializers import JsonSerializerField,FacilitySerializer,FacilityResponseSerializer
+from apps.core.serializers import (
+    AddressSerializer,
+    FacilityResponseSerializer,
+    FlexibleAddressField,
+    JsonSerializerField,
+)
 from apps.listing.exceptions import BookingConflict
 from apps.account.enums import RoleCode
 from apps.core.models import Address
@@ -127,7 +132,7 @@ class RoomListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSe
 
 
 class RoomListingSerializer(serializers.ModelSerializer):
-    address = JsonSerializerField(required=False)
+    address = FlexibleAddressField(required=False)
     images = serializers.ListField(child=serializers.ImageField())
     amenities = JsonSerializerField()
     hotel_id = serializers.UUIDField()
@@ -220,7 +225,7 @@ class GuestHouseListingResponseSerializer(CurrencyConversionMixin, serializers.M
 
 
 class GuestHouseListingSerializer(serializers.ModelSerializer):
-    address = JsonSerializerField()
+    address = FlexibleAddressField()
     images = serializers.ListField(child=serializers.ImageField())
     amenities = JsonSerializerField()
     facility=FacilitySerializer()
@@ -933,7 +938,7 @@ class PropertyListingResponseSerializer(CurrencyConversionMixin, serializers.Mod
 
 
 class PropertyListingSerializer(serializers.ModelSerializer):
-    address = JsonSerializerField()
+    address = FlexibleAddressField()
     images = serializers.ListField(child=serializers.ImageField())
 
     class Meta:
@@ -1243,7 +1248,7 @@ class EventSpaceListingResponseSerializer(CurrencyConversionMixin, serializers.M
 class EventSpaceListingSerializer(serializers.ModelSerializer):
     """Serializer used for POST/PUT operations, relying on the service layer."""
     
-    address = AddressSerializer(required=False)
+    address = FlexibleAddressField(required=False)
     images = serializers.ListField(child=serializers.ImageField(), required=False) 
     amenities = JsonSerializerField(required=False) 
 
