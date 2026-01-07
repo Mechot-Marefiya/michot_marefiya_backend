@@ -442,7 +442,12 @@ class PropertyListing(BaseListing):
     )
 
     address = models.OneToOneField(
-        Address, on_delete=models.RESTRICT, related_name="+")
+        Address,
+        on_delete=models.RESTRICT,
+        related_name="property_listing",
+        verbose_name=_("Address"),
+        help_text=_("Property location address")
+    )
 
     property_type = models.CharField(
         max_length=50,
@@ -518,7 +523,11 @@ class GuestHouseListing(BaseListing):
     )
 
     address = models.OneToOneField(
-        Address, on_delete=models.RESTRICT, related_name="+", blank=True
+        Address,
+        on_delete=models.RESTRICT,
+        related_name="guesthouse_listing",
+        verbose_name=_("Address"),
+        help_text=_("Guesthouse location address")
     )
 
     total_rooms = models.PositiveIntegerField(
@@ -679,7 +688,8 @@ class RoomListing(BaseListing):
     address = models.ForeignKey(
         Address,
         on_delete=models.RESTRICT,
-        related_name="+",
+        related_name="room_listings",
+        verbose_name=_("Address"),
         help_text=_("Branch address for this room type. Must correspond to a hotel branch location."),
     )
 
@@ -1011,8 +1021,8 @@ class EventSpaceListing(BaseListing):
         HotelProfile,
         on_delete=models.CASCADE,
         related_name="event_space_listings",
-        verbose_name=_("Company"),
-        help_text=_("The company that owns this listing."),
+        verbose_name=_("Hotel"),
+        help_text=_("The hotel that owns this event space."),
         null=True,
         blank=True,
     )
@@ -1020,10 +1030,9 @@ class EventSpaceListing(BaseListing):
     address = models.OneToOneField(
         Address,
         on_delete=models.RESTRICT,
-        related_name="+",
-        # * Making only optional for validation cause either we use
-        # * from payload or reuse company HQ address
-        blank=True,
+        related_name="event_space_listing",
+        verbose_name=_("Address"),
+        help_text=_("Event space location address"),
     )
 
     amenities = models.ManyToManyField(

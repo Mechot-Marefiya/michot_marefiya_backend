@@ -13,7 +13,7 @@ from apps.core.serializers import JsonSerializerField,FacilitySerializer,Facilit
 from apps.listing.exceptions import BookingConflict
 from apps.account.enums import RoleCode
 from apps.core.models import Address
-from apps.listing.services import BookingService, ListingService,EventSpaceAvailabilityService,EventSpaceAvailabilityService,GuestHouseAvailabilityService
+from apps.listing.services import BookingService, ListingService, EventSpaceAvailabilityService, GuestHouseAvailabilityService
 
 from apps.listing.models import (
     Amenity,
@@ -1289,7 +1289,7 @@ class EventSpaceListingSerializer(serializers.ModelSerializer):
         Delegates the complex creation process (including availability) 
         to the service layer.
         """
-        return EventSpaceAvailabilityService.create_event_space_listing(validated_data)
+        return ListingService.create_event_space_listing(validated_data)
 
     def to_representation(self, instance):
         """

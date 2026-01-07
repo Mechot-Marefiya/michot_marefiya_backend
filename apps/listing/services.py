@@ -88,61 +88,110 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_guest_house_listing(validated_data: dict):
-        images = validated_data.pop("images")
+        images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
-        amenity_ids = validated_data.pop("amenities")
-        facility_ids=validated_data.pop("facilities")
-        # individual_owner_id = validated_data.pop('individual_owner')
-        address_instance = ListingService.create_address(address_data)
-
-        # individual_owner = get_object_or_404(
-        #     IndividualOwnerProfile, id=individual_owner_id)
+        amenity_ids = validated_data.pop("amenities", [])
+        facility_ids = validated_data.pop("facilities", [])
+        
+        # determine owner and fallback address
+        company = validated_data.get("company")
+        individual_owner = validated_data.get("individual_owner")
+        
+        if address_data:
+            address_instance = ListingService.create_address(address_data)
+        elif company:
+            address_instance = company.address
+        elif individual_owner:
+            address_instance = individual_owner.address
+        else:
+             raise ValidationError("Address is required.")
 
         guest_house_listing_instance = GuestHouseListing.objects.create(
             address=address_instance,
-            # individual_owner=individual_owner,
             **validated_data,
         )
+        
         amenities = []
         for id in amenity_ids:
             instance = get_object_or_404(Amenity, id=id)
             amenities.append(instance)
-                # M2M to amenities
         guest_house_listing_instance.amenities.set(amenities)
+        
         facilities = []
         for id in facility_ids:
             instance = get_object_or_404(Facility, id=id)
             facilities.append(instance)
-        # M2M to facilities
         guest_house_listing_instance.facilities.set(facilities)
+        
         ImageCreationService.create_images(
             guest_house_listing_instance, images)
+            
+        GuestHouseAvailabilityService.create_availability(
+            guest_house_listing_instance, guest_house_listing_instance.total_rooms
+        )
 
         return guest_house_listing_instance
 
     @staticmethod
     @transaction.atomic()
     def create_property_listing(validated_data: dict):
-        images = validated_data.pop("images")
+        images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
+        
+        company = validated_data.get("company")
+        individual_owner = validated_data.get("individual_owner")
 
-        address_instance = ListingService.create_address(address_data)
-        # individual_owner_id = validated_data.pop('individual_owner')
-
-        # individual_owner = get_object_or_404(
-        #     IndividualOwnerProfile,
-        #     id=individual_owner_id
-        # )
+        if address_data:
+            address_instance = ListingService.create_address(address_data)
+        elif company:
+            address_instance = company.address
+        elif individual_owner:
+            address_instance = individual_owner.address
+        else:
+            raise ValidationError("Address is required.")
 
         property_listing_instance = PropertyListing.objects.create(
             address=address_instance,
-            # individual_owner=individual_owner,
             **validated_data,
         )
 
         ImageCreationService.create_images(property_listing_instance, images)
 
         return property_listing_instance
+
+    @staticmethod
+    @transaction.atomic()
+    def create_event_space_listing(validated_data: dict):
+        images = validated_data.pop("images", [])
+        address_data = validated_data.pop("address", None)
+        amenity_ids = validated_data.pop("amenities", [])
+        
+        company_id = validated_data.pop("company_id")
+        hotel = get_object_or_404(HotelProfile, company__id=company_id)
+        
+        if address_data:
+            address_instance = ListingService.create_address(address_data)
+        else:
+            address_instance = hotel.company.address
+
+        instance = EventSpaceListing.objects.create(
+            hotel=hotel,
+            address=address_instance,
+            **validated_data
+        )
+        
+        amenities = []
+        for id in amenity_ids:
+            amenities.append(get_object_or_404(Amenity, id=id))
+        instance.amenities.set(amenities)
+
+        ImageCreationService.create_images(instance, images)
+        
+        EventSpaceAvailabilityService.create_availability(
+            instance, instance.total_units
+        )
+
+        return instance
 
     @staticmethod
     def create_address(address_data) -> Address:

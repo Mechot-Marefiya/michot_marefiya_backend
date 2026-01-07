@@ -128,7 +128,13 @@ class CompanyProfile(AbstractBaseModel):
     business_license_number=models.CharField(max_length=50,verbose_name=_("Business License Number"),blank=True, null=True)
     description = models.TextField(verbose_name=_("Description"), blank=True)
 
-    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(
+        Address,
+        on_delete=models.RESTRICT,
+        related_name="company_profile",
+        verbose_name=_("Address"),
+        help_text=_("Company headquarters address")
+    )
 
     class StatusChoice(models.TextChoices):
         PENDING = "pending", _("Pending")
@@ -194,7 +200,13 @@ class IndividualOwnerProfile(AbstractBaseModel):
 
     last_name = models.CharField(max_length=255, verbose_name=_("Last Name"))
 
-    address = models.OneToOneField(Address, on_delete=models.RESTRICT, related_name="+")
+    address = models.OneToOneField(
+        Address,
+        on_delete=models.RESTRICT,
+        related_name="individual_owner_profile",
+        verbose_name=_("Address"),
+        help_text=_("Individual owner primary address")
+    )
 
     phone = models.CharField(max_length=15, unique=True, verbose_name=("Phone Number"))
 

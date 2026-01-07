@@ -8,7 +8,6 @@ class AddressSerializer(serializers.ModelSerializer):
         fields = [
             "city",
             "country",
-            "country",
             "sub_city",
             "street_line1",
             "latitude",

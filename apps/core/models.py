@@ -18,7 +18,7 @@ class AbstractBaseModel(models.Model):
 class Address(AbstractBaseModel):
     street_line1 = models.CharField(max_length=255)
 
-    country = models.TextField(
+    country = models.CharField(
         max_length=100, verbose_name=_("Country"), default="Ethiopia"
     )
 
