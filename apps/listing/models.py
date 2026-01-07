@@ -1023,8 +1023,8 @@ class EventSpaceListing(BaseListing):
         related_name="event_space_listings",
         verbose_name=_("Hotel"),
         help_text=_("The hotel that owns this event space."),
-        null=True,
-        blank=True,
+        null=False,
+        blank=False,
     )
 
     address = models.OneToOneField(

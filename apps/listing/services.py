@@ -194,8 +194,41 @@ class ListingService:
         return instance
 
     @staticmethod
-    def create_address(address_data) -> Address:
+    def get_or_create_address(address_data: dict) -> Address:
+        """
+        Get existing address or create new one.
+        Prevents duplicate addresses by normalizing and matching on key fields.
+        """
+        if not address_data:
+            return None
+            
+        # Normalize data for matching
+        street = address_data.get('street_line1', '').strip()
+        city = address_data.get('city', '').strip()
+        country = address_data.get('country', 'Ethiopia').strip()
+        sub_city = address_data.get('sub_city', '').strip()
+        
+        # Try to find existing address
+        existing = Address.objects.filter(
+            street_line1__iexact=street,
+            city__iexact=city,
+            country__iexact=country,
+            sub_city__iexact=sub_city,
+        ).first()
+        
+        if existing:
+            return existing
+        
+        # Create new if not found
         return Address.objects.create(**address_data)
+    
+    @staticmethod
+    def create_address(address_data) -> Address:
+        """
+        Legacy method - use get_or_create_address instead.
+        Kept for backward compatibility.
+        """
+        return ListingService.get_or_create_address(address_data)
 
 
 class TermsService:

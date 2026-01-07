@@ -12,6 +12,7 @@ from apps.account.models import (
     ListingImage,
     Role,
 )
+from apps.listing.services import ListingService
 from django.utils import timezone
 from apps.account.utils import generate_password
 from rest_framework import serializers
@@ -302,7 +303,7 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
         user = User(email=email, role=role)
         user.set_password(password)
         user.save()
-        address = Address.objects.create(**address_data)
+        address = ListingService.get_or_create_address(address_data)
         profile = CompanyProfile.objects.create(
             user=user,
             address=address,
@@ -350,7 +351,7 @@ class CompanyApplicationSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = request.user
         address_data = validated_data.pop("address")
-        address = Address.objects.create(**address_data)
+        address = ListingService.get_or_create_address(address_data)
 
         profile = CompanyProfile.objects.create(
             user=user, address=address, status=CompanyProfile.StatusChoice.PENDING, **validated_data
@@ -396,7 +397,7 @@ class IndividualOwnerProfileSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         address_data = validated_data.pop("address")
 
-        address = Address.objects.create(**address_data)
+        address = ListingService.get_or_create_address(address_data)
 
         profile = IndividualOwnerProfile.objects.create(
             address=address, **validated_data
@@ -510,7 +511,7 @@ class HotelProfileSerializer(serializers.Serializer):
         user = User(email=email, role=role)
         user.set_password(password)
         user.save()
-        address = Address.objects.create(**address_info)
+        address = ListingService.get_or_create_address(address_info)
         company = CompanyProfile.objects.create(
             user=user, logo=logo, license=license, **company_info, address=address
         )
