@@ -6,13 +6,14 @@ from datetime import datetime
 from datetime import date
 from rest_framework.exceptions import ValidationError
 from apps.account.services import ImageCreationService
-from apps.account.models import CompanyProfile
+from apps.account.models import CompanyProfile, HotelProfile
 from django.shortcuts import get_object_or_404
 from apps.account.serializers import AddressSerializer, ListingImageSerializer
 from apps.core.serializers import (
     AddressSerializer,
     FacilityResponseSerializer,
     FlexibleAddressField,
+    FacilitySerializer,
     JsonSerializerField,
 )
 from apps.listing.exceptions import BookingConflict
