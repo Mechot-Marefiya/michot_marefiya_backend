@@ -125,14 +125,20 @@ class ChapaPaymentService:
 
 
         with db_transaction.atomic():
+            # Using GenericForeignKey for multi-booking-type support
+            from django.contrib.contenttypes.models import ContentType
+            content_type = ContentType.objects.get_for_model(booking)
+            
             payment_tx = PaymentTransaction.objects.create(
-                booking=booking,
+                content_type=content_type,
+                object_id=booking.id,
                 tx_ref=tx_ref,
                 amount=amount,
                 currency=currency,
                 status=PaymentTransaction.PaymentStatus.PENDING,
                 metadata=metadata or {}
             )
+
 
             try:
                 logger.debug("Chapa initialize payload: %s", payload)
@@ -224,13 +230,52 @@ class ChapaPaymentService:
                 # Use select_for_update to handle concurrent callbacks/webhooks safely
                 payment_tx = PaymentTransaction.objects.select_for_update().get(tx_ref=tx_ref)
                 
+                booking = payment_tx.resolved_booking
+                if not booking:
+                    logger.error(f"PaymentTransaction {tx_ref} has no associated booking!")
+                    return {" success": False, "message": "No booking associated with payment"}
+                
+                booking_model_name = booking.__class__.__name__.lower()
+                
+                from apps.listing.services import (
+                    BookingService, 
+                    GuestHouseBookingService, 
+                    EventSpaceBookingService,
+                    CarRentalService
+                )
+                
+                SERVICE_MAP = {
+                    'booking': BookingService,
+                    'guesthousebooking': GuestHouseBookingService,
+                    'eventspacebooking': EventSpaceBookingService,
+                    'carrental': CarRentalService,
+                }
+                
+                service = SERVICE_MAP.get(booking_model_name)
+                if not service:
+                    logger.error(f"Unknown booking type: {booking_model_name}")
+                    return {"success": False, "message": f"Unsupported booking type: {booking_model_name}"}
+                
                 # Check for booking status even if payment is already success (idempotency recovery)
                 if payment_tx.status == PaymentTransaction.PaymentStatus.SUCCESS:
-                    from apps.listing.models import Booking
-                    if payment_tx.booking.status == Booking.BookingStatus.PENDING:
-                        logger.info(f"Transaction {tx_ref} is SUCCESS but Booking {payment_tx.booking.id} is PENDING. Recovering...")
-                        BookingService.confirm_booking(payment_tx.booking)
-                        return {"success": True, "message": "Booking confirmed via recovery path"}
+                    if hasattr(booking, 'status'):
+                        if booking_model_name == 'booking':
+                            from apps.listing.models import Booking as BookingClass
+                            if booking.status == BookingClass.BookingStatus.PENDING:
+                                logger.info(f"Transaction {tx_ref} is SUCCESS but Booking {booking.id} is PENDING. Recovering...")
+                                service.confirm_booking(booking)
+                                return {"success": True, "message": "Booking confirmed via recovery path"}
+                        elif booking_model_name in ['guesthousebooking', 'eventspacebooking']:
+                            if booking.status == 'pending':
+                                logger.info(f"Transaction {tx_ref} is SUCCESS but {booking_model_name} {booking.id} is PENDING. Recovering...")
+                                service.confirm_booking(booking)
+                                return {"success": True, "message": "Booking confirmed via recovery path"}
+                        elif booking_model_name == 'carrental':
+                            from apps.listing.models import CarRental as CarRentalClass
+                            if booking.status == CarRentalClass.RentStatus.PENDING:
+                                logger.info(f"Transaction {tx_ref} is SUCCESS but CarRental {booking.id} is PENDING. Recovering...")
+                                service.confirm_booking(booking)
+                                return {"success": True, "message": "Rental confirmed via recovery path"}
                     return {"success": True, "message": "Already processed"}
 
                 verification = ChapaPaymentService.verify_payment(tx_ref)
@@ -245,9 +290,12 @@ class ChapaPaymentService:
                     
                     # Phase 4: Immediate release on definitive failure
                     try:
-                        BookingService.cancel_booking(payment_tx.booking)
+                        if hasattr(service, 'cancel_booking'):
+                            service.cancel_booking(booking)
+                        else:
+                            logger.warning(f"{service.__name__} does not have cancel_booking method")
                     except Exception as e:
-                        logger.error(f"Failed to auto-cancel booking {payment_tx.booking.id} after payment failure: {e}")
+                        logger.error(f"Failed to auto-cancel {booking_model_name} {booking.id} after payment failure: {e}")
                         
                     return {"success": False, "message": "Verification failed"}
 
@@ -267,9 +315,12 @@ class ChapaPaymentService:
                     payment_tx.save()
                     
                     try:
-                        BookingService.cancel_booking(payment_tx.booking)
+                        if hasattr(service, 'cancel_booking'):
+                            service.cancel_booking(booking)
+                        else:
+                            logger.warning(f"{service.__name__} does not have cancel_booking method")
                     except Exception as e:
-                        logger.error(f"Failed to auto-cancel booking {payment_tx.booking.id} after mismatch: {e}")
+                        logger.error(f"Failed to auto-cancel {booking_model_name} {booking.id} after mismatch: {e}")
                         
                     return {"success": False, "message": "Amount or currency mismatch"}
 
@@ -286,7 +337,8 @@ class ChapaPaymentService:
                 payment_tx.save()
 
                 # Confirm Booking (Now inside the same transaction)
-                BookingService.confirm_booking(payment_tx.booking)
+                service.confirm_booking(booking)
+
 
             return {"success": True, "message": "Payment verified and booking confirmed"}
 

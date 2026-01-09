@@ -271,3 +271,41 @@ class ORPermission(permissions.BasePermission):
             if hasattr(p, 'has_object_permission') else False
             for p in self.permissions
         )
+
+
+class IsGuestHouseBookingOwner(permissions.BasePermission):
+    """
+    Permission class for GuestHouse bookings.
+    Allows access if user is:
+    - Admin
+    - The renter (customer) who made the booking
+    - Company owner of the guesthouse being booked
+    """
+    
+    def has_object_permission(self, request, view, obj):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        
+        # Admin always allowed
+        if request.user.is_superuser or (
+            hasattr(request.user, 'role') and 
+            request.user.role and 
+            request.user.role.code == RoleCode.ADMIN.value
+        ):
+            return True
+        
+        # Renter (customer) owns booking
+        if hasattr(obj, 'renter') and obj.renter == request.user:
+            return True
+        
+        # Company owns guesthouse
+        if hasattr(obj, 'items') and obj.items.exists():
+            for item in obj.items.all():
+                if hasattr(item, 'room') and item.room:
+                    guesthouse = item.room
+                    if hasattr(guesthouse, 'company') and guesthouse.company:
+                        if hasattr(guesthouse.company, 'user') and guesthouse.company.user:
+                            if guesthouse.company.user == request.user:
+                                return True
+        
+        return False

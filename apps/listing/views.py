@@ -435,88 +435,138 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
             })
 
 @extend_schema(tags=["Accommodations"])
-class GuestHouseBookingAPIView(APIView):
-    permission_classes = [IsAuthenticated]
+class GuestHouseBookingViewSet(AbstractModelViewSet):
+    """
+    ViewSet for GuestHouse Bookings with full CRUD operations.
+    """
+    serializer_class = GuestHouseBookingSerializer
+    queryset = GuestHouseBooking.objects.all()
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['status']
+    ordering_fields = ['start_date', 'end_date', 'total_price', 'created_at']
+    ordering = ['-created_at']
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["display_currency"] = get_display_currency(self.request)
+        context["request"] = self.request
+        return context
+
+    def get_permissions(self):
+        """
+        - CREATE: Authenticated users can create bookings
+        - READ: Authenticated users (see own + companies see their guesthouses)
+        - UPDATE/DELETE: Booking owner or guesthouse owner
+        """
+        if self.action == 'create':
+            return [IsAuthenticated()]
+        elif self.action in ['list', 'retrieve', 'my_bookings']:
+            return [IsAuthenticated()]
+        else:
+            # For update/delete/cancel, require ownership
+            from apps.account.permissions import IsGuestHouseBookingOwner
+            return [IsGuestHouseBookingOwner()]
+    
+    def get_queryset(self):
+        """
+        Filter queryset based on user role:
+        - Admin: sees all bookings
+        - Company: sees bookings for their guesthouses + own bookings as customer
+        - User: sees only own bookings
+        """
+        user = self.request.user
+        if not user.is_authenticated:
+            return GuestHouseBooking.objects.none()
+            
+        queryset = super().get_queryset()
+        
+        # Admin sees all
+        if user.is_superuser or (
+            hasattr(user, 'role') and 
+            user.role and 
+            user.role.code == RoleCode.ADMIN.value
+        ):
+            return queryset
+        
+        # User sees own bookings as renter
+        user_bookings = queryset.filter(renter=user)
+        
+        # Company sees bookings for their guesthouses + own bookings
+        if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
+            company_bookings = queryset.filter(
+                items__room__company__user=user
+            ).distinct()
+            return (user_bookings | company_bookings).distinct()
+        
+        return user_bookings
 
     @extend_schema(
-        summary="List/Create Guest House Bookings",
+        summary="Create a guesthouse booking",
+        description="Create a new guesthouse booking with T&C acceptance. Validates availability and captures T&C snapshot.",
         request=GuestHouseBookingSerializer,
-        responses={200: GuestHouseBookingSerializer(many=True), 201: GuestHouseBookingSerializer}
+        responses={201: GuestHouseBookingSerializer}
     )
-
-    def get(self, request):
-        """
-        List bookings:
-        - Admins: all bookings
-        - Users: own bookings
-        """
-        user = request.user
-        if user.is_superuser:
-            bookings = GuestHouseBooking.objects.all()
-        else:
-            bookings = GuestHouseBooking.objects.filter(renter=user)
-
-        serializer = GuestHouseBookingSerializer(
-            bookings, 
-            many=True, 
-            context={"display_currency": get_display_currency(request)}
-        )
-        return Response(serializer.data)
-
     @transaction.atomic
-    def post(self, request):
+    def create(self, request, *args, **kwargs):
         """
         Create a new booking.
-        Validates availability and updates it.
+        Serializer handles validation, availability checks, and T&C snapshot.
         """
-        serializer = GuestHouseBookingSerializer(data=request.data, context={"request": request})
+        serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-
-        items_data = serializer.validated_data.pop("items")
-        renter = request.user
-        start_date = serializer.validated_data["start_date"]
-        end_date = serializer.validated_data["end_date"]
-
-        # Prepare room infos for availability service
-        room_infos = [
-            {"guesthouse_listing": item["room"], "quantity": item["units_booked"]}
-            for item in items_data
-        ]
-
-        # Validate availability
-        GuestHouseAvailabilityService.validate_availability(
-            room_infos, start_date, end_date
-        )
-
-        # Calculate total price
-        total_price = sum(item["units_booked"] * item["price_per_unit"] for item in items_data)
-
-        # Create booking
-        booking = GuestHouseBooking.objects.create(
-            renter=renter,
-            total_price=total_price,
-            **serializer.validated_data
-        )
-
-        # Create booking items
-        for item in items_data:
-            GuestHouseBookingItem.objects.create(
-                booking=booking,
-                **item
-            )
-
-        # Decrement availability
-        GuestHouseAvailabilityService.update_availability(
-            room_infos, start_date, end_date, increment=False
-        )
+        
+        # Serializer.create() calls GuestHouseBookingService.create_booking()
+        booking = serializer.save()
 
         return Response(
-            GuestHouseBookingSerializer(
-                booking, 
-                context={"display_currency": get_display_currency(request)}
-            ).data,
+            self.get_serializer(booking).data,
             status=status.HTTP_201_CREATED
         )
+
+    @extend_schema(
+        summary="Cancel a guesthouse booking",
+        description="Cancel a pending or confirmed booking and restore availability.",
+        responses={200: GuestHouseBookingSerializer}
+    )
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        """
+        Cancel a booking and restore availability.
+        """
+        booking = self.get_object()
+        
+        # Use service to cancel
+        from apps.listing.services import GuestHouseBookingService
+        try:
+            GuestHouseBookingService.cancel_booking(booking)
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        return Response(self.get_serializer(booking).data)
+    
+    @extend_schema(
+        summary="Get my guesthouse bookings",
+        description="Retrieve all bookings made by the authenticated user.",
+        responses={200: GuestHouseBookingSerializer(many=True)}
+    )
+    @action(detail=False, methods=['get'])
+    def my_bookings(self, request):
+        """
+        Get all bookings for the authenticated user.
+        """
+        bookings = GuestHouseBooking.objects.filter(renter=request.user).order_by('-created_at')
+        
+        page = self.paginate_queryset(bookings)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(bookings, many=True)
+        return Response(serializer.data)
+
 # Car Listing ViewSet
 @extend_schema(tags=["Car Rentals"])
 class CarListingViewSet(AbstractModelViewSet):

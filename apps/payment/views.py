@@ -61,6 +61,7 @@ class InitiatePaymentView(APIView):
     def post(self, request):
         """
         Initiate payment for a booking.
+        Supports multiple booking types: 'booking', 'guesthouse', 'eventspace', 'carrental'.
         Users can only initiate payment for their own bookings.
         Companies can initiate payment for bookings they own (as customers).
         Admin can initiate payment for any booking.
@@ -69,11 +70,38 @@ class InitiatePaymentView(APIView):
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         
-        try:
-            booking = Booking.objects.get(id=serializer.validated_data['booking_id'])
-        except Booking.DoesNotExist:
+        booking_type = serializer.validated_data.get('booking_type', 'booking')
+        booking_id = serializer.validated_data['booking_id']
+        
+        BOOKING_MODELS = {
+            'booking': ('listing', 'Booking', 'user'),
+            'guesthouse': ('listing', 'GuestHouseBooking', 'renter'),
+            'eventspace': ('listing', 'EventSpaceBooking', 'user'),
+            'carrental': ('listing', 'CarRental', 'renter'),
+        }
+        
+        if booking_type not in BOOKING_MODELS:
             return Response(
-                {"error": "Booking not found"}, 
+                {"error": f"Invalid booking_type: {booking_type}"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        app_label, model_name, user_field = BOOKING_MODELS[booking_type]
+        
+        from django.apps import apps
+        try:
+            BookingModel = apps.get_model(app_label, model_name)
+        except LookupError:
+            return Response(
+                {"error": f"Booking model {model_name} not found"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        
+        try:
+            booking = BookingModel.objects.get(id=booking_id)
+        except BookingModel.DoesNotExist:
+            return Response(
+                {"error": f"{model_name} not found"}, 
                 status=status.HTTP_404_NOT_FOUND
             )
         
@@ -85,17 +113,36 @@ class InitiatePaymentView(APIView):
             user.role.code == RoleCode.ADMIN.value
         )
         
-        if not is_admin and booking.user != user:
+        booking_user = getattr(booking, user_field, None)
+        if not is_admin and booking_user != user:
             return Response(
                 {"error": "You can only initiate payment for your own bookings."},
                 status=status.HTTP_403_FORBIDDEN
             )
         
-        if booking.status != Booking.BookingStatus.PENDING:
-            return Response(
-                {"error": "Booking is already processed"},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        status_field = 'status'
+        booking_status = getattr(booking, status_field, None)
+        
+        if booking_type == 'booking':
+            from apps.listing.models import Booking as BookingClass
+            if booking_status != BookingClass.BookingStatus.PENDING:
+                return Response(
+                    {"error": "Booking is already processed"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        elif booking_type in ['guesthouse', 'eventspace']:
+            if booking_status != 'pending':
+                return Response(
+                    {"error": "Booking is already processed"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        elif booking_type == 'carrental':
+            from apps.listing.models import CarRental as CarRentalClass
+            if booking_status != CarRentalClass.RentStatus.PENDING:
+                return Response(
+                    {"error": "Rental is already processed"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         if booking.is_legacy:
             return Response(
@@ -106,18 +153,23 @@ class InitiatePaymentView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Verify the version accepted is still the active one for this property
-        # Use TermsService to get the current active version
         from apps.listing.services import TermsService
         
-        # Determine content object (Hotel, EventSpace, etc.)
         content_object = None
         if hasattr(booking, 'items') and booking.items.exists():
             first_item = booking.items.first()
             if hasattr(first_item, 'room') and first_item.room:
-                content_object = first_item.room.hotel
+                room = first_item.room
+                if hasattr(room, 'hotel') and room.hotel:
+                    content_object = room.hotel
+                elif hasattr(room, '__class__') and room.__class__.__name__ == 'GuestHouseListing':
+                    content_object = room
             elif hasattr(first_item, 'event_space') and first_item.event_space:
                 content_object = first_item.event_space.hotel
+        elif hasattr(booking, 'rental_items') and booking.rental_items.exists():
+            first_item = booking.rental_items.first()
+            if hasattr(first_item, 'car_listing') and first_item.car_listing:
+                content_object = first_item.car_listing
         
         if content_object:
             active_tc = TermsService.get_active_terms(content_object)
@@ -158,7 +210,7 @@ class InitiatePaymentView(APIView):
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.warning(
-                    f"Price Mismatch in Payment Init for Booking {booking.id}. "
+                    f"Price Mismatch in Payment Init for {model_name} {booking.id}. "
                     f"Client sent: {fe_amount}, Server calculated: {expected_amount}"
                 )
         except Exception as e:
@@ -187,6 +239,7 @@ class InitiatePaymentView(APIView):
             return Response(result, status=status.HTTP_200_OK)
         else:
             return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
 
 @extend_schema(
     tags=["Payments"],

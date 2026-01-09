@@ -333,6 +333,7 @@ class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
         fields = [
             "room",
             "units_booked",
+            "price_per_unit",
         ]
 class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     items = GuestHouseBookingItemSerializer(many=True, write_only=True)
@@ -358,7 +359,7 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
             "terms_content_snapshot",
             "is_legacy",
         ]
-        read_only_fields = ["id", "status", "created_at", "updated_at"]
+        read_only_fields = ["id", "status", "renter", "total_price", "created_at", "updated_at"]
         
     def validate_terms_accepted(self, value):
         if not value:

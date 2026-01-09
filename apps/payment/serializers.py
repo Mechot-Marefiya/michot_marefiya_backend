@@ -4,11 +4,17 @@ from apps.payment.models import PaymentTransaction
 
 class PaymentInitializeSerializer(serializers.Serializer):
     booking_id = serializers.UUIDField()
+    booking_type = serializers.ChoiceField(
+        choices=["booking", "guesthouse", "eventspace", "carrental"],
+        default="booking",
+        help_text="Type of booking: 'booking' (hotel room), 'guesthouse', 'eventspace', or 'carrental'"
+    )
     email = serializers.EmailField(required=False, allow_blank=True)
     first_name = serializers.CharField(required=False, allow_blank=True)
     last_name = serializers.CharField(required=False, allow_blank=True)
     amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     currency = serializers.CharField(default="ETB")
+
 
     def validate_currency(self, value):
         value = value.upper()

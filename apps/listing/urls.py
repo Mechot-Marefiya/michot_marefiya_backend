@@ -15,7 +15,7 @@ from apps.listing.views import (
     StayAvailabilityUpdateView,
     EventSpaceListingViewSet,
     EventSpaceBookingViewSet,
-    GuestHouseBookingAPIView,
+    GuestHouseBookingViewSet,
     TermsAndConditionsViewSet,
 )
 
@@ -30,6 +30,7 @@ router.register("bookings", BookingViewSet, basename="bookings")
 router.register('car-rentals', CarRentalViewSet, basename='carrental')
 router.register('event-spaces',EventSpaceListingViewSet,basename="event-spaces")
 router.register('bookings-eventspaces',EventSpaceBookingViewSet,basename="bookings-eventspaces")
+router.register('guesthouse-bookings', GuestHouseBookingViewSet, basename='guesthouse-bookings')
 router.register('terms', TermsAndConditionsViewSet, basename='terms')
 
 urlpatterns = [
@@ -41,7 +42,6 @@ urlpatterns = [
     path("stays/search/", StaySearchView.as_view(), name="stay-search"),
     path("car-availabilities/by-car-and-date/", CarAvailabilityByCarAndDateView.as_view(),  name="car-availability-by-car-and-date"),
     path("car-availabilities/by-dates/", CarAvailabilityByDateRangeView.as_view(), name="car-availability-by-date-range"),
-    path('guesthouse-bookings/', GuestHouseBookingAPIView.as_view(), name='guesthouse-bookings'),
 ]
 
 urlpatterns += router.urls

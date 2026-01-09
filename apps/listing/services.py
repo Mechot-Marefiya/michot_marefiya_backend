@@ -1847,6 +1847,38 @@ class GuestHouseBookingService:
         booking.status = booking.RentStatus.CONFIRMED
         booking.save()
         return booking
+    
+    @staticmethod
+    def cancel_booking(booking):
+        """
+        Cancel a booking and restore availability.
+        Called when payment fails or user cancels.
+        """
+        if booking.status == booking.RentStatus.CANCELLED:
+            logger.info(f"GuestHouseBooking {booking.id} is already CANCELLED.")
+            return booking
+
+        # Restore availability if booking was pending or confirmed
+        if booking.status in [booking.RentStatus.PENDING, booking.RentStatus.CONFIRMED]:
+            # Prepare room infos for availability service
+            room_infos = [{
+                "guesthouse_listing": item.room,
+                "quantity": item.units_booked
+            } for item in booking.items.all()]
+            
+            # Increment availability
+            GuestHouseAvailabilityService.update_availability(
+                room_infos,
+                booking.start_date,
+                booking.end_date,
+                increment=True
+            )
+            logger.info(f"Restored availability for GuestHouseBooking {booking.id}")
+
+        booking.status = booking.RentStatus.CANCELLED
+        booking.save()
+        logger.info(f"GuestHouseBooking {booking.id} status updated to CANCELLED.")
+        return booking
 
 
 class CarRentalService:
