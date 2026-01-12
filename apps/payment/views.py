@@ -221,6 +221,7 @@ class InitiatePaymentView(APIView):
 
         result = ChapaPaymentService.initialize_payment(
             booking=booking,
+            booking_type=booking_type,
             amount=expected_amount,
             currency=payment_currency,
             email=request.user.email,

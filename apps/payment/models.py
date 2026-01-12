@@ -26,6 +26,18 @@ class PaymentTransaction(AbstractBaseModel):
     )
     booking_object = GenericForeignKey('content_type', 'object_id')
     
+    booking_type = models.CharField(
+        max_length=50,
+        choices=[
+            ('booking', 'Hotel Room'),
+            ('guesthouse', 'Guesthouse'),
+            ('eventspace', 'Event Space'),
+            ('carrental', 'Car Rental'),
+        ],
+        default='booking',
+        help_text="Discriminator for the type of booking"
+    )
+    
     booking = models.ForeignKey(
         'listing.Booking', 
         on_delete=models.CASCADE, 
