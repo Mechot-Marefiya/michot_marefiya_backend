@@ -38,6 +38,13 @@ from apps.core.utils import convert_currency
 from apps.listing.services import CarRentalService
 from apps.listing.services import GuestHouseBookingService
 
+from django.utils.dateparse import parse_date
+from apps.listing.services import PriceService
+from apps.core.utils import get_display_currency, convert_currency
+from decimal import Decimal
+from datetime import timedelta 
+
+
 
 
 class CurrencyConversionMixin(metaclass=serializers.SerializerMetaclass):
@@ -74,6 +81,99 @@ class CurrencyConversionMixin(metaclass=serializers.SerializerMetaclass):
         return self.context.get("display_currency")
 
 
+class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
+    price_quote = serializers.SerializerMethodField(help_text="Complete pricing breakdown including platform fees. Populated only when check_in/check_out dates are provided.")
+
+    def get_price_quote(self, obj):
+        request = self.context.get('request')
+        if not request:
+            return None
+        
+        check_in = request.query_params.get('check_in')
+        check_out = request.query_params.get('check_out')
+        units = request.query_params.get('units', '1')
+        
+        if not (check_in and check_out):
+            return None
+        
+        try:
+            check_in_date = parse_date(check_in)
+            check_out_date = parse_date(check_out)
+            units_int = int(units)
+        except (ValueError, TypeError):
+            return None
+        
+        if not check_in_date or not check_out_date or check_out_date <= check_in_date or units_int < 1:
+            return None
+        
+        display_currency = get_display_currency(request)
+        source_currency = getattr(obj, 'currency', 'ETB')
+        
+        try:
+            if hasattr(PriceService, 'resolve_price_details_batch'):
+                price_details_list = PriceService.resolve_price_details_batch(
+                    obj, check_in_date, check_out_date
+                )
+            else:
+                price_details_list = []
+                date_cursor = check_in_date
+                while date_cursor < check_out_date:
+                    detail = PriceService.resolve_price_detail(obj, date_cursor)
+                    detail['date'] = date_cursor
+                    price_details_list.append(detail)
+                    date_cursor += timedelta(days=1)
+        except Exception:
+            return None
+        
+        daily_breakdown = []
+        subtotal = Decimal('0.00')
+        
+        for detail in price_details_list:
+            price_in_source = detail['price']
+            
+            if display_currency and display_currency != source_currency:
+                try:
+                    price_converted = convert_currency(
+                        price_in_source,
+                        source_currency,
+                        display_currency
+                    )
+                except Exception:
+                    price_converted = price_in_source
+                    display_currency = source_currency
+            else:
+                price_converted = price_in_source
+            
+            daily_total = price_converted * units_int
+            subtotal += daily_total
+            
+            daily_breakdown.append({
+                'date': detail['date'].isoformat(),
+                'price_per_unit': str(price_converted.quantize(Decimal('0.01'))),
+                'units': units_int,
+                'daily_total': str(daily_total.quantize(Decimal('0.01'))),
+                'source': detail.get('source', 'base'),
+                'is_discounted': detail.get('is_discounted', False)
+            })
+        
+        # 5% platform fee
+        platform_fee = subtotal * Decimal('0.05')
+        total = subtotal + platform_fee
+        
+        has_discount = any(item['is_discounted'] for item in daily_breakdown)
+        
+        return {
+            'daily_breakdown': daily_breakdown,
+            'subtotal': str(subtotal.quantize(Decimal('0.01'))),
+            'platform_fee': str(platform_fee.quantize(Decimal('0.01'))),
+            'platform_fee_percentage': '5.0',
+            'total': str(total.quantize(Decimal('0.01'))),
+            'currency': display_currency or source_currency,
+            'has_discount': has_discount,
+            'nights': len(daily_breakdown)
+        }
+
+
 class TermsAndConditionsSerializer(serializers.ModelSerializer):
     # Read-only serializer for displaying Terms & Conditions"
     
@@ -92,7 +192,7 @@ class AmenityResponseSSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "icon"]
 
 
-class RoomListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
+class RoomListingResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     amenities = AmenityResponseSSerializer(many=True)
     available_units = serializers.SerializerMethodField()
@@ -117,6 +217,7 @@ class RoomListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSe
             "available_units",
             "converted_price",
             "converted_currency",
+            "price_quote",
         ]
 
     def get_available_units(self, obj):
@@ -129,6 +230,8 @@ class RoomListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSe
         ret = super().to_representation(instance)
         if "availability_map" not in self.context:
             ret.pop("available_units", None)
+        if ret.get("price_quote") is None:
+            ret.pop("price_quote", None)
         return ret
 
 
@@ -1099,11 +1202,19 @@ class BookingItemSerializer(serializers.ModelSerializer):
 
 
 class BookingSerializer(serializers.ModelSerializer):
-    items = BookingItemSerializer(many=True)
+    items = BookingItemSerializer(many=True, help_text="List of rooms and quantities to book.")
     
     # T&C fields (write_only, required for booking creation)
-    terms_accepted = serializers.BooleanField(required=True, write_only=True)
-    terms_version = serializers.CharField(required=True, write_only=True)
+    terms_accepted = serializers.BooleanField(
+        required=True, 
+        write_only=True,
+        help_text="Must be set to true to indicate agreement with the Terms and Conditions."
+    )
+    terms_version = serializers.CharField(
+        required=True, 
+        write_only=True,
+        help_text="The version of the T&C document that was accepted (e.g., '1.0')."
+    )
 
     class Meta:
         model = Booking

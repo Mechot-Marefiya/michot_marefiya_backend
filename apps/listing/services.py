@@ -644,6 +644,108 @@ class PriceService:
             "is_discounted": False,
         }
 
+    @staticmethod
+    def resolve_price_details_batch(room: RoomListing, start_date: date, end_date: date) -> list:
+        dates = []
+        cursor = start_date
+        while cursor < end_date:
+            dates.append(cursor)
+            cursor += timedelta(days=1)
+        
+        inv_qs = RoomInventory.objects.filter(
+            room_listing=room,
+            date__in=dates
+        )
+        inventories = {inv.date: inv for inv in inv_qs}
+        
+        hotel = room.hotel
+        company = getattr(hotel, 'company', None) if hotel else None
+        
+        scope_q = Q(room=room) | Q(hotel=hotel)
+        if company:
+            scope_q |= Q(company=company)
+        scope_q |= Q(room__isnull=True, hotel__isnull=True, company__isnull=True)
+        
+        seasonal_rates = SeasonalRate.objects.filter(
+            active=True
+        ).filter(scope_q).select_related('season')
+        
+        seasonal_rates_list = list(seasonal_rates)
+        
+        results = []
+        base_price = Decimal(room.base_price)
+        
+        for date_val in dates:
+            inv = inventories.get(date_val)
+            if inv and inv.price is not None:
+                p = Decimal(inv.price).quantize(Decimal('0.01'))
+                results.append({
+                    "date": date_val,
+                    "price": p,
+                    "source": "inventory",
+                    "rate_id": None,
+                    "note": None,
+                    "is_discounted": p < base_price,
+                })
+                continue
+            
+            matched = []
+            for rate in seasonal_rates_list:
+                if not PriceService._season_matches(rate.season, date_val):
+                    continue
+                if rate.days_of_week:
+                    try:
+                        if date_val.weekday() not in rate.days_of_week:
+                            continue
+                    except Exception:
+                        pass
+                matched.append(rate)
+            
+            if matched:
+                def score(r):
+                    spec = 3 if r.room else (2 if r.hotel else (1 if r.company else 0))
+                    return (r.priority, spec, getattr(r, 'created_at', None))
+                
+                matched.sort(key=score, reverse=True)
+                chosen = matched[0]
+                
+                if chosen.price_override is not None:
+                    p = Decimal(chosen.price_override).quantize(Decimal('0.01'))
+                    results.append({
+                        "date": date_val,
+                        "price": p,
+                        "source": "seasonal",
+                        "rate_id": str(chosen.id),
+                        "note": None,
+                        "is_discounted": p < base_price,
+                    })
+                    continue
+                
+                if chosen.multiplier is not None:
+                    p = (base_price * Decimal(chosen.multiplier)).quantize(Decimal('0.01'))
+                    results.append({
+                        "date": date_val,
+                        "price": p,
+                        "source": "seasonal",
+                        "rate_id": str(chosen.id),
+                        "note": f"multiplier {chosen.multiplier}",
+                        "is_discounted": p < base_price,
+                    })
+                    continue
+            
+            # Fallback to base price
+            p = base_price.quantize(Decimal('0.01'))
+            results.append({
+                "date": date_val,
+                "price": p,
+                "source": "base",
+                "rate_id": None,
+                "note": None,
+                "is_discounted": False,
+            })
+        
+        return results
+
 
 class BookingService:
     @transaction.atomic()
@@ -692,17 +794,26 @@ class BookingService:
         
         booking = Booking.objects.create(**validated_data)
 
-        # determine booking currency: inherit from first room's listing currency, fallback to ETB
-        try:
-            if rooms_info:
-                booking.currency = getattr(rooms_info[0]["room"], "currency", "ETB")
-            else:
-                booking.currency = "ETB"
-            booking.save(update_fields=["currency"])
-        except Exception:
-            # don't fail booking creation on currency propagation issues; default to ETB
+        currencies = set()
+        for item in items_data:
+            room = item["room"]
+            room_currency = getattr(room, "currency", None)
+            if room_currency:
+                currencies.add(room_currency)
+        
+        if len(currencies) > 1:
+            raise ValidationError({
+                "items": f"All rooms must have the same currency. Found: {', '.join(currencies)}"
+            })
+        
+        if rooms_info and currencies:
+            booking.currency = currencies.pop()
+        elif rooms_info:
             booking.currency = "ETB"
-            booking.save(update_fields=["currency"]) 
+        else:
+            raise ValidationError("Booking must contain at least one room")
+        
+        booking.save(update_fields=["currency"]) 
 
         use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
 

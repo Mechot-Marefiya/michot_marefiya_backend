@@ -3,17 +3,25 @@ from apps.payment.models import PaymentTransaction
 
 
 class PaymentInitializeSerializer(serializers.Serializer):
-    booking_id = serializers.UUIDField()
+    booking_id = serializers.UUIDField(help_text="The unique identifier (UUID) of the booking to pay for.")
     booking_type = serializers.ChoiceField(
         choices=["booking", "guesthouse", "eventspace", "carrental"],
         default="booking",
         help_text="Type of booking: 'booking' (hotel room), 'guesthouse', 'eventspace', or 'carrental'"
     )
-    email = serializers.EmailField(required=False, allow_blank=True)
-    first_name = serializers.CharField(required=False, allow_blank=True)
-    last_name = serializers.CharField(required=False, allow_blank=True)
-    amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
-    currency = serializers.CharField(default="ETB")
+    email = serializers.EmailField(required=False, allow_blank=True, help_text="Email of the payer. If empty, uses the authenticated user's email.")
+    first_name = serializers.CharField(required=False, allow_blank=True, help_text="First name of the payer.")
+    last_name = serializers.CharField(required=False, allow_blank=True, help_text="Last name of the payer.")
+    amount = serializers.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        required=False, 
+        help_text="Optional: The amount you expect to pay. The server will verify this against its own calculation."
+    )
+    currency = serializers.CharField(
+        default="ETB", 
+        help_text="Payment currency (e.g., 'ETB', 'USD')."
+    )
 
 
     def validate_currency(self, value):

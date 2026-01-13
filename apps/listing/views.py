@@ -139,15 +139,25 @@ class RoomListingViewSet(AbstractModelViewSet):
 
     @extend_schema(
         summary="Price Preview for specific dates",
-        description="Get a daily breakdown of prices for a room between check-in and check-out.",
+        description=(
+            "**DEPRECATED**: This endpoint is deprecated and will be removed in a future version. "
+            "Use the main room detail endpoint with check_in/check_out query parameters instead: "
+            "`GET /rooms/{id}/?check_in=YYYY-MM-DD&check_out=YYYY-MM-DD`. "
+            "The response will include a complete `price_quote` field with platform fee and currency conversion."
+        ),
         parameters=[
-            OpenApiParameter("check_in", OpenApiTypes.DATE, required=True),
-            OpenApiParameter("check_out", OpenApiTypes.DATE, required=True),
+            OpenApiParameter("check_in", OpenApiTypes.DATE, required=True, description="Arrival date"),
+            OpenApiParameter("check_out", OpenApiTypes.DATE, required=True, description="Departure date"),
         ],
-        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT}
+        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+        deprecated=True
     )
     @action(detail=True, methods=['get'], url_path='price-preview')
     def price_preview(self, request, pk=None):
+        """
+        DEPRECATED: Use room detail endpoint with check_in/check_out params instead.
+        This endpoint does NOT include the 5% platform fee and lacks currency conversion.
+        """
         room = self.get_object()
         check_in = request.query_params.get('check_in')
         check_out = request.query_params.get('check_out')
@@ -161,30 +171,25 @@ class RoomListingViewSet(AbstractModelViewSet):
         if check_in_date >= check_out_date:
             return Response({"detail": "check_out must be after check_in"}, status=400)
 
-        days = (check_out_date - check_in_date).days
-        lines = []
-        total = Decimal('0.00')
-        for i in range(days):
-            when = check_in_date + timedelta(days=i)
-            info = PriceService.resolve_price_detail(room, when)
-            price = info.get('price')
-            lines.append({
-                'date': when.isoformat(),
-                'price': str(price),
-                'source': info.get('source'),
-                'rate_id': info.get('rate_id'),
-                'note': info.get('note'),
-                'is_discounted': bool(info.get('is_discounted', False)),
-            })
-            total += Decimal(str(price))
-
+        lines = PriceService.resolve_price_details_batch(room, check_in_date, check_out_date)
+        total = sum(Decimal(str(l['price'])) for l in lines)
         has_discount = any(l.get('is_discounted') for l in lines)
 
-        return Response({
+        response = Response({
             'lines': lines,
             'total': str(total.quantize(Decimal('0.01'))),
             'has_discount': bool(has_discount),
+            'warning': (
+                'DEPRECATED: This endpoint does not include platform fees. '
+                'Use GET /rooms/{id}/?check_in=X&check_out=Y for accurate pricing.'
+            )
         })
+        
+        response['Warning'] = (
+            '299 - "Deprecated: Use ?check_in&check_out on main room endpoint instead. '
+            'This endpoint will be removed in v2.0"'
+        )
+        return response
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -223,94 +228,79 @@ class RoomListingViewSet(AbstractModelViewSet):
 
         return context
 
+    @extend_schema(
+        summary="Retrieve room details with accurate pricing",
+        description="""
+        Returns detailed information about a room listing. 
+        Highly recommended: Provide `check_in` and `check_out` query parameters to receive a 
+        comprehensive `price_quote` object including platform fees and daily breakdowns.
+        """,
+        parameters=[
+            OpenApiParameter("check_in", OpenApiTypes.DATE, required=False, description="Arrival date (YYYY-MM-DD)"),
+            OpenApiParameter("check_out", OpenApiTypes.DATE, required=False, description="Departure date (YYYY-MM-DD)"),
+        ]
+    )
     def retrieve(self, request, *args, **kwargs):
-        """Return room detail with optional seasonal display price when
-        `check_in` and `check_out` query params are provided and the
-        `FEATURE_SEASONAL_PRICING` flag is enabled.
-        """
         instance = self.get_object()
-        # base serialized data
         serializer = RoomListingResponseSerializer(instance, context=self.get_serializer_context())
         data = serializer.data
 
-        use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
-        check_in = request.query_params.get('check_in')
-        check_out = request.query_params.get('check_out')
-
-        # default values
-        data['display_price'] = data.get('base_price')
-
-        if use_seasonal and check_in and check_out:
-            from django.utils.dateparse import parse_date
-            from datetime import timedelta
-            check_in_date = parse_date(check_in)
-            check_out_date = parse_date(check_out)
-            if check_in_date and check_out_date and check_out_date > check_in_date:
-                cursor = check_in_date
-                prices = []
-                while cursor < check_out_date:
-                    p = PriceService.resolve_price(instance, cursor)
-                    prices.append(p)
-                    cursor += timedelta(days=1)
-
-                if prices:
-                    preview_total = sum(prices)
-                    preview_min = min(prices)
-                    preview_has_discount = any(p < instance.base_price for p in prices)
-                    data['preview_min_price'] = preview_min
-                    data['preview_total'] = preview_total
-                    data['preview_has_discount'] = preview_has_discount
-                    data['display_price'] = preview_min if preview_has_discount else instance.base_price
+        # Hydrate legacy seasonal fields from the new price_quote engine if active
+        quote = data.get('price_quote')
+        if quote:
+            # price_quote already uses optimized resolve_price_details_batch internally
+            # so we map its components back to legacy fields for backward compatibility
+            prices = [Decimal(line['price_per_unit']) for line in quote['daily_breakdown']]
+            if prices:
+                preview_min = min(prices)
+                data['preview_min_price'] = str(preview_min)
+                data['preview_total'] = quote['subtotal']
+                data['preview_has_discount'] = quote['has_discount']
+                data['display_price'] = str(preview_min) if quote['has_discount'] else data.get('base_price')
+        else:
+            data['display_price'] = data.get('base_price')
 
         return Response(data)
 
+    @extend_schema(
+        summary="List rooms with optional date-based pricing",
+        description="""
+        Returns a list of room listings. Provides `price_quote` and seasonal details 
+        if `check_in` and `check_out` parameters are supplied.
+        """,
+        parameters=[
+            OpenApiParameter("check_in", OpenApiTypes.DATE, required=False, description="Arrival date (YYYY-MM-DD)"),
+            OpenApiParameter("check_out", OpenApiTypes.DATE, required=False, description="Departure date (YYYY-MM-DD)"),
+            OpenApiParameter("hotel", OpenApiTypes.STR, required=False, description="Filter rooms by Hotel UUID"),
+        ]
+    )
     def list(self, request, *args, **kwargs):
-        """List rooms; when `check_in` and `check_out` are provided and
-        `FEATURE_SEASONAL_PRICING` is enabled, compute `display_price` and
-        preview fields for each room.
-        """
         qs = self.filter_queryset(self.get_queryset())
-
         page = self.paginate_queryset(qs)
-        use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
-        check_in = request.query_params.get('check_in') or request.query_params.get('check_in_date')
-        check_out = request.query_params.get('check_out') or request.query_params.get('check_out_date')
-
         rooms = page if page is not None else list(qs)
 
         serialized = []
         for room in rooms:
             serializer = RoomListingResponseSerializer(room, context=self.get_serializer_context())
             data = serializer.data
-            # default
-            data['display_price'] = data.get('base_price')
-
-            if use_seasonal and check_in and check_out:
-                from django.utils.dateparse import parse_date
-                from datetime import timedelta
-                check_in_date = parse_date(check_in)
-                check_out_date = parse_date(check_out)
-                if check_in_date and check_out_date and check_out_date > check_in_date:
-                    cursor = check_in_date
-                    prices = []
-                    while cursor < check_out_date:
-                        p = PriceService.resolve_price(room, cursor)
-                        prices.append(p)
-                        cursor += timedelta(days=1)
-                    if prices:
-                        preview_total = sum(prices)
-                        preview_min = min(prices)
-                        preview_has_discount = any(p < room.base_price for p in prices)
-                        data['preview_min_price'] = preview_min
-                        data['preview_total'] = preview_total
-                        data['preview_has_discount'] = preview_has_discount
-                        data['display_price'] = preview_min if preview_has_discount else room.base_price
+            
+            # Legacy field hydration
+            quote = data.get('price_quote')
+            if quote:
+                prices = [Decimal(line['price_per_unit']) for line in quote['daily_breakdown']]
+                if prices:
+                    preview_min = min(prices)
+                    data['preview_min_price'] = str(preview_min)
+                    data['preview_total'] = quote['subtotal']
+                    data['preview_has_discount'] = quote['has_discount']
+                    data['display_price'] = str(preview_min) if quote['has_discount'] else data.get('base_price')
+            else:
+                data['display_price'] = data.get('base_price')
 
             serialized.append(data)
 
         if page is not None:
             return self.get_paginated_response(serialized)
-
         return Response(serialized)
 
 
@@ -1005,6 +995,21 @@ class BookingViewSet(AbstractModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_class = BookingFilter
 
+    @extend_schema(
+        summary="Create a new room booking",
+        description="""
+        Initiates a booking for one or more hotel rooms. 
+        - Requires an authenticated user.
+        - `terms_accepted` must be true.
+        - `terms_version` must match the hotel's latest active T&C version.
+        - Returns a pending booking that must be processed via the Payment initiation endpoint.
+        """,
+        request=BookingSerializer,
+        responses={201: BookingResponseSerializer}
+    )
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context["display_currency"] = get_display_currency(self.request)
@@ -1189,18 +1194,14 @@ class StaySearchView(APIView):
                 preview_has_discount = False
 
                 if use_seasonal:
-                    cursor = check_in_date
-                    prices = []
-                    while cursor < check_out_date:
-                        p = PriceService.resolve_price(room, cursor)
-                        prices.append(p)
-                        cursor += timedelta(days=1)
+                    # Optimized batch resolution replaces slow day-by-day loops
+                    room_lines = PriceService.resolve_price_details_batch(room, check_in_date, check_out_date)
+                    room_prices = [Decimal(str(line['price'])) for line in room_lines]
 
-                    if prices:
-                        # prices are Decimal
-                        preview_total = sum(prices)
-                        preview_min = min(prices)
-                        preview_has_discount = any(p < base_price for p in prices)
+                    if room_prices:
+                        preview_total = sum(room_prices)
+                        preview_min = min(room_prices)
+                        preview_has_discount = any(p < base_price for p in room_prices)
                         display_price = preview_min if preview_has_discount else base_price
 
                 hotel_result["rooms"].append({
@@ -1403,23 +1404,19 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
             check_out_date = parse_date(check_out)
             
             if check_in_date and check_out_date and check_out_date > check_in_date:
-                cursor = check_in_date
-                prices = []
-                while cursor < check_out_date:
-                    # Assumes PriceService can resolve price for an EventSpaceListing instance
-                    p = PriceService.resolve_price(instance, cursor) 
-                    prices.append(p)
-                    cursor += timedelta(days=1)
+                # Optimized batch resolution for event spaces
+                lines = PriceService.resolve_price_details_batch(instance, check_in_date, check_out_date)
+                prices = [Decimal(str(l['price'])) for l in lines]
 
                 if prices:
                     preview_total = sum(prices)
                     preview_min = min(prices)
                     preview_has_discount = any(p < instance.base_price for p in prices)
                     
-                    data['preview_min_price'] = preview_min
-                    data['preview_total'] = preview_total
+                    data['preview_min_price'] = str(preview_min)
+                    data['preview_total'] = str(preview_total)
                     data['preview_has_discount'] = preview_has_discount
-                    data['display_price'] = preview_min if preview_has_discount else instance.base_price
+                    data['display_price'] = str(preview_min) if preview_has_discount else str(instance.base_price)
 
         return Response(data)
 
