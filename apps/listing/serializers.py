@@ -1,3 +1,4 @@
+from django.utils.dateparse import parse_date
 from django.db import transaction
 from rest_framework import serializers
 from datetime import timedelta
@@ -162,14 +163,20 @@ class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
         
         has_discount = any(item['is_discounted'] for item in daily_breakdown)
         
+        min_nightly_price = Decimal('0.00')
+        if daily_breakdown:
+            min_nightly_price = min(Decimal(item['price_per_unit']) for item in daily_breakdown)
+
         return {
             'daily_breakdown': daily_breakdown,
             'subtotal': str(subtotal.quantize(Decimal('0.01'))),
+            'base_total': str(subtotal.quantize(Decimal('0.01'))),
             'platform_fee': str(platform_fee.quantize(Decimal('0.01'))),
             'platform_fee_percentage': '5.0',
             'total': str(total.quantize(Decimal('0.01'))),
             'currency': display_currency or source_currency,
             'has_discount': has_discount,
+            'min_nightly_price': str(min_nightly_price.quantize(Decimal('0.01'))),
             'nights': len(daily_breakdown)
         }
 
@@ -296,7 +303,7 @@ class RoomListingSerializer(serializers.ModelSerializer):
         )
 
 
-class GuestHouseListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
+class GuestHouseListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     address = AddressSerializer()
     amenities = AmenityResponseSSerializer(many=True)
@@ -319,6 +326,7 @@ class GuestHouseListingResponseSerializer(CurrencyConversionMixin, serializers.M
             "is_favorite",
             "converted_price",
             "converted_currency",
+            "price_quote",
         ]
 
     def get_is_favorite(self, obj):
@@ -431,6 +439,8 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
             instance, context=self.context
         ).to_representation(instance)
 class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
+    price_per_unit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    
     class Meta:
         model = GuestHouseBookingItem
         fields = [
@@ -671,7 +681,7 @@ class CarAvailabilitySerializer(serializers.ModelSerializer):
         read_only_fields = ['id']
 
 
-class CarListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
+class CarListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True, read_only=True)
     availabilities = CarAvailabilitySerializer(many=True, read_only=True)
     current_availability = serializers.SerializerMethodField()
@@ -704,6 +714,7 @@ class CarListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSer
             "updated_at",
             "converted_price",
             "converted_currency",
+            "price_quote",
         ]
     
     def get_current_availability(self, obj):
@@ -1196,9 +1207,10 @@ class BookingRatingSerializer(serializers.ModelSerializer):
         return attrs
 
 class BookingItemSerializer(serializers.ModelSerializer):
+    price_per_unit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     class Meta:
         model = BookingItem
-        fields = ["room", "units_booked"]
+        fields = ["room", "units_booked", "price_per_unit"]
 
 
 class BookingSerializer(serializers.ModelSerializer):
@@ -1336,7 +1348,7 @@ class StayAvailabilityUpdateSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("available_rooms must be non-negative.")
         return value
-class EventSpaceListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
+class EventSpaceListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     amenities = AmenityResponseSSerializer(many=True)
 
@@ -1357,6 +1369,7 @@ class EventSpaceListingResponseSerializer(CurrencyConversionMixin, serializers.M
             "floor_area_sqm",
             "converted_price",
             "converted_currency",
+            "price_quote",
         ]
 class EventSpaceListingSerializer(serializers.ModelSerializer):
     """Serializer used for POST/PUT operations, relying on the service layer."""
@@ -1474,9 +1487,11 @@ class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.M
 
 class EventSpaceBookingItemSerializer(serializers.ModelSerializer):
     """Serializer for taking input on booking items."""
+    price_per_unit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    
     class Meta:
         model = EventSpaceBookingItem
-        fields = ["event_space", "units_booked"] 
+        fields = ["event_space", "units_booked", "price_per_unit"] 
 
 
 class EventSpaceBookingSerializer(serializers.ModelSerializer):

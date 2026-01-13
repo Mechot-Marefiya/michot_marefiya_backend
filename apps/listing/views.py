@@ -245,7 +245,6 @@ class RoomListingViewSet(AbstractModelViewSet):
         serializer = RoomListingResponseSerializer(instance, context=self.get_serializer_context())
         data = serializer.data
 
-        # Hydrate legacy seasonal fields from the new price_quote engine if active
         quote = data.get('price_quote')
         if quote:
             # price_quote already uses optimized resolve_price_details_batch internally
@@ -284,7 +283,6 @@ class RoomListingViewSet(AbstractModelViewSet):
             serializer = RoomListingResponseSerializer(room, context=self.get_serializer_context())
             data = serializer.data
             
-            # Legacy field hydration
             quote = data.get('price_quote')
             if quote:
                 prices = [Decimal(line['price_per_unit']) for line in quote['daily_breakdown']]
@@ -363,6 +361,47 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
         context["display_currency"] = get_display_currency(self.request)
         
         return context
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        data = serializer.data
+
+        quote = data.get('price_quote')
+        if quote:
+            data['preview_min_price'] = quote['min_nightly_price']
+            data['preview_total'] = quote['base_total']
+            data['preview_has_discount'] = quote['has_discount']
+            data['display_price'] = quote['min_nightly_price'] if quote['has_discount'] else data.get('base_price')
+        else:
+            data['display_price'] = data.get('base_price')
+
+        return Response(data)
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            data_list = serializer.data
+        else:
+            serializer = self.get_serializer(queryset, many=True)
+            data_list = serializer.data
+
+        for data in data_list:
+            quote = data.get('price_quote')
+            if quote:
+                data['preview_min_price'] = quote['min_nightly_price']
+                data['preview_total'] = quote['base_total']
+                data['preview_has_discount'] = quote['has_discount']
+                data['display_price'] = quote['min_nightly_price'] if quote['has_discount'] else data.get('base_price')
+            else:
+                data['display_price'] = data.get('base_price')
+
+        if page is not None:
+            return self.get_paginated_response(data_list)
+        return Response(data_list)
     @extend_schema(
             parameters=[
                 OpenApiParameter("check_in", OpenApiTypes.DATE, required=True),
@@ -1194,7 +1233,6 @@ class StaySearchView(APIView):
                 preview_has_discount = False
 
                 if use_seasonal:
-                    # Optimized batch resolution replaces slow day-by-day loops
                     room_lines = PriceService.resolve_price_details_batch(room, check_in_date, check_out_date)
                     room_prices = [Decimal(str(line['price'])) for line in room_lines]
 
@@ -1391,32 +1429,15 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
         serializer = EventSpaceListingResponseSerializer(instance, context=self.get_serializer_context())
         data = serializer.data
 
-        # Price calculation logic
-        use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
-        check_in = request.query_params.get('check_in')
-        check_out = request.query_params.get('check_out')
-
-        # default values
-        data['display_price'] = data.get('base_price')
-
-        if use_seasonal and check_in and check_out:
-            check_in_date = parse_date(check_in)
-            check_out_date = parse_date(check_out)
-            
-            if check_in_date and check_out_date and check_out_date > check_in_date:
-                # Optimized batch resolution for event spaces
-                lines = PriceService.resolve_price_details_batch(instance, check_in_date, check_out_date)
-                prices = [Decimal(str(l['price'])) for l in lines]
-
-                if prices:
-                    preview_total = sum(prices)
-                    preview_min = min(prices)
-                    preview_has_discount = any(p < instance.base_price for p in prices)
-                    
-                    data['preview_min_price'] = str(preview_min)
-                    data['preview_total'] = str(preview_total)
-                    data['preview_has_discount'] = preview_has_discount
-                    data['display_price'] = str(preview_min) if preview_has_discount else str(instance.base_price)
+        # Hydrate legacy pricing fields from price_quote for backward compatibility
+        quote = data.get('price_quote')
+        if quote:
+            data['preview_min_price'] = quote['min_nightly_price']
+            data['preview_total'] = quote['base_total']
+            data['preview_has_discount'] = quote['has_discount']
+            data['display_price'] = quote['min_nightly_price'] if quote['has_discount'] else data.get('base_price')
+        else:
+            data['display_price'] = data.get('base_price')
 
         return Response(data)
 
@@ -1427,12 +1448,7 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
         listing if date params are provided.
         """
         qs = self.filter_queryset(self.get_queryset())
-
         page = self.paginate_queryset(qs)
-        use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
-        check_in = request.query_params.get('check_in') or request.query_params.get('check_in_date')
-        check_out = request.query_params.get('check_out') or request.query_params.get('check_out_date')
-
         listings = page if page is not None else list(qs)
 
         serialized = []
@@ -1440,31 +1456,15 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
             serializer = EventSpaceListingResponseSerializer(listing, context=self.get_serializer_context())
             data = serializer.data
             
-            # default
-            data['display_price'] = data.get('base_price')
-
-            if use_seasonal and check_in and check_out:
-                check_in_date = parse_date(check_in)
-                check_out_date = parse_date(check_out)
-                
-                if check_in_date and check_out_date and check_out_date > check_in_date:
-                    cursor = check_in_date
-                    prices = []
-                    while cursor < check_out_date:
-                        # Assumes PriceService can resolve price for an EventSpaceListing instance
-                        p = PriceService.resolve_price(listing, cursor) 
-                        prices.append(p)
-                        cursor += timedelta(days=1)
-                        
-                    if prices:
-                        preview_total = sum(prices)
-                        preview_min = min(prices)
-                        preview_has_discount = any(p < listing.base_price for p in prices)
-                        
-                        data['preview_min_price'] = preview_min
-                        data['preview_total'] = preview_total
-                        data['preview_has_discount'] = preview_has_discount
-                        data['display_price'] = preview_min if preview_has_discount else listing.base_price
+            # Hydrate legacy pricing fields from price_quote for backward compatibility
+            quote = data.get('price_quote')
+            if quote:
+                data['preview_min_price'] = quote['min_nightly_price']
+                data['preview_total'] = quote['base_total']
+                data['preview_has_discount'] = quote['has_discount']
+                data['display_price'] = quote['min_nightly_price'] if quote['has_discount'] else data.get('base_price')
+            else:
+                data['display_price'] = data.get('base_price')
 
             serialized.append(data)
 

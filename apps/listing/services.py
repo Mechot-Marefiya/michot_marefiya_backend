@@ -19,6 +19,7 @@ from apps.listing.models import (
     Amenity,
     Booking,
     BookingItem,
+    GuestHouseBooking,
     GuestHouseListing,
     PropertyListing,
     RoomListing,
@@ -34,11 +35,14 @@ from apps.listing.models import (
     Season,
     BookingItemPrice,
     SeasonalRate,
-    RoomInventory
+    RoomListing, 
 )
+
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError as DjangoValidationError
 from apps.listing.models import TermsAndConditions
+from apps.listing.models import RoomListing, RoomInventory
+
 
 logger = logging.getLogger(__name__)
 
@@ -565,77 +569,79 @@ class PriceService:
         return Decimal(room.base_price)
 
     @staticmethod
-    def resolve_price_detail(room: RoomListing, when: date) -> dict:
+    def resolve_price_detail(listing: any, when: date) -> dict:
         # Returns detailed info for a single date: final price and source info
-        inv = RoomInventory.objects.filter(room_listing=room, date=when).first()
-        if inv and inv.price is not None:
-            p = Decimal(inv.price).quantize(Decimal('0.01'))
-            base = Decimal(room.base_price)
-            return {
-                "price": p,
-                "source": "inventory",
-                "rate_id": None,
-                "note": None,
-                "is_discounted": p < base,
-            }
 
-        hotel = room.hotel
-        company = getattr(hotel, 'company', None) if hotel else None
-
-        candidates = SeasonalRate.objects.filter(active=True).select_related('season')
-        scope_q = Q(room=room) | Q(hotel=hotel)
-        if company:
-            scope_q |= Q(company=company)
-        scope_q |= Q(room__isnull=True, hotel__isnull=True, company__isnull=True)
-        candidates = candidates.filter(scope_q)
-
-        matched = []
-        for rate in candidates:
-            if not PriceService._season_matches(rate.season, when):
-                continue
-            if rate.days_of_week:
-                try:
-                    if when.weekday() not in rate.days_of_week:
-                        continue
-                except Exception:
-                    pass
-            matched.append(rate)
-
-        if matched:
-            def score(r):
-                spec = 0
-                if r.room:
-                    spec = 3
-                elif r.hotel:
-                    spec = 2
-                elif r.company:
-                    spec = 1
-                return (r.priority, spec, getattr(r, 'created_at', None))
-
-            matched.sort(key=score, reverse=True)
-            chosen = matched[0]
-            if chosen.price_override is not None:
-                p = Decimal(chosen.price_override).quantize(Decimal('0.01'))
-                base = Decimal(room.base_price)
+        if isinstance(listing, RoomListing):
+            inv = RoomInventory.objects.filter(room_listing=listing, date=when).first()
+            if inv and inv.price is not None:
+                p = Decimal(inv.price).quantize(Decimal('0.01'))
+                base = Decimal(listing.base_price)
                 return {
                     "price": p,
-                    "source": "seasonal",
-                    "rate_id": str(chosen.id),
+                    "source": "inventory",
+                    "rate_id": None,
                     "note": None,
                     "is_discounted": p < base,
                 }
-            if chosen.multiplier is not None:
-                base = Decimal(room.base_price)
-                p = (base * Decimal(chosen.multiplier)).quantize(Decimal('0.01'))
-                return {
-                    "price": p,
-                    "source": "seasonal",
-                    "rate_id": str(chosen.id),
-                    "note": f"multiplier {chosen.multiplier}",
-                    "is_discounted": p < base,
-                }
 
-        base = Decimal(room.base_price).quantize(Decimal('0.01'))
+            hotel = listing.hotel
+            company = getattr(hotel, 'company', None) if hotel else None
+
+            candidates = SeasonalRate.objects.filter(active=True).select_related('season')
+            scope_q = Q(room=listing) | Q(hotel=hotel)
+            if company:
+                scope_q |= Q(company=company)
+            scope_q |= Q(room__isnull=True, hotel__isnull=True, company__isnull=True)
+            candidates = candidates.filter(scope_q)
+
+            matched = []
+            for rate in candidates:
+                if not PriceService._season_matches(rate.season, when):
+                    continue
+                if rate.days_of_week:
+                    try:
+                        if when.weekday() not in rate.days_of_week:
+                            continue
+                    except Exception:
+                        pass
+                matched.append(rate)
+
+            if matched:
+                def score(r):
+                    spec = 0
+                    if r.room:
+                        spec = 3
+                    elif r.hotel:
+                        spec = 2
+                    elif r.company:
+                        spec = 1
+                    return (r.priority, spec, getattr(r, 'created_at', None))
+
+                matched.sort(key=score, reverse=True)
+                chosen = matched[0]
+                if chosen.price_override is not None:
+                    p = Decimal(chosen.price_override).quantize(Decimal('0.01'))
+                    base = Decimal(listing.base_price)
+                    return {
+                        "price": p,
+                        "source": "seasonal",
+                        "rate_id": str(chosen.id),
+                        "note": None,
+                        "is_discounted": p < base,
+                    }
+                if chosen.multiplier is not None:
+                    base = Decimal(listing.base_price)
+                    p = (base * Decimal(chosen.multiplier)).quantize(Decimal('0.01'))
+                    return {
+                        "price": p,
+                        "source": "seasonal",
+                        "rate_id": str(chosen.id),
+                        "note": f"multiplier {chosen.multiplier}",
+                        "is_discounted": p < base,
+                    }
+
+        base = Decimal(listing.base_price).quantize(Decimal('0.01'))
         return {
             "price": base,
             "source": "base",
@@ -645,7 +651,19 @@ class PriceService:
         }
 
     @staticmethod
-    def resolve_price_details_batch(room: RoomListing, start_date: date, end_date: date) -> list:
+    def resolve_price_details_batch(listing: any, start_date: date, end_date: date) -> list:
+        
+        if not isinstance(listing, RoomListing):
+            results = []
+            cursor = start_date
+            while cursor < end_date:
+                detail = PriceService.resolve_price_detail(listing, cursor)
+                detail['date'] = cursor
+                results.append(detail)
+                cursor += timedelta(days=1)
+            return results
+
+        room = listing
         dates = []
         cursor = start_date
         while cursor < end_date:
@@ -1049,7 +1067,6 @@ class BookingService:
         return booking
     
     @staticmethod
-    @staticmethod
     def get_booking_total(booking):
         """Return booking total considering seasonal pricing if enabled, plus 5% service fee.
 
@@ -1123,40 +1140,62 @@ class EventSpaceBookingService:
         # 2. Create the parent Booking object
         booking = EventSpaceBooking.objects.create(**validated_data)
 
+        currencies = set()
+        for item in items_data:
+            space = item["event_space"]
+            space_currency = getattr(space, "currency", None)
+            if space_currency:
+                currencies.add(space_currency)
+        
+        if len(currencies) > 1:
+            raise ValidationError({
+                "items": f"All event spaces must have the same currency. Found: {', '.join(currencies)}"
+            })
+        
+        if items_data and currencies:
+            booking.currency = currencies.pop()
+        elif items_data:
+            booking.currency = "ETB"
+        else:
+            raise ValidationError("Booking must contain at least one event space")
+        
+        booking.save(update_fields=["currency"])
+
         total_price = Decimal('0.00')
         booking_items_to_create = []
+        space_infos = []
         duration = (check_out_date - check_in_date).days
         
-        # 3. Create Booking Items and Calculate Price (Simplified)
         for item in items_data:
             event_space: EventSpaceListing = item["event_space"]
             units = item["units_booked"]
             
-            # Price Calculation: Base Price * Duration (Days)
-            # This is the price paid by the customer per unit for the entire booking period
+            # subtotal for the stay (simplified per-day resolve could be added later if needed)
             price_per_unit_total = event_space.base_price * duration 
             
             booking_item = EventSpaceBookingItem(
                 booking=booking,
                 event_space=event_space,
                 units_booked=units,
-                price_per_unit=price_per_unit_total, # Total price per unit for the stay
+                price_per_unit=price_per_unit_total, 
             )
             booking_items_to_create.append(booking_item)
-            total_price += booking_item.subtotal()
+            
+            space_infos.append({
+                "space_listing": event_space,
+                "quantity": units
+            })
 
         EventSpaceBookingItem.objects.bulk_create(booking_items_to_create)
         
-        # 4. Decrement Availability
         EventSpaceAvailabilityService.update_availability(
-            spaces_info=spaces_info,
+            space_infos=space_infos,
             check_in_date=booking.check_in_date,
             check_out_date=booking.check_out_date,
-            increment=False, # Decrement
+            increment=False, 
         )
 
-        # 5. Update Booking Total Price
-        booking.total_price = total_price
+        booking.total_price = EventSpaceBookingService.get_booking_total(booking)
         booking.save(update_fields=['total_price'])
         
         return booking
@@ -1262,7 +1301,10 @@ class EventSpaceBookingService:
     
     @staticmethod
     def get_booking_total(booking: EventSpaceBooking):
-        return sum(item.subtotal() for item in booking.items.all())
+        # this calculates total price for the booking including 5% platform fee.
+        base_total = sum(item.subtotal() for item in booking.items.all())
+        platform_fee = base_total * Decimal('0.05')
+        return base_total + platform_fee
 
 class PaymentService:
     """
@@ -1913,21 +1955,50 @@ class GuestHouseBookingService:
                 logger.error(f"T&C validation failed for GuestHouse booking: {e}")
                 raise
 
-        # Calculate Total Price
-        total_price = sum([
-            item["units_booked"] * item["price_per_unit"]
-            for item in items_data
-        ])
-        validated_data["total_price"] = total_price
-
-        # Create Booking Object
         from apps.listing.models import GuestHouseBooking, GuestHouseBookingItem
+
+        validated_data['total_price'] = Decimal('0.00')
         booking = GuestHouseBooking.objects.create(**validated_data)
+
+        currencies = set()
+        for item in items_data:
+            room = item["room"]
+            room_currency = getattr(room, "currency", None)
+            if room_currency:
+                currencies.add(room_currency)
+        
+        if len(currencies) > 1:
+            raise ValidationError({
+                "items": f"All units must have the same currency. Found: {', '.join(currencies)}"
+            })
+        
+        if items_data and currencies:
+            booking.currency = currencies.pop()
+        elif items_data:
+            booking.currency = "ETB"
+        else:
+            raise ValidationError("Booking must contain at least one unit")
+        
+        booking.save(update_fields=["currency"])
 
         # Create Items & Prep Availability Update
         room_infos = []
+        duration = (booking.end_date - booking.start_date).days
+        if duration <= 0:
+            duration = 1
+
         for item in items_data:
-            obj = GuestHouseBookingItem.objects.create(booking=booking, **item)
+            room = item["room"]
+            units = item["units_booked"]
+            
+            price_per_unit_total = room.base_price * duration
+
+            obj = GuestHouseBookingItem.objects.create(
+                booking=booking, 
+                room=room,
+                units_booked=units,
+                price_per_unit=price_per_unit_total
+            )
             room_infos.append({
                 "guesthouse_listing": obj.room,
                 "quantity": obj.units_booked
@@ -1939,6 +2010,9 @@ class GuestHouseBookingService:
             booking.start_date,
             booking.end_date
         )
+
+        booking.total_price = GuestHouseBookingService.get_booking_total(booking)
+        booking.save(update_fields=['total_price'])
 
         return booking
 
@@ -1991,6 +2065,12 @@ class GuestHouseBookingService:
         logger.info(f"GuestHouseBooking {booking.id} status updated to CANCELLED.")
         return booking
 
+    @staticmethod
+    def get_booking_total(booking: "GuestHouseBooking"):
+        base_total = sum(item.subtotal() for item in booking.items.all())
+        platform_fee = base_total * Decimal('0.05')
+        return base_total + platform_fee
+
 
 class CarRentalService:
     @transaction.atomic()
@@ -2035,6 +2115,24 @@ class CarRentalService:
         from apps.listing.models import CarRental, CarRentalItem
         rental = CarRental.objects.create(**validated_data)
 
+        currencies = set()
+        for item in rental_items_data:
+            car = item["car_listing"]
+            if car.currency:
+                currencies.add(car.currency)
+        
+        if len(currencies) > 1:
+            raise ValidationError({
+                "rental_items": f"All cars must have the same currency. Found: {', '.join(currencies)}"
+            })
+        
+        if rental_items_data and currencies:
+            rental.currency = currencies.pop()
+        elif rental_items_data:
+            rental.currency = "ETB"
+        
+        rental.save(update_fields=["currency"])
+
         # Create Rental Objects & Reserve Availability
         from apps.listing.services import CarAvailabilityService
         for item in rental_items_data:
@@ -2050,7 +2148,18 @@ class CarRentalService:
                 listing, rental.start_date, rental.end_date, units
             )
 
+        # Update Total Price (Includes 5% Platform Fee)
+        rental.total_price = CarRentalService.get_booking_total(rental)
+        rental.save(update_fields=['total_price'])
+
         return rental
+
+    @staticmethod
+    def get_booking_total(rental: "CarRental"):
+        """Calculates total price including 5% platform fee."""
+        base_total = sum(item.subtotal() for item in rental.rental_items.all())
+        platform_fee = base_total * Decimal('0.05')
+        return base_total + platform_fee
 
     @staticmethod
     def confirm_booking(rental):
