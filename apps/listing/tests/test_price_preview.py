@@ -8,7 +8,7 @@ from apps.listing.models import (
     EventSpaceAvailability, GuestHouseAvailability
 )
 from apps.account.models import User, HotelProfile, CompanyProfile
-from apps.core.models import Address
+from apps.core.models import Address, CurrencyRate
 
 class PricePreviewAPITests(APITestCase):
     def setUp(self):
@@ -149,3 +149,44 @@ class PricePreviewAPITests(APITestCase):
         self.assertEqual(response.data['totals']['rooms_subtotal'], '5000.00')
         self.assertEqual(response.data['totals']['platform_fee'], '250.00')
         self.assertEqual(response.data['totals']['grand_total'], '5250.00')
+
+    def test_currency_conversion_in_preview(self):
+        """
+        Verify that display_currency converts totals.
+        """
+        # Create exchange rates
+        # 1 ETB = 0.01 USD (Simple rate for testing)
+        # 1 USD = 100 ETB
+        CurrencyRate.objects.create(base="USD", target="ETB", rate=Decimal("100.00"), date=date.today())
+        
+        self.client.force_authenticate(user=self.user)
+        url = reverse('bookings-price-preview') + "?display_currency=USD"
+        
+        check_in = date.today() + timedelta(days=1)
+        check_out = date.today() + timedelta(days=2)
+        
+        # 1 night * 1 unit * 1000 = 1000 ETB
+        # 1000 * 0.05 = 50 ETB fee
+        # Grand Total = 1050 ETB
+        data = {
+            "check_in_date": check_in.isoformat(),
+            "check_out_date": check_out.isoformat(),
+            "items": [{"room": str(self.room.id), "units_booked": 1}]
+        }
+        
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        
+        # Verify Base Totals (ETB)
+        self.assertEqual(response.data['totals']['rooms_subtotal'], '1000.00')
+        self.assertEqual(response.data['totals']['currency'], 'ETB')
+        
+        # Verify Converted Totals (USD)
+        # 1000 ETB / 100 = 10 USD
+        # 50 ETB / 100 = 0.50 USD
+        # 1050 ETB / 100 = 10.50 USD
+        self.assertIsNotNone(response.data['converted_totals'])
+        self.assertEqual(response.data['converted_totals']['rooms_subtotal'], '10.00')
+        self.assertEqual(response.data['converted_totals']['platform_fee'], '0.50')
+        self.assertEqual(response.data['converted_totals']['grand_total'], '10.50')
+        self.assertEqual(response.data['converted_totals']['currency'], 'USD')

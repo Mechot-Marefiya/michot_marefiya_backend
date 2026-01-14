@@ -42,6 +42,8 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError as DjangoValidationError
 from apps.listing.models import TermsAndConditions
 from apps.listing.models import RoomListing, RoomInventory
+from apps.core.utils import convert_currency
+
 
 
 logger = logging.getLogger(__name__)
@@ -788,16 +790,38 @@ class PriceCalculationService:
         }
 
     @staticmethod
-    def calculate_preview_totals(item_subtotals, currency="ETB"):
-        # Wrapper that provides formatted strings for the API preview.
-        res = PriceCalculationService.calculate_totals(item_subtotals)
+    def calculate_preview_totals(item_subtotals, currency="ETB", display_currency=None):
         
-        return {
-            "rooms_subtotal": str(res["subtotal"].quantize(Decimal('0.01'))),
-            "platform_fee": str(res["platform_fee"].quantize(Decimal('0.01'))),
-            "grand_total": str(res["grand_total"].quantize(Decimal('0.01'))),
-            "currency": currency
+        base_res = PriceCalculationService.calculate_totals(item_subtotals)
+        
+        response = {
+            "totals": {
+                "rooms_subtotal": str(base_res["subtotal"].quantize(Decimal('0.01'))),
+                "platform_fee": str(base_res["platform_fee"].quantize(Decimal('0.01'))),
+                "grand_total": str(base_res["grand_total"].quantize(Decimal('0.01'))),
+                "currency": currency
+            },
+            "converted_totals": None
         }
+
+        if display_currency and display_currency.upper() != currency.upper():
+            try:
+                conv_subtotal = convert_currency(base_res["subtotal"], currency, display_currency)
+                conv_fee = convert_currency(base_res["platform_fee"], currency, display_currency)
+                conv_grand = convert_currency(base_res["grand_total"], currency, display_currency)
+                
+                response["converted_totals"] = {
+                    "rooms_subtotal": str(conv_subtotal),
+                    "platform_fee": str(conv_fee),
+                    "grand_total": str(conv_grand),
+                    "currency": display_currency.upper()
+                }
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Price preview currency conversion failed: {e}")
+                
+        return response
 
 
 class BookingService:

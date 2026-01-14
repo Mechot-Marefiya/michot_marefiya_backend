@@ -642,6 +642,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         if len(currencies) > 1:
             return Response({"detail": "All selected items must have the same currency."}, status=400)
         currency = list(currencies)[0] if currencies else "ETB"
+        display_currency = get_display_currency(request)
         
         for item in items:
             room = item["room"]
@@ -657,11 +658,9 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
                 "subtotal": str(item_subtotal.quantize(Decimal('0.01')))
             })
             
-        totals = PriceCalculationService.calculate_preview_totals(item_subtotals, currency or "ETB")
-        
         return Response({
             "items": total_items,
-            "totals": totals
+            **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency)
         })
 
 # Car Listing ViewSet
@@ -1215,6 +1214,7 @@ class BookingViewSet(AbstractModelViewSet):
         if len(currencies) > 1:
             return Response({"detail": "All selected items must have the same currency."}, status=400)
         currency = list(currencies)[0] if currencies else "ETB"
+        display_currency = get_display_currency(request)
         
         for item in items:
             room = item["room"]
@@ -1231,11 +1231,9 @@ class BookingViewSet(AbstractModelViewSet):
                 "subtotal": str(item_base_total.quantize(Decimal('0.01')))
             })
             
-        totals = PriceCalculationService.calculate_preview_totals(item_subtotals, currency or "ETB")
-        
         return Response({
             "items": total_items,
-            "totals": totals
+            **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency)
         })
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
@@ -1779,6 +1777,7 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         if len(currencies) > 1:
             return Response({"detail": "All selected items must have the same currency."}, status=400)
         currency = list(currencies)[0] if currencies else "ETB"
+        display_currency = get_display_currency(request)
         
         for item in items:
             space = item["event_space"]
@@ -1794,11 +1793,9 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
                 "subtotal": str(item_base_total.quantize(Decimal('0.01')))
             })
             
-        totals = PriceCalculationService.calculate_preview_totals(item_subtotals, currency or "ETB")
-        
         return Response({
             "items": total_items,
-            "totals": totals
+            **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency)
         })
 
 

@@ -1594,7 +1594,12 @@ class PricePreviewTotalsSerializer(serializers.Serializer):
 
 class PricePreviewResponseSerializer(serializers.Serializer):
     items = PricePreviewItemSerializer(many=True, help_text="Breakdown of individual items in the selection")
-    totals = PricePreviewTotalsSerializer(help_text="Consolidated cost summary")
+    totals = PricePreviewTotalsSerializer(help_text="Consolidated cost summary in the base booking currency")
+    converted_totals = PricePreviewTotalsSerializer(
+        required=False, 
+        allow_null=True, 
+        help_text="Optional: Consolidated cost summary converted to requested display currency"
+    )
 
 
 class BookingPreviewSerializer(serializers.Serializer):
