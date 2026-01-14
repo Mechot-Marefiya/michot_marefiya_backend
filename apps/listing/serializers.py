@@ -1576,3 +1576,71 @@ class EventSpaceBookingSerializer(serializers.ModelSerializer):
         return EventSpaceBookingResponseSerializer(instance, context=self.context).to_representation(
             instance
         )
+
+# --- Price Preview Response Serializers (for API Documentation) ---
+
+class PricePreviewItemSerializer(serializers.Serializer):
+    id = serializers.UUIDField(help_text="ID of the room or event space listing")
+    title = serializers.CharField(help_text="Title of the listing")
+    units = serializers.IntegerField(help_text="Number of units selected")
+    price_per_night = serializers.CharField(required=False, help_text="Base price per night (if applicable)")
+    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Calculated subtotal for this item over the date range")
+
+class PricePreviewTotalsSerializer(serializers.Serializer):
+    rooms_subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Total price of all items excluding fees")
+    platform_fee = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Consolidated platform fee (5%)")
+    grand_total = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Final price including all taxes and fees")
+    currency = serializers.CharField(help_text="ISO currency code (e.g., ETB)")
+
+class PricePreviewResponseSerializer(serializers.Serializer):
+    items = PricePreviewItemSerializer(many=True, help_text="Breakdown of individual items in the selection")
+    totals = PricePreviewTotalsSerializer(help_text="Consolidated cost summary")
+
+
+class BookingPreviewSerializer(serializers.Serializer):
+    check_in_date = serializers.DateField(help_text="First night of stay")
+    check_out_date = serializers.DateField(help_text="Day of departure (non-inclusive for hotel stays)")
+    items = BookingItemSerializer(many=True, help_text="List of rooms and quantities selected")
+
+    def validate(self, data):
+        check_in = data.get("check_in_date")
+        check_out = data.get("check_out_date")
+        if check_in and check_out and check_out <= check_in:
+            raise serializers.ValidationError("Check-out date must be after check-in date.")
+        
+        items = data.get("items", [])
+        if not items:
+            raise serializers.ValidationError("At least one booking item is required.")
+        return data
+
+class GuestHouseBookingPreviewSerializer(serializers.Serializer):
+    start_date = serializers.DateField(help_text="Arrival date")
+    end_date = serializers.DateField(help_text="Departure date")
+    items = GuestHouseBookingItemSerializer(many=True, help_text="List of guesthouse rooms and quantities selected")
+
+    def validate(self, data):
+        start = data.get("start_date")
+        end = data.get("end_date")
+        if start and end and end <= start:
+            raise serializers.ValidationError("End date must be after start date.")
+        
+        items = data.get("items", [])
+        if not items:
+            raise serializers.ValidationError("At least one booking item is required.")
+        return data
+
+class EventSpaceBookingPreviewSerializer(serializers.Serializer):
+    check_in_date = serializers.DateField(help_text="Event start date")
+    check_out_date = serializers.DateField(help_text="Event end date")
+    items = EventSpaceBookingItemSerializer(many=True, help_text="List of spaces and quantities selected")
+
+    def validate(self, data):
+        check_in = data.get("check_in_date")
+        check_out = data.get("check_out_date")
+        if check_in and check_out and check_out <= check_in:
+            raise serializers.ValidationError("Check-out date must be after check-in date.")
+        
+        items = data.get("items", [])
+        if not items:
+            raise serializers.ValidationError("At least one booking item is required.")
+        return data

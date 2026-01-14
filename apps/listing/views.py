@@ -59,14 +59,18 @@ from apps.listing.models import (
 from apps.account.models import(CompanyProfile,IndividualOwnerProfile,HotelProfile)
 from apps.listing.serializers import (
     AmenityResponseSSerializer,
+    BookingPreviewSerializer,
     BookingSerializer,BookingResponseSerializer,
     CarListingResponseSerializer,
     CarListingSerializer,
     BookingRatingSerializer,
     
     CarAvailabilityUpdateSerializer,
+    EventSpaceBookingPreviewSerializer,
+    GuestHouseBookingPreviewSerializer,
     GuestHouseListingResponseSerializer,
     GuestHouseListingSerializer,
+    PricePreviewResponseSerializer,
     PropertyListingResponseSerializer,
     PropertyListingSerializer,
     RoomListingResponseSerializer,
@@ -82,7 +86,11 @@ from apps.listing.serializers import (
     EventSpaceBookingSerializer,
     GuestHouseBookingSerializer
 )
-from apps.listing.services import StayAvailabilityService,BookingService,CarAvailabilityService,PriceService,GuestHouseAvailabilityService,EventSpaceAvailabilityService
+from apps.listing.services import (
+    StayAvailabilityService, BookingService, CarAvailabilityService, 
+    PriceService, GuestHouseAvailabilityService, EventSpaceAvailabilityService,
+    PriceCalculationService
+)
 from rest_framework.exceptions import PermissionDenied
 
 @extend_schema(tags=["Accommodations"])
@@ -595,6 +603,63 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         
         serializer = self.get_serializer(bookings, many=True)
         return Response(serializer.data)
+    
+    @extend_schema(
+        summary="Price Preview for guesthouse selection",
+        description="Get a consolidated price quote for a selection of guesthouses/rooms before booking.",
+        request=GuestHouseBookingPreviewSerializer,
+        responses={200: PricePreviewResponseSerializer}
+    )
+    @action(detail=False, methods=['post'], url_path='price-preview')
+    def price_preview(self, request):
+        serializer = GuestHouseBookingPreviewSerializer(data=request.data, context=self.get_serializer_context())
+        serializer.is_valid(raise_exception=True)
+        
+        data = serializer.validated_data
+        start_date = data['start_date']
+        end_date = data['end_date']
+        items = data['items']
+        
+        # Validate availability (lock=False for previews)
+        room_infos = [
+            {"guesthouse_listing": item["room"], "quantity": item["units_booked"]}
+            for item in items
+        ]
+        try:
+            GuestHouseAvailabilityService.validate_availability(room_infos, start_date, end_date, lock=False)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=400)
+            
+        # Calculate totals
+        nights = (end_date - start_date).days
+        total_items = []
+        item_subtotals = []
+        
+        currencies = {item["room"].currency for item in items}
+        if len(currencies) > 1:
+            return Response({"detail": "All selected items must have the same currency."}, status=400)
+        currency = list(currencies)[0] if currencies else "ETB"
+        
+        for item in items:
+            room = item["room"]
+            units = item["units_booked"]
+            item_subtotal = room.base_price * units * nights
+            item_subtotals.append(item_subtotal)
+            
+            total_items.append({
+                "id": str(room.id),
+                "title": room.title,
+                "units": units,
+                "price_per_night": str(room.base_price),
+                "subtotal": str(item_subtotal.quantize(Decimal('0.01')))
+            })
+            
+        totals = PriceCalculationService.calculate_preview_totals(item_subtotals, currency or "ETB")
+        
+        return Response({
+            "items": total_items,
+            "totals": totals
+        })
 
 # Car Listing ViewSet
 @extend_schema(tags=["Car Rentals"])
@@ -1110,10 +1175,62 @@ class BookingViewSet(AbstractModelViewSet):
                     except HotelProfile.DoesNotExist:
                         pass
         
-        return user_bookings
-
     def perform_create(self, serializer):
         serializer.save(user=self.request.user)
+
+    @extend_schema(
+        summary="Price Preview for room selection",
+        description="Get a consolidated price quote for a selection of hotel rooms before booking.",
+        request=BookingPreviewSerializer,
+        responses={200: PricePreviewResponseSerializer}
+    )
+    @action(detail=False, methods=['post'], url_path='price-preview')
+    def price_preview(self, request):
+        serializer = BookingPreviewSerializer(data=request.data, context=self.get_serializer_context())
+        serializer.is_valid(raise_exception=True)
+        
+        data = serializer.validated_data
+        check_in = data['check_in_date']
+        check_out = data['check_out_date']
+        items = data['items']
+        
+        # Validate availability (lock=False for previews)
+        rooms_info = [{"room": item["room"], "quantity": item["units_booked"]} for item in items]
+        hotel = items[0]["room"].hotel
+        try:
+            StayAvailabilityService.validate_availability(hotel, rooms_info, check_in, check_out, lock=False)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=400)
+            
+        total_items = []
+        item_subtotals = []
+        
+        currencies = {item["room"].currency for item in items}
+        if len(currencies) > 1:
+            return Response({"detail": "All selected items must have the same currency."}, status=400)
+        currency = list(currencies)[0] if currencies else "ETB"
+        
+        for item in items:
+            room = item["room"]
+            units = item["units_booked"]
+            
+            price_details = PriceService.resolve_price_details_batch(room, check_in, check_out)
+            item_base_total = sum(Decimal(str(d['price'])) for d in price_details) * units
+            
+            item_subtotals.append(item_base_total)
+            total_items.append({
+                "id": str(room.id),
+                "title": room.title,
+                "units": units,
+                "subtotal": str(item_base_total.quantize(Decimal('0.01')))
+            })
+            
+        totals = PriceCalculationService.calculate_preview_totals(item_subtotals, currency or "ETB")
+        
+        return Response({
+            "items": total_items,
+            "totals": totals
+        })
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
         """Allows an authenticated user to cancel their booking."""
@@ -1174,6 +1291,7 @@ class BookingViewSet(AbstractModelViewSet):
             BookingRatingSerializer(rating).data,
             status=status.HTTP_201_CREATED
         )
+
 @search_schema
 class StaySearchView(APIView):
     permission_classes = [AllowAny]
@@ -1620,6 +1738,59 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
     def perform_create(self, serializer):
         """Passes the request user to the serializer's create method."""
         serializer.save(user=self.request.user)
+
+    @extend_schema(
+        summary="Price Preview for event space selection",
+        description="Get a consolidated price quote for a selection of event spaces before booking.",
+        request=EventSpaceBookingPreviewSerializer,
+        responses={200: PricePreviewResponseSerializer}
+    )
+    @action(detail=False, methods=['post'], url_path='price-preview')
+    def price_preview(self, request):
+        serializer = EventSpaceBookingPreviewSerializer(data=request.data, context=self.get_serializer_context())
+        serializer.is_valid(raise_exception=True)
+        
+        data = serializer.validated_data
+        check_in = data['check_in_date']
+        check_out = data['check_out_date']
+        items = data['items']
+        
+        # validate availability (lock=False for previews)
+        spaces_info = [{"space_listing": item["event_space"], "quantity": item["units_booked"]} for item in items]
+        try:
+            EventSpaceAvailabilityService.validate_availability(spaces_info, check_in, check_out, lock=False)
+        except Exception as e:
+            return Response({"detail": str(e)}, status=400)
+            
+        nights = (check_out - check_in).days
+        total_items = []
+        item_subtotals = []
+        
+        currencies = {item["event_space"].currency for item in items}
+        if len(currencies) > 1:
+            return Response({"detail": "All selected items must have the same currency."}, status=400)
+        currency = list(currencies)[0] if currencies else "ETB"
+        
+        for item in items:
+            space = item["event_space"]
+            units = item["units_booked"]
+            
+            item_base_total = space.base_price * units * nights
+            item_subtotals.append(item_base_total)
+            
+            total_items.append({
+                "id": str(space.id),
+                "title": space.title,
+                "units": units,
+                "subtotal": str(item_base_total.quantize(Decimal('0.01')))
+            })
+            
+        totals = PriceCalculationService.calculate_preview_totals(item_subtotals, currency or "ETB")
+        
+        return Response({
+            "items": total_items,
+            "totals": totals
+        })
 
 
 @extend_schema(tags=["Terms & Conditions"])

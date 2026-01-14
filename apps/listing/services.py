@@ -335,7 +335,7 @@ class StayAvailabilityService:
         return rooms, qs
 
     @staticmethod
-    def validate_availability(hotel, rooms_info, check_in_date, check_out_date):
+    def validate_availability(hotel, rooms_info, check_in_date, check_out_date, lock=True):
         date_cursor = check_in_date
         room_ids = [room_info["room"].id for room_info in rooms_info]
         dates = []
@@ -343,11 +343,15 @@ class StayAvailabilityService:
             dates.append(date_cursor)
             date_cursor += timedelta(days=1)
         
-        availabilities = StayAvailability.objects.select_for_update().filter(
+        queryset = StayAvailability.objects.filter(
             hotel=hotel,
             room_id__in=room_ids,
             date__in=dates
         )
+        if lock:
+            queryset = queryset.select_for_update()
+            
+        availabilities = queryset
         
         availability_map = {}
         for av in availabilities:
@@ -764,6 +768,37 @@ class PriceService:
         
         return results
 
+class PriceCalculationService:
+    @staticmethod
+    def calculate_totals(item_subtotals):
+        # Base math for calculating totals. Returns raw Decimals.
+        rooms_subtotal = sum(Decimal(str(s)) for s in item_subtotals)
+        
+        fee_rate = getattr(settings, 'PLATFORM_FEE_RATE', Decimal('0.05'))
+        if not isinstance(fee_rate, Decimal):
+            fee_rate = Decimal(str(fee_rate))
+            
+        platform_fee = rooms_subtotal * fee_rate
+        grand_total = rooms_subtotal + platform_fee
+        
+        return {
+            "subtotal": rooms_subtotal,
+            "platform_fee": platform_fee,
+            "grand_total": grand_total
+        }
+
+    @staticmethod
+    def calculate_preview_totals(item_subtotals, currency="ETB"):
+        # Wrapper that provides formatted strings for the API preview.
+        res = PriceCalculationService.calculate_totals(item_subtotals)
+        
+        return {
+            "rooms_subtotal": str(res["subtotal"].quantize(Decimal('0.01'))),
+            "platform_fee": str(res["platform_fee"].quantize(Decimal('0.01'))),
+            "grand_total": str(res["grand_total"].quantize(Decimal('0.01'))),
+            "currency": currency
+        }
+
 
 class BookingService:
     @transaction.atomic()
@@ -1068,28 +1103,19 @@ class BookingService:
     
     @staticmethod
     def get_booking_total(booking):
-        """Return booking total considering seasonal pricing if enabled, plus 5% service fee.
-
-        - When `FEATURE_SEASONAL_PRICING` is enabled, sums `BookingItemPrice` rows (per-night).
-        - Otherwise, multiplies booking item per-night price by nights and units.
-        - Adds 5% service fee to the result.
-        """
         use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
-        base_total = Decimal('0.00')
+        item_subtotals = []
 
         if use_seasonal:
             for pip in BookingItemPrice.objects.filter(booking_item__booking=booking):
-                base_total += (Decimal(pip.price_per_unit) * Decimal(pip.units))
+                item_subtotals.append(Decimal(pip.price_per_unit) * Decimal(pip.units))
         else:
             nights = (booking.check_out_date - booking.check_in_date).days
             for item in booking.items.all():
-                base_total += (Decimal(item.price_per_unit) * Decimal(item.units_booked) * Decimal(nights))
+                item_subtotals.append(Decimal(item.price_per_unit) * Decimal(item.units_booked) * Decimal(nights))
         
-        # Calculate 5% service fee - The Platform Fee
-        # Hotels get base_total, Platform gets service_fee
-        service_fee = base_total * Decimal('0.05')
-        
-        return base_total + service_fee
+        calculation = PriceCalculationService.calculate_totals(item_subtotals)
+        return calculation["grand_total"]
 class EventSpaceBookingService:
     @transaction.atomic()
     @staticmethod
@@ -1301,10 +1327,10 @@ class EventSpaceBookingService:
     
     @staticmethod
     def get_booking_total(booking: EventSpaceBooking):
-        # this calculates total price for the booking including 5% platform fee.
-        base_total = sum(item.subtotal() for item in booking.items.all())
-        platform_fee = base_total * Decimal('0.05')
-        return base_total + platform_fee
+        # this calculates total price for the booking including platform fee from settings.
+        item_subtotals = [item.subtotal() for item in booking.items.all()]
+        calculation = PriceCalculationService.calculate_totals(item_subtotals)
+        return calculation["grand_total"]
 
 class PaymentService:
     """
@@ -1602,7 +1628,7 @@ class EventSpaceAvailabilityService:
         return listings, qs
 
     @staticmethod
-    def validate_availability(space_infos, check_in_date, check_out_date):
+    def validate_availability(space_infos, check_in_date, check_out_date, lock=True):
         """
         Validates if the requested quantity of each space is available on ALL dates.
         `space_infos` is a list of dictionaries: [{"space_listing": listing_obj, "quantity": 1}]
@@ -1614,10 +1640,14 @@ class EventSpaceAvailabilityService:
             date_cursor += timedelta(days=1)
         
         space_listing_ids = [info["space_listing"].id for info in space_infos]
-        availabilities = EventSpaceAvailability.objects.select_for_update().filter(
+        queryset = EventSpaceAvailability.objects.filter(
             space_listing_id__in=space_listing_ids,
             date__in=dates
         )
+        if lock:
+            queryset = queryset.select_for_update()
+            
+        availabilities = queryset
         
         availability_map = {}
         for av in availabilities:
@@ -1830,7 +1860,7 @@ class GuestHouseAvailabilityService:
         return listings, aggregated
 
     @staticmethod
-    def validate_availability(room_infos, check_in_date, check_out_date):
+    def validate_availability(room_infos, check_in_date, check_out_date, lock=True):
         """
         Validate availability for each room in room_infos:
         room_infos = [{"guesthouse_listing": obj, "quantity": 2}, ...]
@@ -1838,10 +1868,14 @@ class GuestHouseAvailabilityService:
         dates = [check_in_date + timedelta(days=i) for i in range((check_out_date - check_in_date).days)]
         listing_ids = [r["guesthouse_listing"].id for r in room_infos]
 
-        availabilities = GuestHouseAvailability.objects.select_for_update().filter(
+        queryset = GuestHouseAvailability.objects.filter(
             guest_house_id__in=listing_ids,
             date__in=dates
         )
+        if lock:
+            queryset = queryset.select_for_update()
+            
+        availabilities = queryset
 
         availability_map = {(av.guest_house_id, av.date): av for av in availabilities}
 
@@ -2067,9 +2101,9 @@ class GuestHouseBookingService:
 
     @staticmethod
     def get_booking_total(booking: "GuestHouseBooking"):
-        base_total = sum(item.subtotal() for item in booking.items.all())
-        platform_fee = base_total * Decimal('0.05')
-        return base_total + platform_fee
+        item_subtotals = [item.subtotal() for item in booking.items.all()]
+        calculation = PriceCalculationService.calculate_totals(item_subtotals)
+        return calculation["grand_total"]
 
 
 class CarRentalService:
@@ -2156,10 +2190,9 @@ class CarRentalService:
 
     @staticmethod
     def get_booking_total(rental: "CarRental"):
-        """Calculates total price including 5% platform fee."""
-        base_total = sum(item.subtotal() for item in rental.rental_items.all())
-        platform_fee = base_total * Decimal('0.05')
-        return base_total + platform_fee
+        item_subtotals = [item.subtotal() for item in rental.rental_items.all()]
+        calculation = PriceCalculationService.calculate_totals(item_subtotals)
+        return calculation["grand_total"]
 
     @staticmethod
     def confirm_booking(rental):
