@@ -75,47 +75,54 @@ class ChapaPaymentService:
 
         # SPLIT PAYMENT LOGIC        
         try:
-            # Helper to find subaccount from booking items
             subaccount_id = None
             if hasattr(booking, 'items') and booking.items.exists():
                 first_item = booking.items.first()
-                # 1. Standard Room Booking (Booking -> BookingItem -> RoomListing)
-                if hasattr(first_item, 'room') and first_item.room:
-                    room = first_item.room
-                    if hasattr(room, 'hotel') and room.hotel and room.hotel.company:
-                        subaccount_id = room.hotel.company.chapa_subaccount_id
-                    elif hasattr(room, 'company') and room.company:
-                        # Handles Guesthouse/Property if they link company directly
-                        subaccount_id = room.company.chapa_subaccount_id
                 
-                # 2. Event Space Booking (EventSpaceBooking -> EventSpaceBookingItem -> EventSpaceListing)
-                elif hasattr(first_item, 'event_space') and first_item.event_space:
-                    space = first_item.event_space
-                    if hasattr(space, 'hotel') and space.hotel and space.hotel.company:
-                        subaccount_id = space.hotel.company.chapa_subaccount_id
+                # 1. Hotel Room / Event Space (via Hotel)
+                if hasattr(first_item, 'room') and first_item.room and hasattr(first_item.room, 'hotel') and first_item.room.hotel:
+                    vendor = first_item.room.hotel.company
+                elif hasattr(first_item, 'event_space') and first_item.event_space and hasattr(first_item.event_space, 'hotel') and first_item.event_space.hotel:
+                    vendor = first_item.event_space.hotel.company
+                
+                # 2. Guest House (direct Company link)
+                elif hasattr(first_item, 'room') and first_item.room and hasattr(first_item.room, 'guest_house') and first_item.room.guest_house:
+                    # Note: GuestHouseListing uses 'room' field name in GuestHouseBookingItem
+                    vendor = first_item.room.guest_house.company
+                
+                # 3. Car Rental
+                elif hasattr(first_item, 'car_listing') and first_item.car_listing:
+                    vendor = first_item.car_listing.company
+                else:
+                    vendor = None
+
+                if vendor and hasattr(vendor, 'chapa_subaccount_id'):
+                    subaccount_id = vendor.chapa_subaccount_id
 
             if subaccount_id:
-                # Calculate split amounts for Chapa subaccounts
-                # Hotel should receive exactly their base price (before 5% platform markup)
-                # Platform keeps the 5% markup we added
-                
                 total_dec = Decimal(str(amount))
-                hotel_share = total_dec / Decimal("1.05")  # Reverse the 5% markup
-                platform_share = total_dec - hotel_share    # Platform's 5% cut
+                
+                # Calculate sharing using centralized rate
+                fee_rate = getattr(settings, 'PLATFORM_FEE_RATE', Decimal('0.05'))
+                if not isinstance(fee_rate, Decimal):
+                    fee_rate = Decimal(str(fee_rate))
+                
+                # total = base * (1 + rate) => base = total / (1 + rate)
+                divisor = Decimal('1') + fee_rate
+                vendor_share = total_dec / divisor
+                platform_share = total_dec - vendor_share
                 
                 # Round to 2 decimal places
-                hotel_share_fixed = hotel_share.quantize(Decimal("0.01"))
+                vendor_share_fixed = vendor_share.quantize(Decimal("0.01"))
                 platform_share_fixed = platform_share.quantize(Decimal("0.01"))
                 
-                # Chapa split payment structure with per-transaction override
-                # Use top-level fields instead of subaccounts array
                 payload["subaccount_id"] = subaccount_id
                 payload["split_type"] = "flat"
-                payload["split_value"] = float(platform_share_fixed)  # Platform keeps markup
+                payload["split_value"] = float(platform_share_fixed)
 
                 logger.info(
-                    f"Split payment configured for {tx_ref}: "
-                    f"Platform keeps {platform_share_fixed}, Hotel receives {hotel_share_fixed} (Subaccount {subaccount_id})"
+                    f"Split configured for {tx_ref}: Platform markup {platform_share_fixed}, "
+                    f"Vendor receives {vendor_share_fixed} (Subaccount {subaccount_id}, Rate {fee_rate})"
                 )
 
                 

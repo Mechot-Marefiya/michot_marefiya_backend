@@ -608,7 +608,10 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         summary="Price Preview for guesthouse selection",
         description="Get a consolidated price quote for a selection of guesthouses/rooms before booking.",
         request=GuestHouseBookingPreviewSerializer,
-        responses={200: PricePreviewResponseSerializer}
+        responses={
+            200: PricePreviewResponseSerializer,
+            400: OpenApiTypes.OBJECT
+        }
     )
     @action(detail=False, methods=['post'], url_path='price-preview')
     def price_preview(self, request):
@@ -1182,7 +1185,10 @@ class BookingViewSet(AbstractModelViewSet):
         summary="Price Preview for room selection",
         description="Get a consolidated price quote for a selection of hotel rooms before booking.",
         request=BookingPreviewSerializer,
-        responses={200: PricePreviewResponseSerializer}
+        responses={
+            200: PricePreviewResponseSerializer,
+            400: OpenApiTypes.OBJECT
+        }
     )
     @action(detail=False, methods=['post'], url_path='price-preview')
     def price_preview(self, request):
@@ -1743,7 +1749,10 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         summary="Price Preview for event space selection",
         description="Get a consolidated price quote for a selection of event spaces before booking.",
         request=EventSpaceBookingPreviewSerializer,
-        responses={200: PricePreviewResponseSerializer}
+        responses={
+            200: PricePreviewResponseSerializer,
+            400: OpenApiTypes.OBJECT
+        }
     )
     @action(detail=False, methods=['post'], url_path='price-preview')
     def price_preview(self, request):
