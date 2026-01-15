@@ -584,7 +584,7 @@ class PriceService:
                 p = Decimal(inv.price).quantize(Decimal('0.01'))
                 base = Decimal(listing.base_price)
                 return {
-                    "price": p,
+                    "price_per_unit": p,
                     "source": "inventory",
                     "rate_id": None,
                     "note": None,
@@ -630,7 +630,7 @@ class PriceService:
                     p = Decimal(chosen.price_override).quantize(Decimal('0.01'))
                     base = Decimal(listing.base_price)
                     return {
-                        "price": p,
+                        "price_per_unit": p,
                         "source": "seasonal",
                         "rate_id": str(chosen.id),
                         "note": None,
@@ -640,7 +640,7 @@ class PriceService:
                     base = Decimal(listing.base_price)
                     p = (base * Decimal(chosen.multiplier)).quantize(Decimal('0.01'))
                     return {
-                        "price": p,
+                        "price_per_unit": p,
                         "source": "seasonal",
                         "rate_id": str(chosen.id),
                         "note": f"multiplier {chosen.multiplier}",
@@ -649,7 +649,7 @@ class PriceService:
 
         base = Decimal(listing.base_price).quantize(Decimal('0.01'))
         return {
-            "price": base,
+            "price_per_unit": base,
             "source": "base",
             "rate_id": None,
             "note": None,
@@ -705,7 +705,7 @@ class PriceService:
                 p = Decimal(inv.price).quantize(Decimal('0.01'))
                 results.append({
                     "date": date_val,
-                    "price": p,
+                    "price_per_unit": p,
                     "source": "inventory",
                     "rate_id": None,
                     "note": None,
@@ -737,7 +737,7 @@ class PriceService:
                     p = Decimal(chosen.price_override).quantize(Decimal('0.01'))
                     results.append({
                         "date": date_val,
-                        "price": p,
+                        "price_per_unit": p,
                         "source": "seasonal",
                         "rate_id": str(chosen.id),
                         "note": None,
@@ -749,7 +749,7 @@ class PriceService:
                     p = (base_price * Decimal(chosen.multiplier)).quantize(Decimal('0.01'))
                     results.append({
                         "date": date_val,
-                        "price": p,
+                        "price_per_unit": p,
                         "source": "seasonal",
                         "rate_id": str(chosen.id),
                         "note": f"multiplier {chosen.multiplier}",
@@ -761,7 +761,7 @@ class PriceService:
             p = base_price.quantize(Decimal('0.01'))
             results.append({
                 "date": date_val,
-                "price": p,
+                "price_per_unit": p,
                 "source": "base",
                 "rate_id": None,
                 "note": None,
@@ -774,17 +774,17 @@ class PriceCalculationService:
     @staticmethod
     def calculate_totals(item_subtotals):
         # Base math for calculating totals. Returns raw Decimals.
-        rooms_subtotal = sum(Decimal(str(s)) for s in item_subtotals)
+        items_subtotal = sum(Decimal(str(s)) for s in item_subtotals)
         
         fee_rate = getattr(settings, 'PLATFORM_FEE_RATE', Decimal('0.05'))
         if not isinstance(fee_rate, Decimal):
             fee_rate = Decimal(str(fee_rate))
             
-        platform_fee = rooms_subtotal * fee_rate
-        grand_total = rooms_subtotal + platform_fee
+        platform_fee = items_subtotal * fee_rate
+        grand_total = items_subtotal + platform_fee
         
         return {
-            "subtotal": rooms_subtotal,
+            "items_subtotal": items_subtotal,
             "platform_fee": platform_fee,
             "grand_total": grand_total
         }
@@ -796,7 +796,7 @@ class PriceCalculationService:
         
         response = {
             "totals": {
-                "rooms_subtotal": str(base_res["subtotal"].quantize(Decimal('0.01'))),
+                "items_subtotal": str(base_res["items_subtotal"].quantize(Decimal('0.01'))),
                 "platform_fee": str(base_res["platform_fee"].quantize(Decimal('0.01'))),
                 "grand_total": str(base_res["grand_total"].quantize(Decimal('0.01'))),
                 "currency": currency
@@ -806,14 +806,14 @@ class PriceCalculationService:
 
         if display_currency and display_currency.upper() != currency.upper():
             try:
-                conv_subtotal = convert_currency(base_res["subtotal"], currency, display_currency)
+                conv_subtotal = convert_currency(base_res["items_subtotal"], currency, display_currency)
                 conv_fee = convert_currency(base_res["platform_fee"], currency, display_currency)
                 conv_grand = convert_currency(base_res["grand_total"], currency, display_currency)
                 
                 response["converted_totals"] = {
-                    "rooms_subtotal": str(conv_subtotal),
-                    "platform_fee": str(conv_fee),
-                    "grand_total": str(conv_grand),
+                    "items_subtotal": str(conv_subtotal.quantize(Decimal('0.01'))),
+                    "platform_fee": str(conv_fee.quantize(Decimal('0.01'))),
+                    "grand_total": str(conv_grand.quantize(Decimal('0.01'))),
                     "currency": display_currency.upper()
                 }
             except Exception as e:

@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.utils.dateparse import parse_date
 from django.db import transaction
 from rest_framework import serializers
@@ -126,11 +127,11 @@ class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
         except Exception:
             return None
         
-        daily_breakdown = []
+        breakdown = []
         subtotal = Decimal('0.00')
         
         for detail in price_details_list:
-            price_in_source = detail['price']
+            price_in_source = detail['price_per_unit']
             
             if display_currency and display_currency != source_currency:
                 try:
@@ -148,7 +149,7 @@ class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
             daily_total = price_converted * units_int
             subtotal += daily_total
             
-            daily_breakdown.append({
+            breakdown.append({
                 'date': detail['date'].isoformat(),
                 'price_per_unit': str(price_converted.quantize(Decimal('0.01'))),
                 'units': units_int,
@@ -157,27 +158,30 @@ class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
                 'is_discounted': detail.get('is_discounted', False)
             })
         
-        # 5% platform fee
-        platform_fee = subtotal * Decimal('0.05')
+        # Centralized platform fee from settings
+        fee_rate = Decimal(str(getattr(settings, 'PLATFORM_FEE_RATE', '0.05')))
+        platform_fee = subtotal * fee_rate
         total = subtotal + platform_fee
         
-        has_discount = any(item['is_discounted'] for item in daily_breakdown)
+        has_discount = any(item['is_discounted'] for item in breakdown)
         
         min_nightly_price = Decimal('0.00')
-        if daily_breakdown:
-            min_nightly_price = min(Decimal(item['price_per_unit']) for item in daily_breakdown)
+        if breakdown:
+            min_nightly_price = min(Decimal(item['price_per_unit']) for item in breakdown)
 
         return {
-            'daily_breakdown': daily_breakdown,
-            'subtotal': str(subtotal.quantize(Decimal('0.01'))),
+            'breakdown': breakdown,
+            'items_subtotal': str(subtotal.quantize(Decimal('0.01'))),
+            'subtotal': str(subtotal.quantize(Decimal('0.01'))),       # legacy
             'base_total': str(subtotal.quantize(Decimal('0.01'))),
             'platform_fee': str(platform_fee.quantize(Decimal('0.01'))),
-            'platform_fee_percentage': '5.0',
+            'platform_fee_percentage': str(fee_rate * 100),
             'total': str(total.quantize(Decimal('0.01'))),
             'currency': display_currency or source_currency,
             'has_discount': has_discount,
-            'min_nightly_price': str(min_nightly_price.quantize(Decimal('0.01'))),
-            'nights': len(daily_breakdown)
+            'min_price_per_unit': str(min_nightly_price.quantize(Decimal('0.01'))),
+            'min_nightly_price': str(min_nightly_price.quantize(Decimal('0.01'))), # legacy
+            'units_count': len(breakdown)
         }
 
 
@@ -1577,17 +1581,23 @@ class EventSpaceBookingSerializer(serializers.ModelSerializer):
             instance
         )
 
-# --- Price Preview Response Serializers (for API Documentation) ---
+
+class PriceBreakdownItemSerializer(serializers.Serializer):
+    date = serializers.DateField()
+    price_per_unit = serializers.DecimalField(max_digits=10, decimal_places=2)
+    source = serializers.CharField()
+    note = serializers.CharField(required=False, allow_null=True)
 
 class PricePreviewItemSerializer(serializers.Serializer):
     id = serializers.UUIDField(help_text="ID of the room or event space listing")
     title = serializers.CharField(help_text="Title of the listing")
     units = serializers.IntegerField(help_text="Number of units selected")
-    price_per_night = serializers.CharField(required=False, help_text="Base price per night (if applicable)")
+    price_per_unit = serializers.CharField(required=False, help_text="Base price per unit (if applicable)")
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Calculated subtotal for this item over the date range")
+    breakdown = PriceBreakdownItemSerializer(many=True, help_text="Detailed price breakdown for this item")
 
 class PricePreviewTotalsSerializer(serializers.Serializer):
-    rooms_subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Total price of all items excluding fees")
+    items_subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Total price of all items excluding fees")
     platform_fee = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Consolidated platform fee (5%)")
     grand_total = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Final price including all taxes and fees")
     currency = serializers.CharField(help_text="ISO currency code (e.g., ETB)")

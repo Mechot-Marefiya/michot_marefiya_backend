@@ -98,11 +98,13 @@ class PricePreviewAPITests(APITestCase):
         # 2 nights * 2 units * 1000 = 4000
         # 4000 * 0.05 = 200
         # Total = 4200
-        self.assertEqual(response.data['totals']['rooms_subtotal'], '4000.00')
+        self.assertEqual(response.data['totals']['items_subtotal'], '4000.00')
         self.assertEqual(response.data['totals']['platform_fee'], '200.00')
         self.assertEqual(response.data['totals']['grand_total'], '4200.00')
         self.assertEqual(len(response.data['items']), 1)
         self.assertEqual(response.data['items'][0]['units'], 2)
+        self.assertEqual(len(response.data['items'][0]['breakdown']), 2) # 2 nights
+        self.assertEqual(response.data['items'][0]['breakdown'][0]['source'], 'base')
 
     def test_guesthouse_price_preview(self):
         self.client.force_authenticate(user=self.user)
@@ -123,9 +125,10 @@ class PricePreviewAPITests(APITestCase):
         # 1 night * 1 unit * 500 = 500
         # 500 * 0.05 = 25
         # Total = 525
-        self.assertEqual(response.data['totals']['rooms_subtotal'], '500.00')
+        self.assertEqual(response.data['totals']['items_subtotal'], '500.00')
         self.assertEqual(response.data['totals']['platform_fee'], '25.00')
         self.assertEqual(response.data['totals']['grand_total'], '525.00')
+        self.assertEqual(len(response.data['items'][0]['breakdown']), 1)
 
     def test_eventspace_price_preview(self):
         self.client.force_authenticate(user=self.user)
@@ -146,9 +149,10 @@ class PricePreviewAPITests(APITestCase):
         # 1 night * 1 unit * 5000 = 5000
         # 5000 * 0.05 = 250
         # Total = 5250
-        self.assertEqual(response.data['totals']['rooms_subtotal'], '5000.00')
+        self.assertEqual(response.data['totals']['items_subtotal'], '5000.00')
         self.assertEqual(response.data['totals']['platform_fee'], '250.00')
         self.assertEqual(response.data['totals']['grand_total'], '5250.00')
+        self.assertEqual(len(response.data['items'][0]['breakdown']), 1)
 
     def test_currency_conversion_in_preview(self):
         """
@@ -178,7 +182,7 @@ class PricePreviewAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         
         # Verify Base Totals (ETB)
-        self.assertEqual(response.data['totals']['rooms_subtotal'], '1000.00')
+        self.assertEqual(response.data['totals']['items_subtotal'], '1000.00')
         self.assertEqual(response.data['totals']['currency'], 'ETB')
         
         # Verify Converted Totals (USD)
@@ -186,7 +190,7 @@ class PricePreviewAPITests(APITestCase):
         # 50 ETB / 100 = 0.50 USD
         # 1050 ETB / 100 = 10.50 USD
         self.assertIsNotNone(response.data['converted_totals'])
-        self.assertEqual(response.data['converted_totals']['rooms_subtotal'], '10.00')
+        self.assertEqual(response.data['converted_totals']['items_subtotal'], '10.00')
         self.assertEqual(response.data['converted_totals']['platform_fee'], '0.50')
         self.assertEqual(response.data['converted_totals']['grand_total'], '10.50')
         self.assertEqual(response.data['converted_totals']['currency'], 'USD')

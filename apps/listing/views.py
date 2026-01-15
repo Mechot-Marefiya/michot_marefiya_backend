@@ -257,11 +257,11 @@ class RoomListingViewSet(AbstractModelViewSet):
         if quote:
             # price_quote already uses optimized resolve_price_details_batch internally
             # so we map its components back to legacy fields for backward compatibility
-            prices = [Decimal(line['price_per_unit']) for line in quote['daily_breakdown']]
+            prices = [Decimal(line['price_per_unit']) for line in quote['breakdown']]
             if prices:
                 preview_min = min(prices)
                 data['preview_min_price'] = str(preview_min)
-                data['preview_total'] = quote['subtotal']
+                data['preview_total'] = quote['items_subtotal']
                 data['preview_has_discount'] = quote['has_discount']
                 data['display_price'] = str(preview_min) if quote['has_discount'] else data.get('base_price')
         else:
@@ -293,11 +293,11 @@ class RoomListingViewSet(AbstractModelViewSet):
             
             quote = data.get('price_quote')
             if quote:
-                prices = [Decimal(line['price_per_unit']) for line in quote['daily_breakdown']]
+                prices = [Decimal(line['price_per_unit']) for line in quote['breakdown']]
                 if prices:
                     preview_min = min(prices)
                     data['preview_min_price'] = str(preview_min)
-                    data['preview_total'] = quote['subtotal']
+                    data['preview_total'] = quote['items_subtotal']
                     data['preview_has_discount'] = quote['has_discount']
                     data['display_price'] = str(preview_min) if quote['has_discount'] else data.get('base_price')
             else:
@@ -608,6 +608,14 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         summary="Price Preview for guesthouse selection",
         description="Get a consolidated price quote for a selection of guesthouses/rooms before booking.",
         request=GuestHouseBookingPreviewSerializer,
+        parameters=[
+            OpenApiParameter(
+                name="display_currency",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Optional: Request price preview in a specific currency (e.g., USD) using triangulation."
+            )
+        ],
         responses={
             200: PricePreviewResponseSerializer,
             400: OpenApiTypes.OBJECT
@@ -647,15 +655,19 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         for item in items:
             room = item["room"]
             units = item["units_booked"]
-            item_subtotal = room.base_price * units * nights
-            item_subtotals.append(item_subtotal)
+            
+            price_details = PriceService.resolve_price_details_batch(room, start_date, end_date)
+            item_base_total = sum(Decimal(str(d['price_per_unit'])) for d in price_details) * units
+            
+            item_subtotals.append(item_base_total)
             
             total_items.append({
                 "id": str(room.id),
                 "title": room.title,
                 "units": units,
-                "price_per_night": str(room.base_price),
-                "subtotal": str(item_subtotal.quantize(Decimal('0.01')))
+                "price_per_unit": str(room.base_price),
+                "subtotal": str(item_base_total.quantize(Decimal('0.01'))),
+                "breakdown": price_details
             })
             
         return Response({
@@ -1184,6 +1196,14 @@ class BookingViewSet(AbstractModelViewSet):
         summary="Price Preview for room selection",
         description="Get a consolidated price quote for a selection of hotel rooms before booking.",
         request=BookingPreviewSerializer,
+        parameters=[
+            OpenApiParameter(
+                name="display_currency",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Optional: Request price preview in a specific currency (e.g., USD) using triangulation."
+            )
+        ],
         responses={
             200: PricePreviewResponseSerializer,
             400: OpenApiTypes.OBJECT
@@ -1221,14 +1241,16 @@ class BookingViewSet(AbstractModelViewSet):
             units = item["units_booked"]
             
             price_details = PriceService.resolve_price_details_batch(room, check_in, check_out)
-            item_base_total = sum(Decimal(str(d['price'])) for d in price_details) * units
+            item_base_total = sum(Decimal(str(d['price_per_unit'])) for d in price_details) * units
             
             item_subtotals.append(item_base_total)
             total_items.append({
                 "id": str(room.id),
                 "title": room.title,
                 "units": units,
-                "subtotal": str(item_base_total.quantize(Decimal('0.01')))
+                "price_per_unit": str(price_details[0]['price_per_unit']) if price_details else str(room.base_price),
+                "subtotal": str(item_base_total.quantize(Decimal('0.01'))),
+                "breakdown": price_details
             })
             
         return Response({
@@ -1747,6 +1769,14 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         summary="Price Preview for event space selection",
         description="Get a consolidated price quote for a selection of event spaces before booking.",
         request=EventSpaceBookingPreviewSerializer,
+        parameters=[
+            OpenApiParameter(
+                name="display_currency",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Optional: Request price preview in a specific currency (e.g., USD) using triangulation."
+            )
+        ],
         responses={
             200: PricePreviewResponseSerializer,
             400: OpenApiTypes.OBJECT
@@ -1783,14 +1813,18 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
             space = item["event_space"]
             units = item["units_booked"]
             
-            item_base_total = space.base_price * units * nights
+            price_details = PriceService.resolve_price_details_batch(space, check_in, check_out)
+            item_base_total = sum(Decimal(str(d['price_per_unit'])) for d in price_details) * units
+            
             item_subtotals.append(item_base_total)
             
             total_items.append({
                 "id": str(space.id),
                 "title": space.title,
                 "units": units,
-                "subtotal": str(item_base_total.quantize(Decimal('0.01')))
+                "price_per_unit": str(price_details[0]['price_per_unit']) if price_details else str(space.base_price),
+                "subtotal": str(item_base_total.quantize(Decimal('0.01'))),
+                "breakdown": price_details
             })
             
         return Response({
