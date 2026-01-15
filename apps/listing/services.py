@@ -786,6 +786,7 @@ class PriceCalculationService:
         return {
             "items_subtotal": items_subtotal,
             "platform_fee": platform_fee,
+            "platform_fee_percentage": fee_rate * 100,
             "grand_total": grand_total
         }
 
@@ -798,6 +799,7 @@ class PriceCalculationService:
             "totals": {
                 "items_subtotal": str(base_res["items_subtotal"].quantize(Decimal('0.01'))),
                 "platform_fee": str(base_res["platform_fee"].quantize(Decimal('0.01'))),
+                "platform_fee_percentage": str(base_res["platform_fee_percentage"].quantize(Decimal('0.01'))),
                 "grand_total": str(base_res["grand_total"].quantize(Decimal('0.01'))),
                 "currency": currency
             },
@@ -813,6 +815,7 @@ class PriceCalculationService:
                 response["converted_totals"] = {
                     "items_subtotal": str(conv_subtotal.quantize(Decimal('0.01'))),
                     "platform_fee": str(conv_fee.quantize(Decimal('0.01'))),
+                    "platform_fee_percentage": str(base_res["platform_fee_percentage"].quantize(Decimal('0.01'))),
                     "grand_total": str(conv_grand.quantize(Decimal('0.01'))),
                     "currency": display_currency.upper()
                 }

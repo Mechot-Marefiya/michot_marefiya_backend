@@ -1598,7 +1598,8 @@ class PricePreviewItemSerializer(serializers.Serializer):
 
 class PricePreviewTotalsSerializer(serializers.Serializer):
     items_subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Total price of all items excluding fees")
-    platform_fee = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Consolidated platform fee (5%)")
+    platform_fee = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Consolidated platform fee")
+    platform_fee_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, help_text="Platform fee percentage rate (e.g., 5.00)")
     grand_total = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Final price including all taxes and fees")
     currency = serializers.CharField(help_text="ISO currency code (e.g., ETB)")
 
