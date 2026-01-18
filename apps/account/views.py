@@ -368,7 +368,21 @@ class HotelProfileViewSet(AbstractModelViewSet):
             return [IsCompanyOwner()]
 
     def get_queryset(self):
-        return super().get_queryset()
+        queryset = super().get_queryset()
+        
+        if self.action in ['list', 'retrieve', 'get_featured_hotels']:
+            queryset = queryset.select_related(
+                "company",
+                "company__user",
+                "company__user__role",
+                "company__address",
+                "company__approved_by",
+            ).prefetch_related(
+                "facilities",
+                "images"
+            )
+            
+        return queryset
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

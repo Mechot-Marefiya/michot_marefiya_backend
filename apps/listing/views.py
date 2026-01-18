@@ -122,7 +122,13 @@ class RoomListingViewSet(AbstractModelViewSet):
         - Company users: See all rooms (for their own, can modify)
         - Admin: See all rooms
         """
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().select_related(
+            'hotel', 
+            'address'
+        ).prefetch_related(
+            'images', 
+            'amenities'
+        )
         
         # If user is not authenticated, show only active listings
         if not self.request.user or not self.request.user.is_authenticated:
@@ -336,7 +342,15 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
 
     def get_queryset(self):
         """Filter queryset - show all active to public, all to companies/admin."""
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().select_related(
+            'address',
+            'company',
+            'individual_owner'
+        ).prefetch_related(
+            'images',
+            'amenities',
+            'facility'
+        )
         
         if not self.request.user or not self.request.user.is_authenticated:
             return queryset.filter(is_active=True)
@@ -709,7 +723,13 @@ class CarListingViewSet(AbstractModelViewSet):
         return CarListingResponseSerializer
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().select_related(
+            'company',
+            'individual_owner'
+        ).prefetch_related(
+            'images',
+            'daily_availabilities'
+        )
         user = self.request.user
 
         # Admin sees all
