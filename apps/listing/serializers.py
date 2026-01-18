@@ -444,6 +444,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
         ).to_representation(instance)
 class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
     price_per_unit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    units_booked = serializers.IntegerField(min_value=1)
     
     class Meta:
         model = GuestHouseBookingItem
@@ -1212,6 +1213,8 @@ class BookingRatingSerializer(serializers.ModelSerializer):
 
 class BookingItemSerializer(serializers.ModelSerializer):
     price_per_unit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    units_booked = serializers.IntegerField(min_value=1)
+
     class Meta:
         model = BookingItem
         fields = ["room", "units_booked", "price_per_unit"]
@@ -1492,6 +1495,7 @@ class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.M
 class EventSpaceBookingItemSerializer(serializers.ModelSerializer):
     """Serializer for taking input on booking items."""
     price_per_unit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    units_booked = serializers.IntegerField(min_value=1)
     
     class Meta:
         model = EventSpaceBookingItem

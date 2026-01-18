@@ -194,3 +194,26 @@ class PricePreviewAPITests(APITestCase):
         self.assertEqual(response.data['converted_totals']['platform_fee'], '0.50')
         self.assertEqual(response.data['converted_totals']['grand_total'], '10.50')
         self.assertEqual(response.data['converted_totals']['currency'], 'USD')
+
+    def test_display_price_currency_accuracy(self):
+        """
+        Verify display_price respects display_currency parameter in various scenarios.
+        """
+        CurrencyRate.objects.create(base="USD", target="ETB", rate=Decimal("100.00"), date=date.today())
+        
+        self.client.force_authenticate(user=self.user)
+        base_url = reverse('rooms-list')
+        
+        # Case 1: No dates, USD requested
+        # Room base_price=1000 ETB. Rate: 1 USD = 100 ETB. So 1000 ETB = 10 USD.
+        response = self.client.get(f"{base_url}?hotel={self.hotel.id}&display_currency=USD")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        room_data = response.data[0]
+        
+        # This checks the BUG: Currently it returns 1000.00 (ETB) even if USD requested
+        # We expect it to be 10.00 if generating correctly
+        # For now, we assert what we WANT (10.00). If it fails, we confirmed the bug.
+        self.assertEqual(room_data['currency'], 'ETB') # Source currency stays same
+        self.assertEqual(room_data['converted_price'], 10.0) # Should exist
+        self.assertEqual(room_data['display_price'], '10.00')
+

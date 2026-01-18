@@ -368,8 +368,9 @@ class StayAvailabilityService:
                 availability = availability_map.get(key)
                 
                 if not availability:
-                    raise BookingConflict(
-                        f"No availability data for room {room.title} on {date_cursor}"
+                    raise ValidationError(
+                        f"Availability has not been released for {room.title} on {date_cursor}. "
+                        "Please choose closer dates."
                     )
                 
                 if availability.available_rooms < quantity:

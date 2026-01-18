@@ -1332,6 +1332,18 @@ class StaySearchView(APIView):
             return Response({"detail": "Missing required parameters."},
                             status=status.HTTP_400_BAD_REQUEST)
 
+        try:
+            guests_int = int(guests)
+            if guests_int < 1:
+                return Response({"detail": "Guest count must be at least 1."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if guests_int > 50:
+                return Response({"detail": "Guest count cannot exceed 50."},
+                                status=status.HTTP_400_BAD_REQUEST)
+        except ValueError:
+            return Response({"detail": "Guest count must be a valid integer."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
         check_in_date = parse_date(check_in_date)
         check_out_date = parse_date(check_out_date)
 
