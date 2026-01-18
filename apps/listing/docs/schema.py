@@ -1,4 +1,6 @@
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer
+from rest_framework import serializers
+from apps.listing.serializers import SearchResultSerializer
 
 
 search_schema = extend_schema(
@@ -35,7 +37,15 @@ search_schema = extend_schema(
         ),
     ],
     responses={
-        200: OpenApiTypes.OBJECT,
+        200: inline_serializer(
+            name='PaginatedStaySearchResponse',
+            fields={
+                'count': serializers.IntegerField(),
+                'next': serializers.URLField(allow_null=True),
+                'previous': serializers.URLField(allow_null=True),
+                'results': SearchResultSerializer(many=True)
+            }
+        ),
         400: OpenApiTypes.OBJECT,
     }
 )
