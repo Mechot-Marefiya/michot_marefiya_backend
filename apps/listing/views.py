@@ -27,6 +27,7 @@ from apps.core.utils import get_display_currency
 from rest_framework import viewsets
 from apps.listing.utils import ParseDatesAndQuantity
 from apps.listing.filters import PropertyFilter, RoomFilter, BookingFilter,EventSpaceFilter,EventSpaceBookingFilter
+from apps.core.pagination import StandardResultsSetPagination
 from apps.account.permissions import (
     IsAuthenticatedOrReadOnly,
     IsPublicReadOnly,
@@ -1424,6 +1425,9 @@ class StaySearchView(APIView):
             
             results.append(hotel_result)
 
+        paginator = StandardResultsSetPagination()
+        paginated_results = paginator.paginate_queryset(results, request)
+        
         # Resolve favorites once per request for hotel search results
         try:
             ct = ContentType.objects.get(app_label="account", model="hotelprofile")
@@ -1434,7 +1438,7 @@ class StaySearchView(APIView):
 
         display_currency = get_display_currency(request)
         serializer = SearchResultSerializer(
-            results, 
+            paginated_results, 
             many=True, 
             context={
                 "request": request, 
@@ -1442,7 +1446,7 @@ class StaySearchView(APIView):
                 "display_currency": display_currency
             }
         )
-        return Response(serializer.data)
+        return paginator.get_paginated_response(serializer.data)
 class StayAvailabilityUpdateView(APIView):
     def get_permissions(self):
         """

@@ -28,6 +28,7 @@ class FacilityViewSet(AbstractModelViewSet):
 @extend_schema(tags=["Debug & Utils"])
 class CurrencyViewSet(ViewSet):
     permission_classes = [AllowAny]
+    pagination_class = None
 
     def list(self, request):
         res = [{"code": c.name, "name": c.value} for c in CurrencyEnum]
