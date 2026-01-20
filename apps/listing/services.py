@@ -665,7 +665,7 @@ class PriceService:
     def resolve_price_details_batch(listing: any, start_date: date, end_date: date) -> list:
         
         if isinstance(listing, GuestHouseRoom):
-             return PriceService._resolve_guesthouse_price_batch(listing, start_date, end_date)
+            return PriceService._resolve_guesthouse_price_batch(listing, start_date, end_date)
 
         if not isinstance(listing, RoomListing):
             results = []
@@ -775,8 +775,49 @@ class PriceService:
                 "note": None,
                 "is_discounted": False,
             })
-        
         return results
+
+    @staticmethod
+    def _resolve_guesthouse_price_batch(room: GuestHouseRoom, start_date: date, end_date: date) -> list:
+        dates = []
+        cursor = start_date
+        while cursor < end_date:
+            dates.append(cursor)
+            cursor += timedelta(days=1)
+        
+        inv_qs = GuestHouseInventory.objects.filter(
+            guest_house_room=room,
+            date__in=dates
+        )
+        inventories = {inv.date: inv for inv in inv_qs}
+        
+        results = []
+        base_price = Decimal(room.base_price)
+        
+        for date_val in dates:
+            inv = inventories.get(date_val)
+            if inv and inv.price is not None:
+                p = Decimal(inv.price).quantize(Decimal('0.01'))
+                results.append({
+                    "date": date_val,
+                    "price_per_unit": p,
+                    "source": "inventory",
+                    "rate_id": None,
+                    "note": None,
+                    "is_discounted": p < base_price,
+                })
+            else:
+                p = base_price.quantize(Decimal('0.01'))
+                results.append({
+                    "date": date_val,
+                    "price_per_unit": p,
+                    "source": "base",
+                    "rate_id": None,
+                    "note": None,
+                    "is_discounted": False,
+                })
+        return results
+
 
 class PriceCalculationService:
     @staticmethod
@@ -2060,13 +2101,14 @@ class GuestHouseBookingService:
             room = item["room"]
             units = item["units_booked"]
             
-            price_per_unit_total = room.base_price * duration
+            price_details = PriceService.resolve_price_details_batch(room, booking.start_date, booking.end_date)
+            total_price_for_one_unit = sum(d["price_per_unit"] for d in price_details)
 
             obj = GuestHouseBookingItem.objects.create(
                 booking=booking, 
                 room=room,
                 units_booked=units,
-                price_per_unit=price_per_unit_total
+                price_per_unit=total_price_for_one_unit
             )
             room_infos.append({
                 "guesthouse_room": obj.room,

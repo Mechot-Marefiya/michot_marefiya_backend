@@ -32,6 +32,11 @@ class ListingImageInline(GenericTabularInline):
     extra = 1  # how many empty slots to show
     fields = ("image", "alt_text", "is_primary")
 
+class GuestHouseRoomInline(admin.StackedInline):
+    model = GuestHouseRoom
+    extra = 1
+    show_change_link = True
+
 admin.site.register(CarAvailability)
 admin.site.register(EventSpaceAvailability)
 @admin.register(CarRental)
@@ -100,8 +105,25 @@ class CarListingModelAdmin(admin.ModelAdmin):
 # admin.site.register(PropertyListing)
 @admin.register(GuestHouseProfile)
 class GuestHouseProfileModelAdmin(admin.ModelAdmin):
-    list_display=["company","title"]
-    inlines=[ListingImageInline]
+    list_display = ["title", "company", "individual_owner", "is_active"]
+    list_filter = ["is_active", "company", "individual_owner"]
+    search_fields = ["title", "description", "address__city"]
+    
+    fieldsets = (
+        ("General Information", {
+            "fields": ("title", "description", ("base_price", "currency"), "is_active", "rating"),
+            "description": "The price here is used for display in search results (Marketing Price)."
+        }),
+        ("Identity & Ownership", {
+            "description": "Choose either a Company profile or an Individual owner.",
+            "fields": ("company", "individual_owner")
+        }),
+        ("Location & Amenities", {
+            "fields": ("address", "amenities", "facility")
+        }),
+    )
+    
+    inlines = [GuestHouseRoomInline, ListingImageInline]
 
 @admin.register(GuestHouseRoom)
 class GuestHouseRoomModelAdmin(admin.ModelAdmin):

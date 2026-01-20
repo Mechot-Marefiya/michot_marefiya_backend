@@ -1,6 +1,6 @@
 from datetime import datetime
 from django.core.management.base import BaseCommand
-from apps.listing.services import StayAvailabilityService
+from apps.listing.services import StayAvailabilityService, GuestHouseAvailabilityService
 
 
 class Command(BaseCommand):
@@ -24,11 +24,15 @@ class Command(BaseCommand):
         start_date = options["start_date"]
         if start_date:
             start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
-        created = StayAvailabilityService.ensure_future_availability(
+        created_hotel = StayAvailabilityService.ensure_future_availability(
+            days_ahead=options["days"],
+            start_date=start_date
+        )
+        created_gh = GuestHouseAvailabilityService.ensure_future_availability(
             days_ahead=options["days"],
             start_date=start_date
         )
         self.stdout.write(
-            self.style.SUCCESS(f"Created {created} availability rows.")
+            self.style.SUCCESS(f"Created {created_hotel} hotel and {created_gh} guesthouse availability rows.")
         )
 

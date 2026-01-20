@@ -4,8 +4,8 @@ from rest_framework.test import APITestCase
 from decimal import Decimal
 from datetime import date, timedelta
 from apps.listing.models import (
-    RoomListing, StayAvailability, GuestHouseListing, EventSpaceListing,
-    EventSpaceAvailability, GuestHouseAvailability
+    RoomListing, StayAvailability, GuestHouseProfile, GuestHouseRoom, EventSpaceListing,
+    EventSpaceAvailability, GuestHouseInventory
 )
 from apps.account.models import User, HotelProfile, CompanyProfile
 from apps.core.models import Address, CurrencyRate
@@ -44,21 +44,28 @@ class PricePreviewAPITests(APITestCase):
                 available_rooms=5
             )
 
-        # GuestHouse Room
-        self.guesthouse = GuestHouseListing.objects.create(
+        # GuestHouse Setup
+        self.guesthouse = GuestHouseProfile.objects.create(
             company=self.company, 
             address=self.address,
-            title="GH Room", 
+            title="GH Property", 
             base_price=Decimal("500.00"),
             currency="ETB", 
-            total_rooms=2, 
+            is_active=True
+        )
+        self.gh_room = GuestHouseRoom.objects.create(
+            guest_house=self.guesthouse,
+            title="Standard Room",
+            base_price=Decimal("500.00"),
+            total_units=2,
+            number_of_guests=2,
             is_active=True
         )
         for i in range(10):
-            GuestHouseAvailability.objects.create(
-                guest_house=self.guesthouse,
+            GuestHouseInventory.objects.create(
+                guest_house_room=self.gh_room,
                 date=date.today() + timedelta(days=i+1),
-                available_rooms=2
+                available_units=2
             )
 
         # Event Space
@@ -116,7 +123,7 @@ class PricePreviewAPITests(APITestCase):
         data = {
             "start_date": start.isoformat(),
             "end_date": end.isoformat(),
-            "items": [{"room": str(self.guesthouse.id), "units_booked": 1}]
+            "items": [{"room": str(self.gh_room.id), "units_booked": 1}]
         }
         
         response = self.client.post(url, data, format='json')

@@ -6,7 +6,8 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework import status
 from apps.listing.models import (
     CarListing,
-    GuestHouseListing,
+    GuestHouseProfile,
+    GuestHouseRoom,
     PropertyListing,
     RoomListing,
 )
@@ -146,8 +147,6 @@ class TestGuestHouseListingAPI:
         payload = {
             "title": "ABCD",
             "base_price": 12500.00,
-            "total_rooms": 4,
-            "rating": 4,
             "amenities": amenities,
             "address": address_payload,
             "individual_owner": individual_owner_profile.id,
@@ -161,9 +160,9 @@ class TestGuestHouseListingAPI:
         print("RES", res.data)
 
         assert res.status_code == status.HTTP_201_CREATED
-        assert res.data["total_rooms"] == 4
+        # Note: Profile creation no longer returns total_rooms as it is room-level
         assert res.data["title"] == "ABCD"
-        gh = GuestHouseListing.objects.get(id=res.data["id"])
+        gh = GuestHouseProfile.objects.get(id=res.data["id"])
         assert gh.company is None
         assert gh.individual_owner == individual_owner_profile
 
@@ -177,8 +176,6 @@ class TestGuestHouseListingAPI:
         payload = {
             "title": "ABCD",
             "base_price": 12500.00,
-            "total_rooms": 4,
-            "rating": 4,
             "amenities": amenities,
             "address": address_payload,
             "images": images_list,
@@ -190,9 +187,8 @@ class TestGuestHouseListingAPI:
         print("RES", res.data)
 
         assert res.status_code == status.HTTP_201_CREATED
-        assert res.data["total_rooms"] == 4
         assert res.data["title"] == "ABCD"
-        gh = GuestHouseListing.objects.get(id=res.data["id"])
+        gh = GuestHouseProfile.objects.get(id=res.data["id"])
         assert gh.individual_owner is None
 
     def test_create_guest_house_without_owner_should_fail(
@@ -205,8 +201,6 @@ class TestGuestHouseListingAPI:
         payload = {
             "title": "ABCD",
             "base_price": 12500.00,
-            "total_rooms": 4,
-            "rating": 4,
             "amenities": amenities,
             "address": address_payload,
             "images": images_list,

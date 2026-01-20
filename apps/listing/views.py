@@ -402,7 +402,6 @@ class GuestHouseProfileViewSet(AbstractModelViewSet):
     def get_queryset(self):
         """Filter queryset - show all active to public, all to companies/admin."""
         queryset = super().get_queryset().select_related(
-            'address',
             'company',
             'individual_owner'
         ).prefetch_related(
@@ -434,7 +433,7 @@ class GuestHouseProfileViewSet(AbstractModelViewSet):
         
         # resolve favorites
         try:
-            ct = ContentType.objects.get(app_label="listing", model="guesthouselisting")
+            ct = ContentType.objects.get(app_label="listing", model="guesthouseprofile")
         except Exception:
             ct = None
 
@@ -516,7 +515,10 @@ class GuestHouseProfileViewSet(AbstractModelViewSet):
                     check_in, check_out, units, address_filters
                 )
             
-            serializer = GuestHouseProfileResponseSerializer(qs, many=True, context=self.get_serializer_context())
+            context = self.get_serializer_context()
+            context["availability_map"] = meta
+            
+            serializer = GuestHouseProfileResponseSerializer(qs, many=True, context=context)
             return Response({
                 "count": qs.count(),
                 "results": serializer.data
@@ -576,17 +578,14 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         ):
             return queryset
         
-        # User sees own bookings as renter
-        user_bookings = queryset.filter(renter=user)
+        # Base filter: User sees own bookings as renter
+        query = Q(renter=user)
         
-        # Company sees bookings for their guesthouses + own bookings
+        # Company sees bookings for their guesthouses
         if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
-            company_bookings = queryset.filter(
-                items__room__company__user=user
-            ).distinct()
-            return (user_bookings | company_bookings).distinct()
+            query |= Q(items__room__guest_house__company__user=user)
         
-        return user_bookings
+        return queryset.filter(query).distinct()
 
     @extend_schema(
         summary="Create a guesthouse booking",

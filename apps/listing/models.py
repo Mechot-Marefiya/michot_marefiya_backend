@@ -570,7 +570,10 @@ class GuestHouseProfile(BaseListing):
         ]
 
     def __str__(self) -> str:
-        return f"{self.title} ({self.address.city})"
+        try:
+            return f"{self.title} ({self.address.city})"
+        except:
+            return f"{self.title}"
 
 class GuestHouseRoom(BaseListing):
     # represents a specific type of room in a GuestHouse (e.g. Master Bedroom, Single Room).
@@ -690,6 +693,11 @@ class GuestHouseBooking(AbstractBaseModel):
 
     def __str__(self):
         return f"Booking #{self.id} ({self.start_date} → {self.end_date})"
+
+    class Meta:
+        verbose_name = _("Guesthouse Booking")
+        verbose_name_plural = _("Guesthouse Bookings")
+        db_table = "guest_house_bookings"
 class GuestHouseBookingItem(AbstractBaseModel):
     booking = models.ForeignKey(
         GuestHouseBooking,
@@ -711,8 +719,8 @@ class GuestHouseBookingItem(AbstractBaseModel):
 
     class Meta:
         verbose_name = _("Guesthouse Booking Item")
-        verbose_name_plural = _("GuestBooking Items")
-        db_table = "guesthouse_booking_items"
+        verbose_name_plural = _("Guesthouse Booking Items")
+        db_table = "guest_house_booking_items"
 
     def subtotal(self):
         return self.units_booked * self.price_per_unit

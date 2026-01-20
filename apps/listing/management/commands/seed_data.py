@@ -16,7 +16,9 @@ from apps.listing.models import (
     Amenity,
     CarListing,
     PropertyListing,
-    GuestHouseListing,
+    GuestHouseProfile,
+    GuestHouseRoom,
+    GuestHouseInventory,
     RoomListing,
     StayAvailability,
     Booking,
@@ -121,7 +123,9 @@ class Command(BaseCommand):
         Booking.objects.all().delete()
         StayAvailability.objects.all().delete()
         RoomListing.objects.all().delete()
-        GuestHouseListing.objects.all().delete()
+        GuestHouseProfile.objects.all().delete()
+        GuestHouseRoom.objects.all().delete()
+        GuestHouseInventory.objects.all().delete()
         PropertyListing.objects.all().delete()
         CarListing.objects.all().delete()
         HotelProfile.objects.all().delete()
@@ -509,19 +513,37 @@ class Command(BaseCommand):
                 },
             )
 
-            guest_house, _ = GuestHouseListing.objects.get_or_create(
+            guest_house, _ = GuestHouseProfile.objects.get_or_create(
                 title=f"Cozy Guest House {i+1}",
                 company=company,
                 defaults={
                     "description": f"Comfortable guest house in {city}",
                     "base_price": Decimal(random.randint(800, 2000)),
-                    "total_rooms": random.randint(5, 15),
                     "rating": Decimal(str(round(random.uniform(3.5, 5.0), 2))),
                     "address": address,
                     "is_active": True,
                 },
             )
             guest_house.amenities.set(random.sample(amenities, k=random.randint(3, 6)))
+            
+            # Add rooms for the guesthouse
+            for r_idx in range(random.randint(1, 4)):
+                room, _ = GuestHouseRoom.objects.get_or_create(
+                    guest_house=guest_house,
+                    title=f"Room {r_idx + 1}",
+                    defaults={
+                        "description": "Clean and quiet room.",
+                        "base_price": guest_house.base_price + Decimal(str(r_idx * 100)),
+                        "total_units": random.randint(2, 5),
+                        "number_of_guests": random.randint(1, 4),
+                        "bed_type": random.choice(["king", "queen", "twin"]),
+                        "room_size_sqm": random.randint(15, 40),
+                        "currency": "ETB",
+                    }
+                )
+                from apps.listing.services import GuestHouseAvailabilityService
+                GuestHouseAvailabilityService.ensure_future_availability(start_date=date.today(), days_ahead=90)
+            
             guest_houses.append(guest_house)
         return guest_houses
 

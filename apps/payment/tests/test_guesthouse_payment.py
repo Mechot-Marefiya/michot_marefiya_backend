@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from apps.account.models import User, Role
 from apps.account.enums import RoleCode
-from apps.listing.models import GuestHouseBooking, GuestHouseListing, GuestHouseBookingItem, TermsAndConditions
+from apps.listing.models import GuestHouseBooking, GuestHouseBookingItem, TermsAndConditions
 from apps.listing.services import GuestHouseAvailabilityService
 from apps.payment.models import PaymentTransaction
 from apps.core.models import Address

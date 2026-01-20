@@ -1,7 +1,7 @@
 from rest_framework.test import APITestCase
 from rest_framework import status
 from django.urls import reverse
-from apps.listing.models import RoomListing, GuestHouseListing
+from apps.listing.models import RoomListing
 from apps.account.models import User, Role
 from apps.core.models import CurrencyRate
 

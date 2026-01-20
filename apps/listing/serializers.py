@@ -339,9 +339,9 @@ class GuestHouseRoomResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin,
 
 class GuestHouseProfileResponseSerializer(serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
-    address = AddressSerializer()
+    address = AddressSerializer(allow_null=True)
     amenities = AmenityResponseSSerializer(many=True)
-    facility=FacilitySerializer()
+    facility = serializers.SerializerMethodField()
     is_favorite = serializers.SerializerMethodField()
     rooms = GuestHouseRoomResponseSerializer(many=True, read_only=True)
     
@@ -365,6 +365,13 @@ class GuestHouseProfileResponseSerializer(serializers.ModelSerializer):
         if not fav_ids:
             return False
         return str(obj.id) in fav_ids
+    
+    def get_facility(self, obj):
+        try:
+            facilities = obj.facility.all()
+            return [{"name": f.name} for f in facilities]
+        except:
+            return []
 
 
 class GuestHouseRoomSerializer(serializers.ModelSerializer):

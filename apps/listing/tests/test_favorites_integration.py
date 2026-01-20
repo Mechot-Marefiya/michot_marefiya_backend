@@ -128,7 +128,7 @@ def test_stay_search_includes_is_favorite_and_uses_one_fav_query(
 def test_guesthouse_list_includes_is_favorite(
     authenticated_hotel_profile_client, company_user, hotel_profile
 ):
-    from apps.listing.models import GuestHouseListing
+    from apps.listing.models import GuestHouseProfile
     from apps.core.models import Address
     client = authenticated_hotel_profile_client
 
@@ -140,17 +140,16 @@ def test_guesthouse_list_includes_is_favorite(
     )
 
     # create a guesthouse
-    gh = GuestHouseListing.objects.create(
+    gh = GuestHouseProfile.objects.create(
         title="Test GH",
         base_price=500,
-        total_rooms=5,
         is_active=True,
         address=addr,
         company=hotel_profile.company # satisfy constraint
     )
 
     # create favorite
-    ct = ContentType.objects.get(app_label="listing", model="guesthouselisting")
+    ct = ContentType.objects.get(app_label="listing", model="guesthouseprofile")
     Favorite.objects.create(user=company_user, content_type=ct, object_id=str(gh.id))
 
     url = "/api/v1/listing/guest-houses/"
