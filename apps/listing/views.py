@@ -1429,8 +1429,8 @@ class StaySearchView(APIView):
                 "city": hotel.company.address.city,
                 "stars": hotel.stars,
                 "featured": hotel.featured,
-                "images": ListingImageSerializer(hotel.images.all(), many=True).data,
-                "facilities": FacilityResponseSerializer(hotel.facilities.all(), many=True).data,
+                "images": hotel.images.all(),
+                "facilities": hotel.facilities.all(),
                 "rooms": []
             }
             
