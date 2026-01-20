@@ -43,7 +43,8 @@ from apps.account.enums import RoleCode
 from apps.listing.models import (
     Amenity,
     CarListing,
-    GuestHouseListing,
+    CarListing,
+    GuestHouseProfile, GuestHouseRoom,
     PropertyListing,
     RoomListing,
     Booking,StayAvailability,
@@ -69,8 +70,9 @@ from apps.listing.serializers import (
     CarAvailabilityUpdateSerializer,
     EventSpaceBookingPreviewSerializer,
     GuestHouseBookingPreviewSerializer,
-    GuestHouseListingResponseSerializer,
-    GuestHouseListingSerializer,
+    GuestHouseBookingPreviewSerializer,
+    GuestHouseProfileResponseSerializer, GuestHouseRoomResponseSerializer,
+    GuestHouseProfileSerializer, GuestHouseRoomSerializer,
     PricePreviewResponseSerializer,
     PropertyListingResponseSerializer,
     PropertyListingSerializer,
@@ -317,10 +319,67 @@ class RoomListingViewSet(AbstractModelViewSet):
         return Response(serialized)
 
 
+
+@extend_schema(tags=["Guest House Rooms"])
+class GuestHouseRoomViewSet(AbstractModelViewSet):
+    serializer_class = GuestHouseRoomSerializer
+    queryset = GuestHouseRoom.objects.all()
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ["guest_house", "total_units", "number_of_guests"]
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return [IsAuthenticated()]
+        elif self.action in ['list', 'retrieve', 'price_preview']:
+            return [AllowAny()]
+        else:
+            return [IsListingOwner()]
+
+    def get_queryset(self):
+        queryset = super().get_queryset().select_related(
+            "guest_house", "guest_house__address"
+        ).prefetch_related(
+            "images", "amenities"
+        )
+        if not self.request.user or not self.request.user.is_authenticated:
+            return queryset.filter(guest_house__is_active=True)
+        return queryset
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        request = self.request
+        context["request"] = request
+        context["display_currency"] = get_display_currency(request)
+        
+        check_in = request.query_params.get("check_in")
+        check_out = request.query_params.get("check_out")
+        
+        if check_in and check_out:
+             try:
+                check_in_date = parse_date(check_in)
+                check_out_date = parse_date(check_out)
+                pass 
+             except Exception:
+                 pass
+        return context
+
+    @extend_schema(
+        summary="Retrieve room details with accurate pricing",
+        parameters=[
+            OpenApiParameter("check_in", OpenApiTypes.DATE, required=False),
+            OpenApiParameter("check_out", OpenApiTypes.DATE, required=False),
+        ]
+    )
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = GuestHouseRoomResponseSerializer(instance, context=self.get_serializer_context())
+        return Response(serializer.data)
+
+
 @extend_schema(tags=["Accommodations"])
-class GuestHouseListingViewSet(AbstractModelViewSet):
-    serializer_class = GuestHouseListingSerializer
-    queryset = GuestHouseListing.objects.all()
+class GuestHouseProfileViewSet(AbstractModelViewSet):
+    serializer_class = GuestHouseProfileSerializer
+    queryset = GuestHouseProfile.objects.all()
 
     def get_permissions(self):
         """
@@ -337,8 +396,8 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
 
     def get_serializer_class(self):
         if self.action in ["list", "retrieve", "check_availability"]:
-            return GuestHouseListingResponseSerializer
-        return GuestHouseListingSerializer
+            return GuestHouseProfileResponseSerializer
+        return GuestHouseProfileSerializer
 
     def get_queryset(self):
         """Filter queryset - show all active to public, all to companies/admin."""
@@ -349,7 +408,8 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
         ).prefetch_related(
             'images',
             'amenities',
-            'facility'
+            'facility',
+            'rooms'
         )
         
         if not self.request.user or not self.request.user.is_authenticated:
@@ -372,7 +432,7 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
         context = super().get_serializer_context()
         context["request"] = self.request
         
-        # resolve favorites for guesthouse responses
+        # resolve favorites
         try:
             ct = ContentType.objects.get(app_label="listing", model="guesthouselisting")
         except Exception:
@@ -388,18 +448,7 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         serializer = self.get_serializer(instance)
-        data = serializer.data
-
-        quote = data.get('price_quote')
-        if quote:
-            data['preview_min_price'] = quote['min_nightly_price']
-            data['preview_total'] = quote['base_total']
-            data['preview_has_discount'] = quote['has_discount']
-            data['display_price'] = quote['min_nightly_price'] if quote['has_discount'] else data.get('base_price')
-        else:
-            data['display_price'] = data.get('base_price')
-
-        return Response(data)
+        return Response(serializer.data)
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -407,24 +456,11 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
         
         if page is not None:
             serializer = self.get_serializer(page, many=True)
-            data_list = serializer.data
-        else:
-            serializer = self.get_serializer(queryset, many=True)
-            data_list = serializer.data
+            return self.get_paginated_response(serializer.data)
+        
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
 
-        for data in data_list:
-            quote = data.get('price_quote')
-            if quote:
-                data['preview_min_price'] = quote['min_nightly_price']
-                data['preview_total'] = quote['base_total']
-                data['preview_has_discount'] = quote['has_discount']
-                data['display_price'] = quote['min_nightly_price'] if quote['has_discount'] else data.get('base_price')
-            else:
-                data['display_price'] = data.get('base_price')
-
-        if page is not None:
-            return self.get_paginated_response(data_list)
-        return Response(data_list)
     @extend_schema(
             parameters=[
                 OpenApiParameter("check_in", OpenApiTypes.DATE, required=True),
@@ -436,12 +472,13 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
                 OpenApiParameter("sub_city", OpenApiTypes.STR, required=False),
                 OpenApiParameter("guesthouse_id", OpenApiTypes.UUID, required=False),
             ],
-            responses=GuestHouseListingResponseSerializer(many=True)
+            responses=GuestHouseProfileResponseSerializer(many=True)
         )
     @action(detail=False, methods=["get"], url_path="check-availability")
     def check_availability(self, request):
             """
             Check availability across all guesthouses or a specific one.
+            Returns PROFILES that have at least one room type meeting criteria.
             """
             try:
                 check_in = datetime.strptime(request.query_params.get("check_in"), "%Y-%m-%d").date()
@@ -466,21 +503,20 @@ class GuestHouseListingViewSet(AbstractModelViewSet):
             guesthouse_id = request.query_params.get("guesthouse_id")
 
             if guesthouse_id:
-                listing = GuestHouseListing.objects.filter(id=guesthouse_id, is_active=True).first()
-                if not listing:
+                profile = GuestHouseProfile.objects.filter(id=guesthouse_id, is_active=True).first()
+                if not profile:
                     return Response({"error": "Guest house not found."}, status=404)
 
                 qs, meta = GuestHouseAvailabilityService.get_available_listings(
                     check_in, check_out, units, address_filters
                 )
-
                 qs = qs.filter(id=guesthouse_id)
-
             else:
                 qs, meta = GuestHouseAvailabilityService.get_available_listings(
                     check_in, check_out, units, address_filters
                 )
-            serializer = GuestHouseListingResponseSerializer(qs, many=True)
+            
+            serializer = GuestHouseProfileResponseSerializer(qs, many=True, context=self.get_serializer_context())
             return Response({
                 "count": qs.count(),
                 "results": serializer.data
@@ -648,7 +684,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         
         # Validate availability (lock=False for previews)
         room_infos = [
-            {"guesthouse_listing": item["room"], "quantity": item["units_booked"]}
+            {"guesthouse_room": item["room"], "quantity": item["units_booked"]}
             for item in items
         ]
         try:

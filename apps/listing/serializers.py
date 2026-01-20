@@ -26,9 +26,9 @@ from apps.listing.services import BookingService, ListingService, EventSpaceAvai
 from apps.listing.models import (
     Amenity,
     Booking,BookingRating,
-    BookingItem,StayAvailability,GuestHouseAvailability,
+    BookingItem,StayAvailability,GuestHouseInventory,
     CarListing,CarAvailability,
-    GuestHouseListing,
+    GuestHouseProfile, GuestHouseRoom,
     PropertyListing,
     RoomListing,EventSpaceListing,
     CarRental,CarRentalItem,GuestHouseBookingItem,GuestHouseBooking,
@@ -307,30 +307,57 @@ class RoomListingSerializer(serializers.ModelSerializer):
         )
 
 
-class GuestHouseListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, serializers.ModelSerializer):
+class GuestHouseRoomResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin, serializers.ModelSerializer):
+    images = ListingImageSerializer(many=True)
+    available_units = serializers.SerializerMethodField()
+    amenities = AmenityResponseSSerializer(many=True)
+    
+    class Meta:
+        model = GuestHouseRoom
+        fields = [
+            "id",
+            "title",
+            "images",
+            "base_price",
+            "currency",
+            "amenities",
+            "number_of_guests",
+            "total_units",
+            "available_units",
+            "bed_type",
+            "room_size_sqm",
+            "converted_price",
+            "converted_currency",
+            "price_quote",
+        ]
+        
+    def get_available_units(self, obj):
+        availability_map = self.context.get("availability_map")
+        if availability_map:
+            return availability_map.get(obj.id, 0)
+        return obj.total_units
+
+class GuestHouseProfileResponseSerializer(serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     address = AddressSerializer()
     amenities = AmenityResponseSSerializer(many=True)
     facility=FacilitySerializer()
     is_favorite = serializers.SerializerMethodField()
+    rooms = GuestHouseRoomResponseSerializer(many=True, read_only=True)
+    
     class Meta:
-        model = GuestHouseListing
+        model = GuestHouseProfile
         fields = [
             "id",
             "title",
-            "base_price",
-            "currency",
             "description",
             "images",
-            "total_rooms",
             "amenities",
             "address",
             "rating",
             "facility",
             "is_favorite",
-            "converted_price",
-            "converted_currency",
-            "price_quote",
+            "rooms",
         ]
 
     def get_is_favorite(self, obj):
@@ -340,28 +367,27 @@ class GuestHouseListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMix
         return str(obj.id) in fav_ids
 
 
-class GuestHouseListingSerializer(serializers.ModelSerializer):
-    address = FlexibleAddressField()
-    images = serializers.ListField(child=serializers.ImageField())
-    amenities = JsonSerializerField()
-    facility=FacilitySerializer()
+class GuestHouseRoomSerializer(serializers.ModelSerializer):
+    images = serializers.ListField(child=serializers.ImageField(), required=False)
+    amenities = JsonSerializerField(required=False)
+    guest_house_id = serializers.UUIDField()
+
     class Meta:
-        model = GuestHouseListing
+        model = GuestHouseRoom
         fields = [
             "id",
+            "guest_house_id",
             "title",
             "images",
             "base_price",
             "currency",
-            "individual_owner",
-            "company",
-            "description",
-            "total_rooms",
             "amenities",
-            "address",
-            "facility"
+            "number_of_guests",
+            "total_units",
+            "bed_type",
+            "room_size_sqm",
         ]
-
+        
     def validate_currency(self, value):
         if not value:
             return value
@@ -369,6 +395,48 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
         if len(value) != 3:
             raise serializers.ValidationError("Currency must be a 3-letter ISO code.")
         return value
+        
+    def validate_guest_house_id(self, value):
+        if not GuestHouseProfile.objects.filter(id=value).exists():
+             raise serializers.ValidationError(f"Guest House with id {value} does not exist.")
+        return value
+
+    @transaction.atomic
+    def create(self, validated_data):
+         images = validated_data.pop("images", [])
+         amenities = validated_data.pop("amenities", [])
+         
+         guest_house_id = validated_data.pop("guest_house_id")
+         validated_data["guest_house"] = GuestHouseProfile.objects.get(id=guest_house_id)
+         
+         instance = GuestHouseRoom.objects.create(**validated_data)
+         
+         if isinstance(amenities, list):
+             instance.amenities.set(amenities)
+             
+         if images:
+            ImageCreationService.create_images(instance, images)
+            
+         return instance
+
+class GuestHouseProfileSerializer(serializers.ModelSerializer):
+    address = FlexibleAddressField()
+    images = serializers.ListField(child=serializers.ImageField())
+    amenities = JsonSerializerField()
+    facility=FacilitySerializer()
+    class Meta:
+        model = GuestHouseProfile
+        fields = [
+            "id",
+            "title",
+            "images",
+            "individual_owner",
+            "company",
+            "description",
+            "amenities",
+            "address",
+            "facility"
+        ]
 
     def validate_address(self, attr):
         serializer = AddressSerializer(data=attr)
@@ -389,26 +457,6 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"company": "Company profile is not approved."})
         return data
 
-    # def create(self, validated_data):
-    #     # user = self.context["request"].user
-    #     # individual_owner = validated_data.get("individual_owner")
-
-    #     # ? Just for testing purpose
-    #     # validated_data['individual_owner'] = "8393efcf-27c8-4408-bac1-cea75cccee96"
-
-    #     # if not individual_owner:
-    #     #     # ! Checking if the company is not doing this
-    #     #     # ! but rather the Michot admin doing this and in some case the individual owner is missed.
-    #     #     # ! Which means the logged in user is Michot admin (not another vendor)
-    #     #     if user.role and user.role.code == RoleCode.ADMIN.value:
-    #     #         raise serializers.ValidationError(
-    #     #             "Valid Company or individual owner must exist."
-    #     #         )
-    #     #     company = get_object_or_404(CompanyProfile, user=user)
-    #     #     validated_data["company"] = company
-
-    #     # TODO: proper error handling
-    #     return ListingService.create_guest_house_listing(validated_data)
     @transaction.atomic
     def create(self, validated_data):
         images = validated_data.pop("images", [])
@@ -419,7 +467,7 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
         address = Address.objects.create(**address_data)
         validated_data["address"] = address
 
-        instance = GuestHouseListing.objects.create(**validated_data)
+        instance = GuestHouseProfile.objects.create(**validated_data)
 
         if isinstance(amenities, list):
             instance.amenities.set(amenities)
@@ -430,16 +478,10 @@ class GuestHouseListingSerializer(serializers.ModelSerializer):
         if images:
             ImageCreationService.create_images(instance, images)
 
-        # FIX: use correct service method
-        GuestHouseAvailabilityService.create_availability(
-            instance,
-            units_quantity=instance.total_rooms
-        )
-
         return instance
 
     def to_representation(self, instance):
-        return GuestHouseListingResponseSerializer(
+        return GuestHouseProfileResponseSerializer(
             instance, context=self.context
         ).to_representation(instance)
 class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
@@ -502,7 +544,7 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
 
         # Build space_infos list expected by availability service
         room_infos = [
-            {"guesthouse_listing": item["room"], "quantity": item["units_booked"]}
+            {"guesthouse_room": item["room"], "quantity": item["units_booked"]}
             for item in items
         ]
 
@@ -514,12 +556,13 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
         terms_version = data.get("terms_version")
         if terms_version and items:
             from django.contrib.contenttypes.models import ContentType
-            first_guesthouse = items[0]["room"]
+            first_room = items[0]["room"]
+            first_guesthouse_profile = first_room.guest_house
             
-            ct = ContentType.objects.get_for_model(first_guesthouse)
+            ct = ContentType.objects.get_for_model(first_guesthouse_profile)
             tc_exists = TermsAndConditions.objects.filter(
                 content_type=ct,
-                object_id=first_guesthouse.id,
+                object_id=first_guesthouse_profile.id,
                 version=terms_version,
                 is_active=True
             ).exists()
@@ -547,7 +590,7 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
         if old_status == GuestHouseBooking.RentStatus.CONFIRMED and new_status == GuestHouseBooking.RentStatus.CANCELLED:
 
             room_infos = [{
-                "guesthouse_listing": item.room,
+                "guesthouse_room": item.room,
                 "quantity": item.units_booked
             } for item in instance.items.all()]
 
@@ -562,7 +605,7 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
         if old_status == GuestHouseBooking.RentStatus.PENDING and new_status == GuestHouseBooking.RentStatus.CONFIRMED:
 
             room_infos = [{
-                "guesthouse_listing": item.room,
+                "guesthouse_room": item.room,
                 "quantity": item.units_booked
             } for item in instance.items.all()]
 
@@ -575,10 +618,10 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
         return super().update(instance, validated_data)
 
 
-class GuestHouseAvailabilitySerializer(serializers.ModelSerializer):
+class GuestHouseInventorySerializer(serializers.ModelSerializer):
     class Meta:
-        model = GuestHouseAvailability
-        fields = ["id", "date", "available_rooms"]
+        model = GuestHouseInventory
+        fields = ["id", "date", "available_rooms", "price"]
         read_only_fields = ["id"]
 
 # class CarListingResponseSerializer(serializers.ModelSerializer):

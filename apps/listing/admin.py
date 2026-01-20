@@ -5,8 +5,9 @@ from apps.listing.models import (
     CarListing,
     CarAvailability,CarRental,CarRentalItem,
     EventSpaceListing,
-     GuestHouseListing,
-     GuestHouseAvailability,
+    EventSpaceListing,
+     GuestHouseProfile, GuestHouseRoom,
+     GuestHouseInventory,
     GuestHouseBooking,
     GuestHouseBookingItem,
     EventSpaceBookingItem,
@@ -53,7 +54,8 @@ class EventSpaceBookingAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "check_in_date", "check_out_date", "total_price", "currency", "status", "is_legacy")
     list_filter = ("status",)
     search_fields = ("user__email",)
-admin.site.register(GuestHouseAvailability)
+    search_fields = ("user__email",)
+admin.site.register(GuestHouseInventory)
 
 @admin.register(GuestHouseBooking)
 class GuestHouseBookingAdmin(admin.ModelAdmin):
@@ -96,9 +98,14 @@ class CarListingModelAdmin(admin.ModelAdmin):
     list_display = ["brand", "company", "base_price", "currency"]
     inlines = [ListingImageInline]
 # admin.site.register(PropertyListing)
-@admin.register(GuestHouseListing)
-class GuestHouseListingModelAdmin(admin.ModelAdmin):
-    list_display=["company","title","base_price","currency"]
+@admin.register(GuestHouseProfile)
+class GuestHouseProfileModelAdmin(admin.ModelAdmin):
+    list_display=["company","title"]
+    inlines=[ListingImageInline]
+
+@admin.register(GuestHouseRoom)
+class GuestHouseRoomModelAdmin(admin.ModelAdmin):
+    list_display=["guest_house", "title", "base_price", "total_units"]
     inlines=[ListingImageInline]
 admin.site.register(Amenity)
 

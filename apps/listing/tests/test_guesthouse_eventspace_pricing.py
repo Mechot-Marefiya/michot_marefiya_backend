@@ -4,8 +4,8 @@ from rest_framework.test import APITestCase
 from decimal import Decimal
 from datetime import date, timedelta
 from apps.listing.models import (
-    GuestHouseListing, GuestHouseBooking, GuestHouseBookingItem, 
-    GuestHouseAvailability, EventSpaceListing, EventSpaceBooking, 
+    GuestHouseProfile, GuestHouseRoom, GuestHouseBooking, GuestHouseBookingItem, 
+    GuestHouseInventory, EventSpaceListing, EventSpaceBooking, 
     EventSpaceBookingItem, EventSpaceAvailability, TermsAndConditions
 )
 from apps.account.models import User, HotelProfile, CompanyProfile
@@ -44,23 +44,29 @@ class GuesthouseEventSpacePricingTests(APITestCase):
         )
         
         # --- Guesthouse Setup ---
-        self.guesthouse = GuestHouseListing.objects.create(
+        self.guesthouse = GuestHouseProfile.objects.create(
             company=self.company,
             address=create_addr("GH St"),
             title="Luxury Guesthouse",
             base_price=Decimal("2000.00"),
             currency="ETB",
-            total_rooms=3,
             is_active=True
         )
-        # Create availability for guesthouse
+        # Create room for guesthouse
+        self.guesthouse_room = GuestHouseRoom.objects.create(
+            guest_house=self.guesthouse,
+            title="Standard Room",
+            description="Standard room",
+            base_price=Decimal("2000.00"),
+            currency="ETB",
+            total_units=3,
+            number_of_guests=2
+        )
+        # Create availability for guesthouse room
         start = date.today() + timedelta(days=1)
-        for i in range(10):
-            GuestHouseAvailability.objects.create(
-                guest_house=self.guesthouse,
-                date=start + timedelta(days=i),
-                available_rooms=3
-            )
+        from apps.listing.services import GuestHouseAvailabilityService
+        GuestHouseAvailabilityService.create_availability(self.guesthouse_room, 3)
+        
         # T&C for Guesthouse
         ct_gh = ContentType.objects.get_for_model(self.guesthouse)
         TermsAndConditions.objects.create(
@@ -120,7 +126,7 @@ class GuesthouseEventSpacePricingTests(APITestCase):
             "terms_version": "1.0",
             "items": [
                 {
-                    "room": str(self.guesthouse.id),
+                    "room": str(self.guesthouse_room.id),
                     "units_booked": 1
                 }
             ]
@@ -167,22 +173,26 @@ class GuesthouseEventSpacePricingTests(APITestCase):
         """Verify guesthouse prevents mixed currencies."""
         # Create another guesthouse with different currency
         addr = Address.objects.create(street_line1="USD St", city="Test", country="Test")
-        guesthouse_usd = GuestHouseListing.objects.create(
+        guesthouse_usd = GuestHouseProfile.objects.create(
             company=self.company,
             address=addr,
             title="USD Guesthouse",
             base_price=Decimal("100.00"),
             currency="USD",
-            total_rooms=1,
             is_active=True
         )
-        # Add availability for the USD guesthouse to avoid conflict before currency check
-        for i in range(10):
-             GuestHouseAvailability.objects.create(
-                guest_house=guesthouse_usd,
-                date=date.today() + timedelta(days=1+i),
-                available_rooms=1
-            )
+        guesthouse_usd_room = GuestHouseRoom.objects.create(
+            guest_house=guesthouse_usd,
+            title="Standard Room",
+            description="Room",
+            base_price=Decimal("100.00"),
+            currency="USD",
+            total_units=1,
+            number_of_guests=2
+        )
+        # Add availability for the USD guesthouse room
+        from apps.listing.services import GuestHouseAvailabilityService
+        GuestHouseAvailabilityService.create_availability(guesthouse_usd_room, 1)
         
         self.client.force_authenticate(user=self.user)
         url = reverse('guesthouse-bookings-list')
@@ -193,8 +203,8 @@ class GuesthouseEventSpacePricingTests(APITestCase):
             "terms_accepted": True,
             "terms_version": "1.0",
             "items": [
-                {"room": str(self.guesthouse.id), "units_booked": 1},
-                {"room": str(guesthouse_usd.id), "units_booked": 1}
+                {"room": str(self.guesthouse_room.id), "units_booked": 1},
+                {"room": str(guesthouse_usd_room.id), "units_booked": 1}
             ]
         }
         

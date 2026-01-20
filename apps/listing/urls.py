@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from apps.listing.views import (
     BookingViewSet,
     RoomListingViewSet,
-    GuestHouseListingViewSet,
+    GuestHouseProfileViewSet, GuestHouseRoomViewSet,
     CarListingViewSet,
     PropertyListingViewSet,
     AmenityViewSet,
@@ -22,7 +22,8 @@ from apps.listing.views import (
 router = DefaultRouter()
 
 router.register("rooms", RoomListingViewSet, basename="rooms")
-router.register("guest-houses", GuestHouseListingViewSet, basename="guest_houses")
+router.register("guest-houses", GuestHouseProfileViewSet, basename="guest_houses")
+router.register("guest-house-rooms", GuestHouseRoomViewSet, basename="guest_house_rooms")
 router.register("cars", CarListingViewSet, basename="cars")
 router.register("properties", PropertyListingViewSet, basename="properties")
 router.register("amenities", AmenityViewSet, basename="amenities")

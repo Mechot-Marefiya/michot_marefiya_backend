@@ -501,11 +501,11 @@ class PropertyListing(BaseListing):
         return self.property_type
 
 
-class GuestHouseListing(BaseListing):
+class GuestHouseProfile(BaseListing):
     company = models.ForeignKey(
         CompanyProfile,
         on_delete=models.CASCADE,
-        related_name="guest_house_listings",
+        related_name="guest_house_profiles",
         verbose_name=_("Company"),
         help_text=_("The company that owns this listing."),
         null=True,
@@ -515,7 +515,7 @@ class GuestHouseListing(BaseListing):
     individual_owner = models.ForeignKey(
         IndividualOwnerProfile,
         on_delete=models.CASCADE,
-        related_name="guest_house_listings",
+        related_name="guest_house_profiles",
         verbose_name=_("Individual Owner"),
         help_text=_("The individual person that owns this listing."),
         null=True,
@@ -525,23 +525,26 @@ class GuestHouseListing(BaseListing):
     address = models.OneToOneField(
         Address,
         on_delete=models.RESTRICT,
-        related_name="guesthouse_listing",
+        related_name="guesthouse_profile",
         verbose_name=_("Address"),
         help_text=_("Guesthouse location address")
     )
 
-    total_rooms = models.PositiveIntegerField(
-        verbose_name=_("Total Rooms"),
-        help_text=_("Number of rooms available in the guest house."),
-    )
 
     amenities = models.ManyToManyField(
         Amenity,
         blank=True,
-        related_name="guest_house_listings",
-        verbose_name=_("Amenities"),
+        related_name="guest_house_profiles",
+        verbose_name=_("Property Amenities"),
     )
-    facility=models.ManyToManyField(Facility,blank=True,related_name="guest_house_listing",verbose_name=_("Facility"))
+    
+    facility = models.ManyToManyField(
+        Facility, 
+        blank=True, 
+        related_name="guest_house_profiles", 
+        verbose_name=_("Facility")
+    )
+    
     rating = models.DecimalField(
         max_digits=3,
         decimal_places=2,
@@ -552,11 +555,11 @@ class GuestHouseListing(BaseListing):
     )
 
     class Meta:
-        verbose_name = _("Guest House")
-        verbose_name_plural = _("Guest Houses")
-        db_table = "guest_houses"
+        verbose_name = _("Guest House Profile")
+        verbose_name_plural = _("Guest House Profiles")
+        db_table = "guest_houses" 
+        
         constraints = [
-            # * Enforcing either one of the owners(company, or individual) must exist
             models.CheckConstraint(
                 condition=(
                     (Q(individual_owner__isnull=False) & Q(company__isnull=True))
@@ -568,21 +571,77 @@ class GuestHouseListing(BaseListing):
 
     def __str__(self) -> str:
         return f"{self.title} ({self.address.city})"
-class GuestHouseAvailability(AbstractBaseModel):
+
+class GuestHouseRoom(BaseListing):
+    # represents a specific type of room in a GuestHouse (e.g. Master Bedroom, Single Room).
+    class BedType(models.TextChoices):
+        KING = "king", _("King")
+        QUEEN = "queen", _("Queen")
+        TWIN = "twin", _("Twin")
+        DOUBLE = "double", _("Double")
+        MIXED = "mixed", _("Mixed/Multiple")
+
     guest_house = models.ForeignKey(
-        GuestHouseListing,
+        GuestHouseProfile,
         on_delete=models.CASCADE,
-        related_name="availability",
+        related_name="rooms",
+        verbose_name=_("Guest House"),
     )
-    date = models.DateField()
-    available_rooms = models.PositiveIntegerField()
+
+    amenities = models.ManyToManyField(
+        Amenity,
+        blank=True,
+        related_name="guest_house_rooms",
+        verbose_name=_("Room Amenities"),
+    )
+
+    number_of_guests = models.PositiveIntegerField(default=1)
+
+    total_units = models.PositiveIntegerField(
+        verbose_name=_("Total Rooms of This Type"),
+        help_text=_("How many rooms of this type exist in the guest house."),
+        default=1
+    )
+
+    bed_type = models.CharField(
+        max_length=20, choices=BedType.choices, default=BedType.MIXED
+    )
+
+    room_size_sqm = models.PositiveIntegerField(null=True, blank=True)
     
+
     class Meta:
-        unique_together = ("guest_house", "date")
-        ordering = ["date"]
+        verbose_name = _("Guest House Room")
+        verbose_name_plural = _("Guest House Rooms")
+        db_table = "guest_house_rooms"
 
     def __str__(self):
-        return f"{self.guest_house.title} - {self.date}: {self.available_rooms} rooms"
+        return f"{self.title} at {self.guest_house.title}"
+class GuestHouseInventory(AbstractBaseModel):
+    # per-day stock & price for a given guest house room type.
+    guest_house_room = models.ForeignKey(
+        GuestHouseRoom,
+        on_delete=models.CASCADE,
+        related_name="inventories",
+    )
+    date = models.DateField(db_index=True)
+    available_rooms = models.PositiveIntegerField()
+    
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        help_text=_("Price for this date; falls back to room base price if null."),
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        unique_together = ("guest_house_room", "date")
+        ordering = ["date"]
+        db_table = "guest_house_inventories"
+
+    def __str__(self):
+        return f"{self.guest_house_room} - {self.date}: {self.available_rooms} rooms"
 class GuestHouseBooking(AbstractBaseModel):
     class RentStatus(models.TextChoices):
         PENDING = "pending", _("Pending")
@@ -640,7 +699,7 @@ class GuestHouseBookingItem(AbstractBaseModel):
     )
 
     room = models.ForeignKey(
-        GuestHouseListing,
+        GuestHouseRoom,
         on_delete=models.CASCADE,
         related_name="booking_items",
         verbose_name=_("Room")

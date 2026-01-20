@@ -1,14 +1,9 @@
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
-from apps.listing.models import GuestHouseListing, GuestHouseBooking, GuestHouseBookingItem, TermsAndConditions
-from apps.account.models import User, Role
-from apps.account.enums import RoleCode
+from apps.listing.models import GuestHouseProfile, GuestHouseRoom, GuestHouseBooking, GuestHouseBookingItem, TermsAndConditions
+from apps.account.models import User, IndividualOwnerProfile
 from apps.core.models import Address
-
-# Note: Factories might not exist or be named differently, referencing common patterns. 
-# Better to create objects manually if factories aren't confirmed.
-# I'll create helper methods for setup.
 
 import datetime
 from decimal import Decimal
@@ -46,8 +41,7 @@ class GuestHouseBookingTests(APITestCase):
             country="Ethiopia"
         )
 
-        # Create GuestHouse Listing
-        from apps.listing.models import IndividualOwnerProfile
+        # Create Owner Profile
         self.owner_profile = IndividualOwnerProfile.objects.create(
             first_name="Owner",
             last_name="Person",
@@ -55,18 +49,30 @@ class GuestHouseBookingTests(APITestCase):
             address=self.owner_address
         )
         
-        self.guesthouse = GuestHouseListing.objects.create(
+        # Create GuestHouse Profile
+        self.guesthouse = GuestHouseProfile.objects.create(
             title="Cozy GuestHouse",
             description="A nice place",
             individual_owner=self.owner_profile,
             address=self.guesthouse_address,
-            total_rooms=5,
-            base_price=Decimal("500.00") 
+            base_price=Decimal("500.00"),
+            currency="ETB"
         )
 
-        # Setup Availability
+        # Create GuestHouse Room (the new bookable unit)
+        self.standard_room = GuestHouseRoom.objects.create(
+            guest_house=self.guesthouse,
+            title="Standard Room",
+            description="Comfortable standard room",
+            base_price=Decimal("500.00"),
+            currency="ETB",
+            total_units=5,
+            number_of_guests=2
+        )
+
+        # Setup Availability for the room
         from apps.listing.services import GuestHouseAvailabilityService
-        GuestHouseAvailabilityService.create_availability(self.guesthouse, 5)
+        GuestHouseAvailabilityService.create_availability(self.standard_room, 5)
 
         # Setup Terms and Conditions
         from django.contrib.contenttypes.models import ContentType
@@ -83,7 +89,7 @@ class GuestHouseBookingTests(APITestCase):
 
     def test_create_booking_success(self):
         self.client.force_authenticate(user=self.renter_user)
-        url = reverse('guesthouse-bookings-list') # Standard router name
+        url = reverse('guesthouse-bookings-list')
         
         data = {
             "start_date": (datetime.date.today() + datetime.timedelta(days=1)).isoformat(),
@@ -92,7 +98,7 @@ class GuestHouseBookingTests(APITestCase):
             "terms_version": "1.0",
             "items": [
                 {
-                    "room": self.guesthouse.id, 
+                    "room": self.standard_room.id,  # Now references GuestHouseRoom
                     "units_booked": 1,
                     "price_per_unit": 500.00
                 }
@@ -110,9 +116,7 @@ class GuestHouseBookingTests(APITestCase):
 
     def test_list_bookings(self):
         # Create a booking first
-        # (Already created objects in setUp don't include a booking)
-        # We need a booking for this test
-        GuestHouseBooking.objects.create(
+        booking = GuestHouseBooking.objects.create(
             renter=self.renter_user,
             start_date=datetime.date.today() + datetime.timedelta(days=1),
             end_date=datetime.date.today() + datetime.timedelta(days=3),
@@ -121,6 +125,12 @@ class GuestHouseBookingTests(APITestCase):
             terms_accepted=True,
             terms_version="1.0",
             terms_content_snapshot="Terms..."
+        )
+        GuestHouseBookingItem.objects.create(
+            booking=booking,
+            room=self.standard_room,  # Now references GuestHouseRoom
+            units_booked=1,
+            price_per_unit=Decimal("500.00")
         )
         
         self.client.force_authenticate(user=self.renter_user)
@@ -131,7 +141,7 @@ class GuestHouseBookingTests(APITestCase):
         if isinstance(response.data, list):
             self.assertEqual(len(response.data), 1)
         else:
-            self.assertEqual(len(response.data['results']), 1) # Pagination enabled
+            self.assertEqual(len(response.data['results']), 1)
 
     def test_cancel_booking(self):
         booking = GuestHouseBooking.objects.create(
@@ -147,12 +157,10 @@ class GuestHouseBookingTests(APITestCase):
         # Create an item for it
         GuestHouseBookingItem.objects.create(
             booking=booking,
-            room=self.guesthouse,
+            room=self.standard_room,  # Now references GuestHouseRoom
             units_booked=1,
             price_per_unit=Decimal("500.00")
         )
-        # Create item to test availability restoration logic (if possible without full setup)
-        # For this test, we accept simple cancel status change.
         
         self.client.force_authenticate(user=self.renter_user)
         url = reverse('guesthouse-bookings-cancel', args=[booking.id])
@@ -181,3 +189,94 @@ class GuestHouseBookingTests(APITestCase):
         
         # ViewSet get_queryset filters by user, so it returns 404 if not found
         self.assertIn(response.status_code, [status.HTTP_403_FORBIDDEN, status.HTTP_404_NOT_FOUND])
+
+    def test_booking_with_multiple_room_types(self):
+        """Test booking multiple room types in same guesthouse"""
+        # Create a deluxe room
+        deluxe_room = GuestHouseRoom.objects.create(
+            guest_house=self.guesthouse,
+            title="Deluxe Room",
+            description="Luxury deluxe room",
+            base_price=Decimal("800.00"),
+            currency="ETB",
+            total_units=3,
+            number_of_guests=2
+        )
+        
+        from apps.listing.services import GuestHouseAvailabilityService
+        GuestHouseAvailabilityService.create_availability(deluxe_room, 3)
+        
+        self.client.force_authenticate(user=self.renter_user)
+        url = reverse('guesthouse-bookings-list')
+        
+        data = {
+            "start_date": (datetime.date.today() + datetime.timedelta(days=1)).isoformat(),
+            "end_date": (datetime.date.today() + datetime.timedelta(days=3)).isoformat(),
+            "terms_accepted": True,
+            "terms_version": "1.0",
+            "items": [
+                {
+                    "room": self.standard_room.id,
+                    "units_booked": 2,
+                    "price_per_unit": 500.00
+                },
+                {
+                    "room": deluxe_room.id,
+                    "units_booked": 1,
+                    "price_per_unit": 800.00
+                }
+            ]
+        }
+        
+        response = self.client.post(url, data, format='json')
+        if response.status_code != 201:
+            print(f"Error: {response.data}")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        
+        booking = GuestHouseBooking.objects.first()
+        self.assertEqual(booking.items.count(), 2)
+
+    def test_availability_check_per_room_type(self):
+        """Test that availability is tracked per room type, not per guesthouse"""
+        from apps.listing.services import GuestHouseAvailabilityService
+        from apps.listing.models import GuestHouseInventory
+        
+        # Book all standard rooms
+        start_date = datetime.date.today() + datetime.timedelta(days=1)
+        end_date = datetime.date.today() + datetime.timedelta(days=3)
+        
+        room_infos = [{
+            "guesthouse_room": self.standard_room,
+            "quantity": 5  # All 5 units
+        }]
+        
+        GuestHouseAvailabilityService.update_availability(
+            room_infos, start_date, end_date, increment=False
+        )
+        
+        # Verify that standard room's inventory is depleted
+        inventory = GuestHouseInventory.objects.filter(
+            guest_house_room=self.standard_room,
+            date=start_date
+        ).first()
+        self.assertIsNotNone(inventory)
+        self.assertEqual(inventory.available_rooms, 0)
+        
+        # But a new deluxe room should still have full availability
+        deluxe_room = GuestHouseRoom.objects.create(
+            guest_house=self.guesthouse,
+            title="Deluxe Room",
+            description="Luxury room",
+            base_price=Decimal("800.00"),
+            currency="ETB",
+            total_units=2,
+            number_of_guests=2
+        )
+        GuestHouseAvailabilityService.create_availability(deluxe_room, 2)
+        
+        deluxe_inventory = GuestHouseInventory.objects.filter(
+            guest_house_room=deluxe_room,
+            date=start_date
+        ).first()
+        self.assertIsNotNone(deluxe_inventory)
+        self.assertEqual(deluxe_inventory.available_rooms, 2)
