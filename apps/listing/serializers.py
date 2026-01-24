@@ -26,7 +26,7 @@ from apps.listing.services import BookingService, ListingService, EventSpaceAvai
 from apps.listing.models import (
     Amenity,
     Booking,BookingRating,
-    BookingItem,StayAvailability,GuestHouseInventory,
+    BookingItem,StayAvailability,GuestHouseInventory,BookingAddon,
     CarListing,CarAvailability,
     GuestHouseProfile, GuestHouseRoom,
     PropertyListing,
@@ -525,6 +525,7 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
             "terms_accepted_at",
             "terms_content_snapshot",
             "is_legacy",
+            "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests",
         ]
         read_only_fields = ["id", "status", "renter", "total_price", "created_at", "updated_at"]
         
@@ -548,6 +549,11 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
 
         if not items:
             raise serializers.ValidationError("At least one room booking item is required.")
+
+        user = self.context['request'].user
+        guest_email = data.get('guest_email')
+        if (not user or not user.is_authenticated) and not guest_email:
+             raise serializers.ValidationError("Either log in or provide guest email.")
 
         # Build space_infos list expected by availability service
         room_infos = [
@@ -583,9 +589,13 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
 
     @transaction.atomic
     def create(self, validated_data):
+        user = self.context["request"].user
+        if not user.is_authenticated:
+            user = None
+            
         return GuestHouseBookingService.create_booking(
             validated_data, 
-            user=self.context["request"].user
+            user=user
         )
 
     @transaction.atomic
@@ -872,7 +882,8 @@ class CarListingSerializer(serializers.ModelSerializer):
 
 class CarRentalItemSerializer(serializers.ModelSerializer):
     car_listing_details = serializers.SerializerMethodField()
-    subtotal = serializers.ReadOnlyField()
+    car_listing_details = serializers.SerializerMethodField()
+    subtotal = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     
     class Meta:
         model = CarRentalItem
@@ -913,6 +924,7 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
             'created_at', 'updated_at', 'converted_price', 'converted_currency',
             'terms_accepted', 'terms_version', 'terms_accepted_at', 'terms_content_snapshot',
             'is_legacy',
+            'guest_first_name', 'guest_last_name', 'guest_email', 'guest_phone', 'special_requests',
         ]
         read_only_fields = ['id', 'status', 'created_at', 'updated_at']
     
@@ -947,6 +959,11 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
             raise serializers.ValidationError({
                 "rental_items": "At least one rental item is required."
             })
+
+        user = self.context['request'].user
+        guest_email = data.get('guest_email')
+        if (not user or not user.is_authenticated) and not guest_email:
+             raise serializers.ValidationError("Either log in or provide guest email.")
 
         # ========== DAILY AVAILABILITY CHECK ==========
         for item in rental_items:
@@ -996,9 +1013,13 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     
     @transaction.atomic
     def create(self, validated_data):
+        user = self.context["request"].user
+        if not user.is_authenticated:
+            user = None
+            
         return CarRentalService.create_booking(
             validated_data, 
-            user=self.context["request"].user
+            user=user
         )
     
     @transaction.atomic
@@ -1179,12 +1200,23 @@ class PropertyListingSerializer(serializers.ModelSerializer):
         ).to_representation(instance)
 
 
+
+class BookingAddonSerializer(serializers.ModelSerializer):
+    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    
+    class Meta:
+        model = BookingAddon
+        fields = ['id', 'booking_item', 'name', 'description', 
+                  'category', 'quantity', 'price_per_unit', 'subtotal']
+        read_only_fields = ['id', 'subtotal']
+
 class BookingItemResponseSerializer(serializers.ModelSerializer):
     room_id = serializers.UUIDField(source="room.id", read_only=True)
     room_title = serializers.CharField(source="room.title", read_only=True)
     room_description = serializers.CharField(source="room.description", read_only=True)
     subtotal = serializers.SerializerMethodField()
     snapshot = serializers.JSONField(read_only=True)
+    addons = BookingAddonSerializer(many=True, read_only=True)
 
     class Meta:
         model = BookingItem
@@ -1196,7 +1228,9 @@ class BookingItemResponseSerializer(serializers.ModelSerializer):
             "units_booked",
             "price_per_unit",
             "subtotal",
+            "subtotal",
             "snapshot",
+            "addons",
         ]
 
     def get_subtotal(self, obj):
@@ -1288,7 +1322,8 @@ class BookingSerializer(serializers.ModelSerializer):
     class Meta:
         model = Booking
         fields = ["items", "check_in_date", "check_out_date", "currency", "status", 
-                  "terms_accepted", "terms_version"]
+                  "terms_accepted", "terms_version",
+                  "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests"]
         read_only_fields = ["status"]
         
     def validate_terms_accepted(self, value):
@@ -1313,6 +1348,11 @@ class BookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"items": "At least one booking item is required."}
             )
+
+        user = self.context['request'].user
+        guest_email = data.get('guest_email')
+        if (not user or not user.is_authenticated) and not guest_email:
+             raise serializers.ValidationError("Either log in or provide guest email.")
         
         terms_version = data.get("terms_version")
         if terms_version and items:
@@ -1562,7 +1602,8 @@ class EventSpaceBookingSerializer(serializers.ModelSerializer):
     class Meta:
         model = EventSpaceBooking # Mapped to the dedicated model
         fields = ["items", "check_in_date", "check_out_date", "currency", "event_type",
-                  "terms_accepted", "terms_version"]
+                  "terms_accepted", "terms_version",
+                  "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests"]
         read_only_fields = ["status"]
 
     def validate_terms_accepted(self, value):
@@ -1587,6 +1628,11 @@ class EventSpaceBookingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"items": "At least one booking item is required."}
             )
+
+        user = self.context['request'].user
+        guest_email = data.get('guest_email')
+        if (not user or not user.is_authenticated) and not guest_email:
+             raise serializers.ValidationError("Either log in or provide guest email.")
         
         terms_version = data.get("terms_version")
         if terms_version and items:
@@ -1620,6 +1666,8 @@ class EventSpaceBookingSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not user and request:
             user = request.user
+            if not user.is_authenticated:
+                user = None
             
         is_front_desk = False
         if user and user.is_authenticated and hasattr(user, 'role') and user.role and user.role.code == RoleCode.FRONT_DESK.value:

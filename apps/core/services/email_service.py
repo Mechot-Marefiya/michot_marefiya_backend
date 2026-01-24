@@ -1,0 +1,97 @@
+from django.core.mail import send_mail, EmailMultiAlternatives
+from django.template.loader import render_to_string
+from django.conf import settings
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class BookingEmailService:    
+    @staticmethod
+    def send_booking_confirmation(booking):
+        
+        # send confirmation email to guest after successful booking.
+        try:
+            context = {
+                'booking_reference': booking.booking_reference,
+                'guest_name': booking.guest_full_name,
+                'guest_email': booking.guest_email,
+                'guest_phone': booking.guest_phone,
+                'check_in': getattr(booking, 'check_in_date', getattr(booking, 'start_date', None)).strftime('%B %d, %Y'),
+                'check_out': getattr(booking, 'check_out_date', getattr(booking, 'end_date', None)).strftime('%B %d, %Y'),
+                'total': booking.total_price,
+                'currency': booking.currency,
+            }
+            
+            subject = f"Booking Confirmed - {booking.booking_reference}"
+            
+            html_body = render_to_string('emails/booking_confirmation.html', context)
+            
+            plain_body = f"""
+Dear {context['guest_name']},
+
+Thank you for booking with Michot Marefiya. Your reservation has been successfully confirmed.
+
+BOOKING REFERENCE: {booking.booking_reference}
+
+Booking Details:
+- Check-in Date: {context['check_in']}
+- Check-out Date: {context['check_out']}
+- Guest Email: {context['guest_email']}
+- Guest Phone: {context['guest_phone']}
+- Total Amount: {context['total']} {context['currency']}
+
+IMPORTANT: Please save this email and your booking reference. You will need it for check-in and to manage your booking.
+
+If you have any questions or need to modify your booking, please contact our support team or reply to this email.
+
+We look forward to welcoming you!
+
+Best regards,
+Michot Marefiya Team
+
+---
+© 2026 Michot Marefiya. All rights reserved.
+Visit us: https://michotmarefia.com
+Support: support@michotmarefia.com
+            """
+            
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=plain_body.strip(),
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[booking.guest_email]
+            )
+            email.attach_alternative(html_body, "text/html")
+            
+            email.send(fail_silently=False)
+            
+            logger.info(
+                f"Confirmation email sent successfully for booking {booking.booking_reference} "
+                f"to {booking.guest_email}"
+            )
+            return True
+            
+        except Exception as e:
+            logger.error(
+                f"Failed to send confirmation email for booking {booking.id}: {str(e)}",
+                exc_info=True
+            )
+            # don't crash the booking flow if email fails
+            # the booking is still valid even if email doesn't send
+            return False
+    
+    @staticmethod
+    def send_payment_receipt(booking, payment_transaction):
+        # send payment receipt email (future implementation)
+        
+        # todo: implement payment receipt email
+        pass
+    
+    @staticmethod
+    def send_checkin_reminder(booking):
+        # send check-in reminder email 24h before arrival (future implementation)
+        
+        # todo: implement check-in reminder
+        # this would be called by a Celery scheduled task
+        pass

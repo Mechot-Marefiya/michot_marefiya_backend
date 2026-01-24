@@ -19,6 +19,8 @@ from apps.account.models import (
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.contenttypes.fields import GenericForeignKey
 
+from apps.listing.utils import generate_booking_reference
+
 
 def validate_days_of_week(value):
     """Validator to ensure `days_of_week` is a list of integers 0..6.
@@ -237,9 +239,14 @@ class CarRental(AbstractBaseModel):
         PENDING = "pending", _("Pending")
         CONFIRMED = "confirmed", _("Confirmed")
         CANCELLED = "cancelled", _("Cancelled")
+    # Renter who created the booking
+    # Nullable to support guest checkout
     renter = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name=_("Renter Account")
     )
 
     start_date = models.DateField(
@@ -260,6 +267,48 @@ class CarRental(AbstractBaseModel):
     status = models.CharField(
          max_length=20, choices=RentStatus.choices, default=RentStatus.PENDING
     )
+
+    # Guest Information (who is staying)
+    guest_first_name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name=_("Guest First Name")
+    )
+    guest_last_name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name=_("Guest Last Name")
+    )
+    guest_email = models.EmailField(
+        blank=True,
+        default="",
+        verbose_name=_("Guest Email")
+    )
+    guest_phone = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        verbose_name=_("Guest Phone Number")
+    )
+    special_requests = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("Special Requests")
+    )
+    
+    booking_reference = models.CharField(
+        max_length=10,
+        unique=True,
+        editable=False,
+        db_index=True,
+        blank=True,
+        default="",
+        verbose_name=_("Booking Reference")
+    )
+
+    snapshot = models.JSONField(null=True, blank=True)
 
     # Terms and Conditions tracking
     terms_accepted = models.BooleanField(
@@ -290,12 +339,37 @@ class CarRental(AbstractBaseModel):
     )
 
     @property
+    @property
     def is_legacy(self):
         return not self.terms_accepted and not self.terms_version
+
+    @property
+    def guest_full_name(self):
+        return f"{self.guest_first_name} {self.guest_last_name}"
+    
+    @property
+    def contact_email(self):
+        return self.guest_email or (self.renter.email if self.renter else None)
 
     class Meta:
         verbose_name = _("Car Rental")
         verbose_name_plural = _("Car Rentals")
+        db_table = "car_rentals"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(start_date__lt=F("end_date")),
+                name="car_rental_valid_dates",
+            ),
+            models.CheckConstraint(
+                condition=Q(renter__isnull=False) | Q(guest_email__isnull=False),
+                name="car_rental_must_have_renter_or_guest"
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        if not self.booking_reference:
+            self.booking_reference = generate_booking_reference(prefix='C', model_class=CarRental)
+        super().save(*args, **kwargs)
     
     def __str__(self):
         return f"Rental by {self.renter} from {self.start_date} to {self.end_date}"
@@ -651,13 +725,59 @@ class GuestHouseBooking(AbstractBaseModel):
         CONFIRMED = "confirmed", _("Confirmed")
         CANCELLED = "cancelled", _("Cancelled")
         WALK_IN = "walk_in", _("Walk-In")
-    renter = models.ForeignKey(settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE)
+    renter = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name=_("Renter Account")
+    )
     start_date = models.DateField()
     end_date = models.DateField()
     total_price = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=3, default="ETB")
     status = models.CharField(max_length=20, choices=RentStatus.choices, default=RentStatus.PENDING)
+
+    guest_first_name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name=_("Guest First Name")
+    )
+    guest_last_name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name=_("Guest Last Name")
+    )
+    guest_email = models.EmailField(
+        blank=True,
+        default="",
+        verbose_name=_("Guest Email")
+    )
+    guest_phone = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        verbose_name=_("Guest Phone Number")
+    )
+    special_requests = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("Special Requests")
+    )
+    
+    booking_reference = models.CharField(
+        max_length=10,
+        unique=True,
+        editable=False,
+        db_index=True,
+        blank=True,
+        default="",
+        verbose_name=_("Booking Reference")
+    )
+
+    snapshot = models.JSONField(null=True, blank=True)
     
     # Terms and Conditions tracking
     terms_accepted = models.BooleanField(
@@ -691,6 +811,19 @@ class GuestHouseBooking(AbstractBaseModel):
     def is_legacy(self):
         return not self.terms_accepted and not self.terms_version
 
+    @property
+    def guest_full_name(self):
+        return f"{self.guest_first_name} {self.guest_last_name}"
+    
+    @property
+    def contact_email(self):
+        return self.guest_email or (self.renter.email if self.renter else None)
+
+    def save(self, *args, **kwargs):
+        if not self.booking_reference:
+            self.booking_reference = generate_booking_reference(prefix='G', model_class=GuestHouseBooking)
+        super().save(*args, **kwargs)
+
     def __str__(self):
         return f"Booking #{self.id} ({self.start_date} → {self.end_date})"
 
@@ -698,6 +831,19 @@ class GuestHouseBooking(AbstractBaseModel):
         verbose_name = _("Guesthouse Booking")
         verbose_name_plural = _("Guesthouse Bookings")
         db_table = "guest_house_bookings"
+        constraints = [
+            # Valid date range
+            models.CheckConstraint(
+                condition=Q(start_date__lt=F("end_date")),
+                name="guesthouse_booking_valid_dates",
+            ),
+            # Either renter OR guest_email must exist (for guest checkout)
+            # Either renter OR guest_email must exist (for guest checkout)
+            models.CheckConstraint(
+                condition=Q(renter__isnull=False) | Q(guest_email__isnull=False),
+                name="guesthouse_booking_must_have_renter_or_guest"
+            ),
+        ]
 class GuestHouseBookingItem(AbstractBaseModel):
     booking = models.ForeignKey(
         GuestHouseBooking,
@@ -840,9 +986,15 @@ class Booking(AbstractBaseModel):
         CANCELLED = "cancelled", _("Cancelled")
         WALK_IN = "walk_in", _("Walk-In")
 
+    # User who created the booking (the "Booker")
+    # Nullable to support guest checkout (booking without account)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name=_("Booker Account"),
+        help_text=_("User account of the person making the booking (if logged in)")
     )
 
     # for rooms: first night; for halls: event start date
@@ -865,7 +1017,54 @@ class Booking(AbstractBaseModel):
         max_length=20, choices=BookingStatus.choices, default=BookingStatus.PENDING
     )
 
-    # Immutable snapshot of booking-level display data captured at creation time
+    # these fields capture the actual guest details, separate from the booker account
+    guest_first_name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name=_("Guest First Name"),
+        help_text=_("First name of the person staying")
+    )
+    guest_last_name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name=_("Guest Last Name"),
+        help_text=_("Last name of the person staying")
+    )
+    guest_email = models.EmailField(
+        blank=True,
+        default="",
+        verbose_name=_("Guest Email"),
+        help_text=_("Email address for booking confirmations and communication")
+    )
+    guest_phone = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        verbose_name=_("Guest Phone Number"),
+        help_text=_("Contact phone number for the guest")
+    )
+    special_requests = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("Special Requests"),
+        help_text=_("Guest requests (e.g., late check-in, non-smoking room, dietary needs)")
+    )
+    
+    booking_reference = models.CharField(
+        max_length=10,
+        unique=True,
+        editable=False,
+        db_index=True,
+        blank=True,
+        default="",
+        verbose_name=_("Booking Reference"),
+        help_text=_("Human-readable booking code (e.g., H-X7Y2Z9)")
+    )
+
+
+
     snapshot = models.JSONField(null=True, blank=True)
 
     # Terms and Conditions tracking
@@ -899,6 +1098,14 @@ class Booking(AbstractBaseModel):
     @property
     def is_legacy(self):
         return not self.terms_accepted and not self.terms_version
+    
+    @property
+    def guest_full_name(self):
+        return f"{self.guest_first_name} {self.guest_last_name}"
+    
+    @property
+    def contact_email(self):
+        return self.guest_email or (self.user.email if self.user else None)
 
     class Meta:
         verbose_name = _("Booking")
@@ -910,10 +1117,22 @@ class Booking(AbstractBaseModel):
                 condition=Q(check_in_date__lt=F("check_out_date")),
                 name="booking_valid_dates",
             ),
+            # Either user OR guest_email must exist (for guest checkout)
+            models.CheckConstraint(
+                condition=Q(user__isnull=False) | Q(guest_email__isnull=False),
+                name="booking_must_have_user_or_guest"
+            ),
         ]
 
+    def save(self, *args, **kwargs):
+        if not self.booking_reference:
+            self.booking_reference = generate_booking_reference(prefix='H', model_class=Booking)
+        super().save(*args, **kwargs)
+
     def __str__(self):
-        return f"Booking #{self.id} by {self.user}"
+        if hasattr(self, 'booking_reference') and self.booking_reference:
+            return f"Booking {self.booking_reference} - {self.guest_full_name}"
+        return f"Booking #{self.id} by {self.user or 'Guest'}"
 
 
 class BookingItem(AbstractBaseModel):
@@ -935,7 +1154,6 @@ class BookingItem(AbstractBaseModel):
 
     price_per_unit = models.DecimalField(max_digits=10, decimal_places=2)
 
-    # Immutable snapshot of item-level display data captured at booking time
     snapshot = models.JSONField(null=True, blank=True)
 
     class Meta:
@@ -948,6 +1166,65 @@ class BookingItem(AbstractBaseModel):
 
     def __str__(self) -> str:
         return f"Room {self.room} booked for {self.booking.check_in_date}"
+
+
+class BookingAddon(AbstractBaseModel):
+    # additional services/products attached to a booking item(things like breakfast, airport transfer, etc...).
+    
+    class AddonCategory(models.TextChoices):
+        MEAL = "meal", _("Meal/Food")
+        TRANSPORT = "transport", _("Transportation")
+        SERVICE = "service", _("Service")
+        AMENITY = "amenity", _("Amenity/Equipment")
+    
+    booking_item = models.ForeignKey(
+        BookingItem,
+        on_delete=models.CASCADE,
+        related_name="addons",
+        verbose_name=_("Booking Item"),
+        help_text=_("The room/item this addon is attached to")
+    )
+    
+    name = models.CharField(
+        max_length=100,
+        verbose_name=_("Addon Name"),
+        help_text=_("e.g., 'Breakfast', 'Airport Pickup', 'Extra Bed'")
+    )
+    description = models.TextField(
+        blank=True,
+        verbose_name=_("Description"),
+        help_text=_("Detailed description of the addon")
+    )
+    category = models.CharField(
+        max_length=20,
+        choices=AddonCategory.choices,
+        default=AddonCategory.SERVICE,
+        verbose_name=_("Category")
+    )
+    
+    quantity = models.PositiveIntegerField(
+        default=1,
+        verbose_name=_("Quantity"),
+        help_text=_("Number of units (e.g., 2 breakfasts)")
+    )
+    price_per_unit = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name=_("Price per Unit"),
+        help_text=_("Price for one unit of this addon")
+    )
+    
+    class Meta:
+        verbose_name = _("Booking Addon")
+        verbose_name_plural = _("Booking Addons")
+        db_table = "booking_addons"
+    
+    def subtotal(self):
+        return self.quantity * self.price_per_unit
+    
+    def __str__(self):
+        return f"{self.name} x{self.quantity} for {self.booking_item}"
+
 
 class BookingRating(models.Model):
     booking = models.OneToOneField(
@@ -1168,7 +1445,9 @@ class BookingBase(AbstractBaseModel):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        verbose_name=_("User")
+        null=True,
+        blank=True,
+        verbose_name=_("Booker Account")
     )
 
     check_in_date = models.DateField(verbose_name=_("Check-In Date"))
@@ -1182,10 +1461,58 @@ class BookingBase(AbstractBaseModel):
         max_length=20, choices=BookingStatus.choices, default=BookingStatus.PENDING, verbose_name=_("Status")
     )
 
+    guest_first_name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name=_("Guest First Name")
+    )
+    guest_last_name = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name=_("Guest Last Name")
+    )
+    guest_email = models.EmailField(
+        blank=True,
+        default="",
+        verbose_name=_("Guest Email")
+    )
+    guest_phone = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        verbose_name=_("Guest Phone Number")
+    )
+    special_requests = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("Special Requests")
+    )
+    
+    booking_reference = models.CharField(
+        max_length=10,
+        unique=True,
+        editable=False,
+        db_index=True,
+        blank=True,
+        default="",
+        verbose_name=_("Booking Reference")
+    )
+
+    snapshot = models.JSONField(null=True, blank=True)
+
+    @property
+    def guest_full_name(self):
+        return f"{self.guest_first_name} {self.guest_last_name}"
+    
+    @property
+    def contact_email(self):
+        return self.guest_email or (self.user.email if self.user else None)
+
     class Meta:
         abstract = True
         constraints = [
-            # Valid date range
             models.CheckConstraint(
                 condition=Q(check_in_date__lt=F("check_out_date")),
                 name="booking_valid_dates",
@@ -1252,6 +1579,11 @@ class EventSpaceBooking(BookingBase):
         verbose_name = _("Event Space Booking")
         verbose_name_plural = _("Event Space Bookings")
         db_table = "event_space_bookings"
+
+    def save(self, *args, **kwargs):
+        if not self.booking_reference:
+            self.booking_reference = generate_booking_reference(prefix='E', model_class=EventSpaceBooking)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Event Space Booking #{self.id} - {self.status}"

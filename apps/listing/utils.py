@@ -37,3 +37,31 @@ class ParseDatesAndQuantity:
             )
         
         return car_listing_id, start_date_obj, end_date_obj, quantity
+
+
+import random
+import string
+
+
+def generate_booking_reference(prefix='H', model_class=None):
+
+    if model_class is None:
+        from apps.listing.models import Booking
+        model_class = Booking
+    
+    max_attempts = 50
+    
+    for _ in range(max_attempts):
+        code_part = ''.join(random.choices(
+            string.ascii_uppercase + string.digits,
+            k=6
+        ))
+        reference = f"{prefix}-{code_part}"
+        
+        if not model_class.objects.filter(booking_reference=reference).exists():
+            return reference
+    
+    raise ValueError(
+        f"Failed to generate unique booking reference after {max_attempts} attempts. "
+        "This is extremely rare and may indicate a database issue."
+    )

@@ -549,7 +549,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         - UPDATE/DELETE: Booking owner or guesthouse owner
         """
         if self.action == 'create':
-            return [IsAuthenticated()]
+            return [AllowAny()]
         elif self.action in ['list', 'retrieve', 'my_bookings']:
             return [IsAuthenticated()]
         else:
@@ -915,7 +915,7 @@ class CarRentalViewSet(AbstractModelViewSet):
 
     def get_permissions(self):
         if self.action == 'create':
-            return [IsAuthenticated()]
+            return [AllowAny()]
         elif self.action in ['list', 'retrieve', 'my_rentals', 'rental_stats']:
             return [IsAuthenticated()]
         else:
@@ -959,7 +959,8 @@ class CarRentalViewSet(AbstractModelViewSet):
             if not availability.get('available'):
                 return Response({"error": availability.get('reason')}, status=status.HTTP_400_BAD_REQUEST)
 
-        rental = serializer.save(renter=request.user)
+        user = request.user if request.user.is_authenticated else None
+        rental = serializer.save(renter=user)
 
         # --- Create rental items & update availability ---
         for item_data in rental_items_data:
@@ -1196,7 +1197,7 @@ class BookingViewSet(AbstractModelViewSet):
         - Special actions: partial_cancel, rate require ownership
         """
         if self.action == 'create':
-            return [ORPermission(IsAuthenticated, IsCompanyOrFrontDesk)]
+            return [AllowAny()]
         elif self.action in ['list', 'retrieve']:
             return [IsAuthenticated()]
         elif self.action in ['partial_cancel', 'cancel','rate_booking']:
@@ -1246,7 +1247,8 @@ class BookingViewSet(AbstractModelViewSet):
                         pass
         
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        user = self.request.user if self.request.user.is_authenticated else None
+        serializer.save(user=user)
 
     @extend_schema(
         summary="Price Preview for room selection",
@@ -1787,8 +1789,8 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         Applies access control based on the action and user role.
         """
         if self.action == 'create':
-            # Only authenticated users (and potentially company/front desk) can create
-            return [ORPermission(IsAuthenticated, IsCompanyOrFrontDesk)]
+            # Allow guests to create bookings
+            return [AllowAny()]
         elif self.action in ['list', 'retrieve']:
             # All authenticated users can see their permitted list/detail
             return [IsAuthenticated()]
@@ -1834,7 +1836,8 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
 
     def perform_create(self, serializer):
         """Passes the request user to the serializer's create method."""
-        serializer.save(user=self.request.user)
+        user = self.request.user if self.request.user.is_authenticated else None
+        serializer.save(user=user)
 
     @extend_schema(
         summary="Price Preview for event space selection",

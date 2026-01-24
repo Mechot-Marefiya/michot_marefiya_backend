@@ -38,6 +38,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from apps.listing.models import TermsAndConditions
 from apps.listing.models import RoomListing, RoomInventory
 from apps.core.utils import convert_currency
+from apps.core.services.email_service import BookingEmailService
 
 
 
@@ -880,6 +881,10 @@ class BookingService:
     @transaction.atomic()
     @staticmethod
     def create_booking(validated_data, user=None):
+        guest_email = validated_data.get("guest_email")
+        if not user and not guest_email and not validated_data.get("user"):
+            raise ValidationError("Either a user account or guest email is required to complete the booking.")
+
         items_data = validated_data.pop("items")
         
         # Extract T&C data
@@ -1175,6 +1180,9 @@ class BookingService:
         booking.status = booking.BookingStatus.CONFIRMED
         booking.save()
         logger.info(f"Booking {booking.id} status updated to CONFIRMED.")
+        
+        BookingEmailService.send_booking_confirmation(booking)
+        
         return booking
     
     @staticmethod
@@ -1200,6 +1208,10 @@ class EventSpaceBookingService:
         Creates a new Event Space Booking, validates availability, and decrements inventory, 
         using only the base price for calculation.
         """
+        guest_email = validated_data.get("guest_email")
+        if not user and not guest_email and not validated_data.get("user"):
+            raise ValidationError("Either a user account or guest email is required to complete the booking.")
+
         items_data = validated_data.pop("items")
         
         terms_accepted = validated_data.pop("terms_accepted", False)
@@ -1398,6 +1410,8 @@ class EventSpaceBookingService:
 
         booking.status = booking.BookingStatus.CONFIRMED
         booking.save()
+
+        BookingEmailService.send_booking_confirmation(booking)
 
         return booking
     
@@ -2036,6 +2050,10 @@ class GuestHouseBookingService:
         Creates a Guest House Booking, validates availability, 
         captures T&C snapshots, and updates inventory.
         """
+        guest_email = validated_data.get("guest_email")
+        if not user and not guest_email and not validated_data.get("renter"):
+             raise ValidationError("Either a user account or guest email is required to complete the booking.")
+
         items_data = validated_data.pop("items")
         terms_accepted = validated_data.pop("terms_accepted", False)
         terms_version = validated_data.pop("terms_version", "")
@@ -2142,6 +2160,9 @@ class GuestHouseBookingService:
 
         booking.status = booking.RentStatus.CONFIRMED
         booking.save()
+        
+        BookingEmailService.send_booking_confirmation(booking)
+        
         return booking
     
     @staticmethod
@@ -2187,6 +2208,10 @@ class CarRentalService:
     @transaction.atomic()
     @staticmethod
     def create_booking(validated_data, user=None):
+        guest_email = validated_data.get("guest_email")
+        if not user and not guest_email and not validated_data.get("renter"):
+            raise ValidationError("Either a user account or guest email is required to complete the booking.")
+
         rental_items_data = validated_data.pop('rental_items')
         terms_accepted = validated_data.pop("terms_accepted", False)
         terms_version = validated_data.pop("terms_version", "")
@@ -2286,4 +2311,7 @@ class CarRentalService:
 
         rental.status = rental.RentStatus.CONFIRMED
         rental.save()
+        
+        BookingEmailService.send_booking_confirmation(rental)
+        
         return rental

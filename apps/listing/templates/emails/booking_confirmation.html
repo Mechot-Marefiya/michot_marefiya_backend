@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Booking Confirmation</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background-color: #f4f4f4;
+            margin: 0;
+            padding: 0;
+        }
+        .container {
+            max-width: 600px;
+            margin: 20px auto;
+            background: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .content {
+            padding: 30px 20px;
+        }
+        .greeting {
+            font-size: 16px;
+            margin-bottom: 20px;
+        }
+        .booking-ref-box {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 25px 0;
+            border-radius: 4px;
+        }
+        .booking-ref {
+            font-size: 28px;
+            font-weight: bold;
+            color: #667eea;
+            letter-spacing: 2px;
+            font-family: 'Courier New', monospace;
+        }
+        .booking-ref-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        .details-grid {
+            display: table;
+            width: 100%;
+            margin: 20px 0;
+        }
+        .detail-row {
+            display: table-row;
+        }
+        .detail-label {
+            display: table-cell;
+            padding: 10px 0;
+            font-weight: 600;
+            color: #555;
+            width: 40%;
+        }
+        .detail-value {
+            display: table-cell;
+            padding: 10px 0;
+            color: #333;
+        }
+        .divider {
+            height: 1px;
+            background: #e0e0e0;
+            margin: 20px 0;
+        }
+        .notice {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .footer {
+            text-align: center;
+            padding: 20px;
+            background: #f8f9fa;
+            color: #666;
+            font-size: 13px;
+        }
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>✓ Booking Confirmed!</h1>
+        </div>
+        
+        <div class="content">
+            <div class="greeting">
+                <p>Dear <strong>{{ guest_name }}</strong>,</p>
+                <p>Thank you for booking with Michot Marefiya. Your reservation has been successfully confirmed.</p>
+            </div>
+            
+            <div class="booking-ref-box">
+                <div class="booking-ref-label">Your Booking Reference</div>
+                <div class="booking-ref">{{ booking_reference }}</div>
+            </div>
+            
+            <div class="divider"></div>
+            
+            <div class="details-grid">
+                <div class="detail-row">
+                    <div class="detail-label">Check-in Date:</div>
+                    <div class="detail-value">{{ check_in }}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Check-out Date:</div>
+                    <div class="detail-value">{{ check_out }}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Guest Email:</div>
+                    <div class="detail-value">{{ guest_email }}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Guest Phone:</div>
+                    <div class="detail-value">{{ guest_phone }}</div>
+                </div>
+                <div class="detail-row">
+                    <div class="detail-label">Total Amount:</div>
+                    <div class="detail-value"><strong>{{ total }} {{ currency }}</strong></div>
+                </div>
+            </div>
+            
+            <div class="notice">
+                <strong>⚠️ Important:</strong> Please save this email and your booking reference <strong>{{ booking_reference }}</strong>. You will need it for check-in and to manage your booking.
+            </div>
+            
+            <div class="divider"></div>
+            
+            <p style="font-size: 14px; color: #666;">
+                If you have any questions or need to modify your booking, please contact our support team or reply to this email.
+            </p>
+            
+            <p style="font-size: 14px; color: #666;">
+                We look forward to welcoming you!
+            </p>
+        </div>
+        
+        <div class="footer">
+            <p>&copy; 2026 Michot Marefiya. All rights reserved.</p>
+            <p>
+                <a href="https://michotmarefia.com">Visit Website</a> | 
+                <a href="mailto:support@michotmarefia.com">Contact Support</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>
