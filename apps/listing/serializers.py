@@ -1651,6 +1651,11 @@ class PartialCancelSerializer(serializers.Serializer):
     units_to_cancel = serializers.IntegerField(min_value=1)
 
 
+class GuestCancellationSerializer(serializers.Serializer):
+    guest_email = serializers.EmailField(required=True)
+    reason = serializers.CharField(required=False, allow_blank=True)
+
+
 class SearchRoomSerializer(CurrencyConversionMixin, serializers.Serializer):
     id = serializers.UUIDField()
     title = serializers.CharField()

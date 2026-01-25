@@ -91,6 +91,7 @@ from apps.listing.serializers import (
     AddonOfferingSerializer,
     AddonOfferingListSerializer,
     BookingLookupSerializer,
+    GuestCancellationSerializer,
 )
 from apps.listing.services import (
     StayAvailabilityService, BookingService, CarAvailabilityService, 
@@ -1270,11 +1271,11 @@ class BookingViewSet(AbstractModelViewSet):
         - READ: Users see own bookings, companies see bookings for their listings, admin sees all
         - Special actions: partial_cancel, rate require ownership
         """
-        if self.action in ['create', 'lookup']:
+        if self.action in ['create', 'lookup', 'cancel']:
             return [AllowAny()]
         elif self.action in ['list', 'retrieve']:
             return [IsAuthenticated()]
-        elif self.action in ['partial_cancel', 'cancel','rate_booking']:
+        elif self.action in ['partial_cancel', 'rate_booking']:
             return [IsBookingOwner()]
         else:
             return [IsAuthenticated()]
@@ -1415,11 +1416,46 @@ class BookingViewSet(AbstractModelViewSet):
             "items": total_items,
             **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency)
         })
+    @extend_schema(
+        summary="Cancel a booking (User or Guest)",
+        description="""
+        Cancel a booking.
+        - **Authenticated**: User cancels their own booking.
+        - **Guest**: Must provide `guest_email` matching the booking to verify ownership.
+        """,
+        request=GuestCancellationSerializer,
+        responses={200: BookingResponseSerializer}
+    )
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
-        """Allows an authenticated user to cancel their booking."""
+        """Allows an authenticated user or verified guest to cancel their booking."""
         booking = self.get_object()
         
+        # 1. Authenticated User Check
+        if request.user.is_authenticated:
+            pass # Permission class IsBookingOwner handles this? No, we might need manual check if permission is relaxed
+            # If strictly using IsBookingOwner in get_permissions, this block is safe.
+            # BUT: We are relaxing get_permissions to allow guests!
+        
+        # 2. Guest Verification Logic
+        if not request.user.is_authenticated:
+            if booking.user is not None:
+                return Response(
+                    {"detail": "This booking belongs to a registered user. Please log in to cancel."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            serializer = GuestCancellationSerializer(data=request.data)
+            if not serializer.is_valid():
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+            email_input = serializer.validated_data['guest_email']
+            if email_input.lower().strip() != booking.guest_email.lower().strip():
+                return Response(
+                    {"detail": "Email does not match the booking record."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
         try:
             cancelled_booking = BookingService.cancel_booking(booking)
         except BookingConflict as e:

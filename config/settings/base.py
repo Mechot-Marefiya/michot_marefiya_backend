@@ -307,5 +307,5 @@ DEFAULT_FROM_EMAIL = env(
 )
 
 # Override to console backend in DEBUG mode for safety
-if DEBUG:
-    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+# if DEBUG:
+#     EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

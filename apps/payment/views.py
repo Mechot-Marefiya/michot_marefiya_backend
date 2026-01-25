@@ -25,7 +25,7 @@ from .services import ChapaPaymentService
 
 @extend_schema(tags=["Payments"])
 class InitiatePaymentView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     
     @extend_schema(
         summary="Initiate payment for a booking",
@@ -107,18 +107,28 @@ class InitiatePaymentView(APIView):
         
         # Check permission: user must own the booking (or be admin)
         user = request.user
-        is_admin = user.is_superuser or (
-            hasattr(user, 'role') and
-            user.role and
-            user.role.code == RoleCode.ADMIN.value
-        )
         
-        booking_user = getattr(booking, user_field, None)
-        if not is_admin and booking_user != user:
-            return Response(
-                {"error": "You can only initiate payment for your own bookings."},
-                status=status.HTTP_403_FORBIDDEN
+        if user.is_authenticated:
+            is_admin = user.is_superuser or (
+                hasattr(user, 'role') and
+                user.role and
+                user.role.code == RoleCode.ADMIN.value
             )
+            
+            booking_user = getattr(booking, user_field, None)
+            if not is_admin and booking_user != user:
+                return Response(
+                    {"error": "You can only initiate payment for your own bookings."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+        else:
+            # GUEST FLOW VERIFICATION
+            booking_user = getattr(booking, user_field, None)
+            if booking_user is not None:
+                return Response(
+                    {"error": "This booking belongs to a registered user. Please log in to pay."},
+                    status=status.HTTP_403_FORBIDDEN
+                )
         
         status_field = 'status'
         booking_status = getattr(booking, status_field, None)
@@ -219,14 +229,23 @@ class InitiatePaymentView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        if request.user.is_authenticated:
+            payer_email = request.user.email
+            payer_first_name = request.user.first_name
+            payer_last_name = request.user.last_name
+        else:
+            payer_email = getattr(booking, 'guest_email', 'guest@michotmarefia.com')
+            payer_first_name = getattr(booking, 'guest_first_name', 'Guest')
+            payer_last_name = getattr(booking, 'guest_last_name', 'User')
+
         result = ChapaPaymentService.initialize_payment(
             booking=booking,
             booking_type=booking_type,
             amount=expected_amount,
             currency=payment_currency,
-            email=request.user.email,
-            first_name=request.user.first_name,
-            last_name=request.user.last_name,
+            email=payer_email,
+            first_name=payer_first_name,
+            last_name=payer_last_name,
             metadata=locked_metadata
         )
         
