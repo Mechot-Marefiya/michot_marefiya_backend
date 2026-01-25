@@ -26,7 +26,7 @@ from apps.listing.services import BookingService, ListingService, EventSpaceAvai
 from apps.listing.models import (
     Amenity,
     Booking,BookingRating,
-    BookingItem,StayAvailability,GuestHouseInventory,BookingAddon,
+    BookingItem,StayAvailability,GuestHouseInventory,BookingAddon,AddonOffering,
     CarListing,CarAvailability,
     GuestHouseProfile, GuestHouseRoom,
     PropertyListing,
@@ -1223,15 +1223,99 @@ class PropertyListingSerializer(serializers.ModelSerializer):
         ).to_representation(instance)
 
 
+class AddonOfferingSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AddonOffering
+        fields = [
+            'id', 'hotel', 'name', 'description', 'category', 
+            'price_per_unit', 'currency', 'pricing_type',
+            'is_active', 'max_quantity_per_booking',
+            'requires_inventory', 'daily_capacity',
+            'icon', 'display_order',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def validate(self, data):
+        requires_inventory = data.get('requires_inventory', False)
+        daily_capacity = data.get('daily_capacity')
+        
+        if requires_inventory and not daily_capacity:
+            raise serializers.ValidationError({
+                'daily_capacity': 'Daily capacity is required when inventory tracking is enabled'
+            })
+        
+        price_per_unit = data.get('price_per_unit')
+        if price_per_unit and price_per_unit <= 0:
+            raise serializers.ValidationError({
+                'price_per_unit': 'Price must be greater than zero'
+            })
+        
+        return data
+
+
+class AddonOfferingListSerializer(serializers.ModelSerializer):
+    hotel_name = serializers.CharField(source='hotel.name', read_only=True)
+    
+    class Meta:
+        model = AddonOffering
+        fields = [
+            'id', 'hotel', 'hotel_name', 'name', 'description', 'category',
+            'price_per_unit', 'currency', 'pricing_type',
+            'max_quantity_per_booking', 'icon'
+        ]
+        read_only_fields = fields
+
+
+class BookingAddonInputSerializer(serializers.Serializer):
+    offering_id = serializers.UUIDField(
+        help_text="UUID of the addon offering to book"
+    )
+    quantity = serializers.IntegerField(
+        min_value=1,
+        default=1,
+        help_text="Number of units to book"
+    )
+    
+    def validate(self, data):
+        offering_id = data.get('offering_id')
+        quantity = data.get('quantity', 1)
+        
+        try:
+            offering = AddonOffering.objects.get(id=offering_id)
+        except AddonOffering.DoesNotExist:
+            raise serializers.ValidationError({
+                'offering_id': f'Addon offering {offering_id} not found'
+            })
+        
+        if not offering.is_active:
+            raise serializers.ValidationError({
+                'offering_id': f'{offering.name} is currently unavailable'
+            })
+        
+        if offering.max_quantity_per_booking and quantity > offering.max_quantity_per_booking:
+            raise serializers.ValidationError({
+                'quantity': f'{offering.name}: Maximum {offering.max_quantity_per_booking} units allowed per booking'
+            })
+        
+        data['_offering'] = offering
+        
+        return data
+
 
 class BookingAddonSerializer(serializers.ModelSerializer):
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    offering_name = serializers.CharField(source='offering.name', read_only=True, allow_null=True)
+    offering_id = serializers.UUIDField(source='offering.id', read_only=True, allow_null=True)
     
     class Meta:
         model = BookingAddon
-        fields = ['id', 'booking_item', 'name', 'description', 
-                  'category', 'quantity', 'price_per_unit', 'subtotal']
-        read_only_fields = ['id', 'subtotal']
+        fields = [
+            'id', 'booking_item', 'offering_id', 'offering_name',
+            'name', 'description', 'category', 'quantity', 
+            'price_per_unit', 'currency', 'subtotal'
+        ]
+        read_only_fields = ['id', 'subtotal', 'offering_id', 'offering_name']
 
 class BookingItemResponseSerializer(serializers.ModelSerializer):
     room_id = serializers.UUIDField(source="room.id", read_only=True)
@@ -1251,13 +1335,15 @@ class BookingItemResponseSerializer(serializers.ModelSerializer):
             "units_booked",
             "price_per_unit",
             "subtotal",
-            "subtotal",
             "snapshot",
             "addons",
         ]
 
     def get_subtotal(self, obj):
-        return obj.subtotal()
+        booking = obj.booking
+        nights = (booking.check_out_date - booking.check_in_date).days
+        sub = obj.subtotal(nights=nights)
+        return f"{sub:.2f}"
 
 
 class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
@@ -1324,13 +1410,35 @@ class BookingRatingSerializer(serializers.ModelSerializer):
 
         return attrs
 
+
+class BookingLookupSerializer(serializers.Serializer):
+    reference = serializers.CharField(
+        required=True,
+        help_text="The unique booking reference (e.g., H-X7Y2Z9)"
+    )
+    email = serializers.EmailField(
+        required=True,
+        help_text="The guest email associated with the booking"
+    )
+
 class BookingItemSerializer(serializers.ModelSerializer):
     price_per_unit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     units_booked = serializers.IntegerField(min_value=1)
+    addons = BookingAddonInputSerializer(
+        many=True, 
+        required=False,
+        help_text="List of addon offerings to include with this room booking"
+    )
 
     class Meta:
         model = BookingItem
-        fields = ["room", "units_booked", "price_per_unit"]
+        fields = ["room", "units_booked", "price_per_unit", "addons"]
+    
+    def validate_addons(self, addons_data):
+        if not addons_data:
+            return addons_data
+        
+        return addons_data
 
 
 class BookingSerializer(serializers.ModelSerializer):

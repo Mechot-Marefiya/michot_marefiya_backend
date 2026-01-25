@@ -20,7 +20,9 @@ from apps.listing.models import (
     RoomInventory,
     BookingRating,
     Transaction,
-    StayAvailability
+    StayAvailability,
+    AddonOffering,
+    BookingAddon,
 )
 from apps.listing.models import Amenity
 from apps.listing.models import Season, SeasonalRate, BookingItemPrice
@@ -170,3 +172,49 @@ class StayAvailabilityAdmin(admin.ModelAdmin):
 @admin.register(GuestHouseBookingItem)
 class GuestHouseBookingItemAdmin(admin.ModelAdmin):
     list_display = ("booking", "room", "units_booked", "price_per_unit")
+
+
+@admin.register(AddonOffering)
+class AddonOfferingAdmin(admin.ModelAdmin):
+    list_display = ("name", "hotel", "category", "price_per_unit", "currency", "is_active", "display_order")
+    list_filter = ("category", "is_active", "hotel", "requires_inventory")
+    search_fields = ("name", "description", "hotel__company__name")
+    ordering = ("hotel", "display_order", "name")
+    
+    fieldsets = (
+        ("Basic Information", {
+            "fields": ("hotel", "name", "description", "category", "icon")
+        }),
+        ("Pricing", {
+            "fields": (("price_per_unit", "currency"), "pricing_type")
+        }),
+        ("Availability", {
+            "fields": ("is_active", "max_quantity_per_booking")
+        }),
+        ("Inventory (Optional)", {
+            "fields": ("requires_inventory", "daily_capacity"),
+            "classes": ("collapse",),
+            "description": "Enable if this addon has limited daily availability (e.g., airport shuttles)"
+        }),
+        ("Display", {
+            "fields": ("display_order",)
+        }),
+    )
+
+
+@admin.register(BookingAddon)
+class BookingAddonAdmin(admin.ModelAdmin):
+    list_display = ("name", "booking_item", "offering", "quantity", "price_per_unit", "currency", "subtotal_display")
+    list_filter = ("category", "offering__hotel")
+    search_fields = ("name", "booking_item__booking__id", "booking_item__booking__user__email")
+    readonly_fields = ("booking_item", "offering", "name", "description", "category", "quantity", "price_per_unit", "currency")
+    
+    def subtotal_display(self, obj):
+        return f"{obj.subtotal()} {obj.currency}"
+    subtotal_display.short_description = "Subtotal"
+    
+    def has_add_permission(self, request):
+        return False
+    
+    def has_delete_permission(self, request, obj=None):
+        return False

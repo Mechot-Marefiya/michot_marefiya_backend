@@ -55,8 +55,8 @@ from apps.listing.models import (
     EventSpaceBooking,
     CarRental,
     GuestHouseBooking,
-    GuestHouseBookingItem
-    
+    GuestHouseBookingItem,
+    AddonOffering,
 )
 from apps.account.models import(CompanyProfile,IndividualOwnerProfile,HotelProfile)
 from apps.listing.serializers import (
@@ -87,7 +87,10 @@ from apps.listing.serializers import (
     CarRentalSerializer,
     EventSpaceBookingResponseSerializer,
     EventSpaceBookingSerializer,
-    GuestHouseBookingSerializer
+    GuestHouseBookingSerializer,
+    AddonOfferingSerializer,
+    AddonOfferingListSerializer,
+    BookingLookupSerializer,
 )
 from apps.listing.services import (
     StayAvailabilityService, BookingService, CarAvailabilityService, 
@@ -548,7 +551,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         - READ: Authenticated users (see own + companies see their guesthouses)
         - UPDATE/DELETE: Booking owner or guesthouse owner
         """
-        if self.action == 'create':
+        if self.action in ['create', 'lookup']:
             return [AllowAny()]
         elif self.action in ['list', 'retrieve', 'my_bookings']:
             return [IsAuthenticated()]
@@ -599,6 +602,32 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         request=GuestHouseBookingSerializer,
         responses={201: GuestHouseBookingSerializer}
     )
+    @extend_schema(
+        summary="Lookup guest house booking status (Guest)",
+        description="Retrieve booking details using reference and guest email. No login required.",
+        parameters=[
+            OpenApiParameter("reference", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("email", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
+        ],
+        responses={200: GuestHouseBookingSerializer, 404: OpenApiTypes.OBJECT}
+    )
+    @action(detail=False, methods=['get'], url_path='lookup', permission_classes=[AllowAny])
+    def lookup(self, request):
+        serializer = BookingLookupSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        
+        reference = serializer.validated_data['reference']
+        email = serializer.validated_data['email']
+        
+        booking = get_object_or_404(
+            GuestHouseBooking.objects.prefetch_related("items", "items__room"),
+            booking_reference=reference,
+            guest_email=email
+        )
+        
+        response_serializer = GuestHouseBookingSerializer(booking, context=self.get_serializer_context())
+        return Response(response_serializer.data)
+    
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         """
@@ -920,7 +949,7 @@ class CarRentalViewSet(AbstractModelViewSet):
         return context
 
     def get_permissions(self):
-        if self.action == 'create':
+        if self.action in ['create', 'lookup']:
             return [AllowAny()]
         elif self.action in ['list', 'retrieve', 'my_rentals', 'rental_stats']:
             return [IsAuthenticated()]
@@ -946,6 +975,32 @@ class CarRentalViewSet(AbstractModelViewSet):
             return (user_rentals | company_rentals).distinct()
 
         return user_rentals
+
+    @extend_schema(
+        summary="Lookup car rental status (Guest)",
+        description="Retrieve rental details using reference and guest email. No login required.",
+        parameters=[
+            OpenApiParameter("reference", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("email", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
+        ],
+        responses={200: CarRentalSerializer, 404: OpenApiTypes.OBJECT}
+    )
+    @action(detail=False, methods=['get'], url_path='lookup', permission_classes=[AllowAny])
+    def lookup(self, request):
+        serializer = BookingLookupSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        
+        reference = serializer.validated_data['reference']
+        email = serializer.validated_data['email']
+        
+        rental = get_object_or_404(
+            CarRental.objects.prefetch_related("rental_items", "rental_items__car_listing"),
+            booking_reference=reference,
+            guest_email=email
+        )
+        
+        response_serializer = CarRentalSerializer(rental, context=self.get_serializer_context())
+        return Response(response_serializer.data)
 
     @transaction.atomic
     @extend_schema(
@@ -1211,11 +1266,11 @@ class BookingViewSet(AbstractModelViewSet):
 
     def get_permissions(self):
         """
-        - CREATE: Authenticated users can create bookings
+        - CREATE/LOOKUP: Allow anyone (guests)
         - READ: Users see own bookings, companies see bookings for their listings, admin sees all
         - Special actions: partial_cancel, rate require ownership
         """
-        if self.action == 'create':
+        if self.action in ['create', 'lookup']:
             return [AllowAny()]
         elif self.action in ['list', 'retrieve']:
             return [IsAuthenticated()]
@@ -1268,6 +1323,32 @@ class BookingViewSet(AbstractModelViewSet):
     def perform_create(self, serializer):
         user = self.request.user if self.request.user.is_authenticated else None
         serializer.save(user=user)
+
+    @extend_schema(
+        summary="Lookup room booking status (Guest)",
+        description="Retrieve booking details using reference and guest email. No login required.",
+        parameters=[
+            OpenApiParameter("reference", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("email", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
+        ],
+        responses={200: BookingResponseSerializer, 404: OpenApiTypes.OBJECT}
+    )
+    @action(detail=False, methods=['get'], url_path='lookup', permission_classes=[AllowAny])
+    def lookup(self, request):
+        serializer = BookingLookupSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        
+        reference = serializer.validated_data['reference']
+        email = serializer.validated_data['email']
+        
+        booking = get_object_or_404(
+            Booking.objects.prefetch_related("items", "items__room"),
+            booking_reference=reference,
+            guest_email=email
+        )
+        
+        response_serializer = BookingResponseSerializer(booking, context=self.get_serializer_context())
+        return Response(response_serializer.data)
 
     @extend_schema(
         summary="Price Preview for room selection",
@@ -1822,8 +1903,8 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         """
         Applies access control based on the action and user role.
         """
-        if self.action == 'create':
-            # Allow guests to create bookings
+        if self.action in ['create', 'lookup']:
+            # Allow guests to create and lookup bookings
             return [AllowAny()]
         elif self.action in ['list', 'retrieve']:
             # All authenticated users can see their permitted list/detail
@@ -1872,6 +1953,32 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         """Passes the request user to the serializer's create method."""
         user = self.request.user if self.request.user.is_authenticated else None
         serializer.save(user=user)
+
+    @extend_schema(
+        summary="Lookup event space booking status (Guest)",
+        description="Retrieve event space booking details using reference and guest email. No login required.",
+        parameters=[
+            OpenApiParameter("reference", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("email", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
+        ],
+        responses={200: EventSpaceBookingResponseSerializer, 404: OpenApiTypes.OBJECT}
+    )
+    @action(detail=False, methods=['get'], url_path='lookup', permission_classes=[AllowAny])
+    def lookup(self, request):
+        serializer = BookingLookupSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+        
+        reference = serializer.validated_data['reference']
+        email = serializer.validated_data['email']
+        
+        booking = get_object_or_404(
+            EventSpaceBooking.objects.prefetch_related("items", "items__event_space"),
+            booking_reference=reference,
+            guest_email=email
+        )
+        
+        response_serializer = EventSpaceBookingResponseSerializer(booking, context=self.get_serializer_context())
+        return Response(response_serializer.data)
 
     @extend_schema(
         summary="Price Preview for event space selection",
@@ -1979,5 +2086,67 @@ class TermsAndConditionsViewSet(viewsets.ReadOnlyModelViewSet):
         
         serializer = self.serializer_class(terms)
         return Response(serializer.data)
+
+
+@extend_schema(tags=["Accommodations"])
+class AddonOfferingViewSet(AbstractModelViewSet):
+    queryset = AddonOffering.objects.all()
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['hotel', 'category', 'is_active']
+    search_fields = ['name', 'description']
+    ordering_fields = ['display_order', 'price_per_unit', 'name']
+    ordering = ['display_order', 'name']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+
+        if user.is_authenticated and (user.is_superuser or (
+            hasattr(user, 'role') and user.role and user.role.code == RoleCode.ADMIN.value
+        )):
+            return queryset
+
+        if user.is_authenticated and hasattr(user, 'role') and user.role:
+            if user.role.code == RoleCode.COMPANY.value:
+                return queryset.filter(hotel__company__user=user)
+
+        return queryset.filter(is_active=True)
+
+    def get_serializer_class(self):
+        if self.action in ['list', 'retrieve']:
+            return AddonOfferingListSerializer
+        return AddonOfferingSerializer
+
+    def get_permissions(self):
+        if self.action in ['list', 'retrieve']:
+            return [AllowAny()]
+        return [IsListingOwner()]
+
+    def perform_create(self, serializer):
+        hotel = serializer.validated_data.get('hotel')
+        
+        is_admin = self.request.user.is_superuser or (
+            hasattr(self.request.user, 'role') and 
+            self.request.user.role and 
+            self.request.user.role.code == RoleCode.ADMIN.value
+        )
+        
+        if not is_admin:
+            if not hotel.company or not hotel.company.user == self.request.user:
+                raise PermissionDenied("You can only create addons for your own hotel.")
+        
+        serializer.save()
+
+    @extend_schema(
+        summary="List addons for a specific hotel",
+        description="Filter offerings by hotel ID. Returns public-facing addon details.",
+        parameters=[
+            OpenApiParameter("hotel", OpenApiTypes.UUID, OpenApiParameter.QUERY, description="Filter by Hotel UUID"),
+            OpenApiParameter("category", OpenApiTypes.STR, OpenApiParameter.QUERY, description="Filter by Category"),
+        ]
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
 
     

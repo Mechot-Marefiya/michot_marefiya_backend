@@ -17,6 +17,7 @@ from apps.listing.views import (
     EventSpaceBookingViewSet,
     GuestHouseBookingViewSet,
     TermsAndConditionsViewSet,
+    AddonOfferingViewSet,
 )
 
 router = DefaultRouter()
@@ -33,6 +34,7 @@ router.register('event-spaces',EventSpaceListingViewSet,basename="event-spaces")
 router.register('bookings-eventspaces',EventSpaceBookingViewSet,basename="bookings-eventspaces")
 router.register('guesthouse-bookings', GuestHouseBookingViewSet, basename='guesthouse-bookings')
 router.register('terms', TermsAndConditionsViewSet, basename='terms')
+router.register('addon-offerings', AddonOfferingViewSet, basename='addon-offerings')
 
 urlpatterns = [
    path(

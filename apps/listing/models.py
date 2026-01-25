@@ -1160,15 +1160,144 @@ class BookingItem(AbstractBaseModel):
         verbose_name_plural = _("Booking Items")
         db_table = "booking_items"
 
-    def subtotal(self):
-        return self.units_booked * self.price_per_unit
+    def subtotal(self, nights=None):
+        """Calculate subtotal. If nights provided, reflects total stay cost."""
+        base = self.units_booked * self.price_per_unit
+        if nights:
+            return base * nights
+        return base
 
     def __str__(self) -> str:
         return f"Room {self.room} booked for {self.booking.check_in_date}"
 
 
+class AddonOffering(AbstractBaseModel):
+    
+    class AddonCategory(models.TextChoices):
+        MEAL = "meal", _("Meal/Food")
+        TRANSPORT = "transport", _("Transportation")
+        SERVICE = "service", _("Service")
+        AMENITY = "amenity", _("Amenity/Equipment")
+    
+    class PricingType(models.TextChoices):
+        PER_PERSON = "per_person", _("Per Person")
+        PER_NIGHT = "per_night", _("Per Night")
+        PER_BOOKING = "per_booking", _("Per Booking (One-time)")
+        PER_UNIT = "per_unit", _("Per Unit")
+    
+    hotel = models.ForeignKey(
+        HotelProfile,
+        on_delete=models.CASCADE,
+        related_name="addon_offerings",
+        verbose_name=_("Hotel"),
+        help_text=_("The hotel that provides this addon")
+    )
+    
+    name = models.CharField(
+        max_length=100,
+        verbose_name=_("Addon Name"),
+        help_text=_("e.g., 'Breakfast Buffet', 'Airport Shuttle'")
+    )
+    description = models.TextField(
+        blank=True,
+        verbose_name=_("Description"),
+        help_text=_("Detailed description of the addon service")
+    )
+    category = models.CharField(
+        max_length=20,
+        choices=AddonCategory.choices,
+        default=AddonCategory.SERVICE,
+        verbose_name=_("Category")
+    )
+    
+    price_per_unit = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name=_("Price per Unit"),
+        help_text=_("Base price for one unit of this addon")
+    )
+    currency = models.CharField(
+        max_length=3,
+        default="ETB",
+        verbose_name=_("Currency"),
+        help_text=_("ISO 4217 currency code")
+    )
+    
+    pricing_type = models.CharField(
+        max_length=20,
+        choices=PricingType.choices,
+        default=PricingType.PER_UNIT,
+        verbose_name=_("Pricing Type"),
+        help_text=_("How this addon is priced")
+    )
+    
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name=_("Active"),
+        help_text=_("Whether this addon is currently available for booking")
+    )
+    max_quantity_per_booking = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name=_("Max Quantity per Booking"),
+        help_text=_("Maximum number of units per booking (null = unlimited)")
+    )
+    
+    # optional: inventory tracking (for future enhancement)
+    requires_inventory = models.BooleanField(
+        default=False,
+        verbose_name=_("Requires Inventory"),
+        help_text=_("Whether this addon has limited daily inventory")
+    )
+    daily_capacity = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name=_("Daily Capacity"),
+        help_text=_("Total available units per day (if inventory tracked)")
+    )
+    
+    icon = models.CharField(
+        max_length=50,
+        blank=True,
+        verbose_name=_("Icon"),
+        help_text=_("Icon identifier for frontend (e.g., 'breakfast', 'shuttle')")
+    )
+    display_order = models.PositiveIntegerField(
+        default=0,
+        verbose_name=_("Display Order"),
+        help_text=_("Order in which addon appears in lists (lower numbers first)")
+    )
+    
+    class Meta:
+        verbose_name = _("Addon Offering")
+        verbose_name_plural = _("Addon Offerings")
+        db_table = "addon_offerings"
+        ordering = ['hotel', 'display_order', 'name']
+        unique_together = [['hotel', 'name']] 
+        indexes = [
+            models.Index(fields=['hotel', 'is_active']),
+            models.Index(fields=['category']),
+        ]
+    
+    def clean(self):
+        super().clean()
+        
+        if self.requires_inventory and not self.daily_capacity:
+            raise ValidationError({
+                'daily_capacity': _("Daily capacity is required when inventory tracking is enabled")
+            })
+        
+        if self.price_per_unit and self.price_per_unit <= 0:
+            raise ValidationError({
+                'price_per_unit': _("Price must be greater than zero")
+            })
+    
+    def __str__(self):
+        hotel_name = getattr(self.hotel, 'company', None).name if self.hotel and hasattr(self.hotel, 'company') else "N/A"
+        return f"{hotel_name} - {self.name} ({self.price_per_unit} {self.currency})"
+
+
 class BookingAddon(AbstractBaseModel):
-    # additional services/products attached to a booking item(things like breakfast, airport transfer, etc...).
     
     class AddonCategory(models.TextChoices):
         MEAL = "meal", _("Meal/Food")
@@ -1182,6 +1311,16 @@ class BookingAddon(AbstractBaseModel):
         related_name="addons",
         verbose_name=_("Booking Item"),
         help_text=_("The room/item this addon is attached to")
+    )
+    
+    offering = models.ForeignKey(
+        AddonOffering,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="booking_instances",
+        verbose_name=_("Addon Offering"),
+        help_text=_("Reference to the hotel's addon offering definition (null for legacy bookings)")
     )
     
     name = models.CharField(
@@ -1210,7 +1349,13 @@ class BookingAddon(AbstractBaseModel):
         max_digits=10,
         decimal_places=2,
         verbose_name=_("Price per Unit"),
-        help_text=_("Price for one unit of this addon")
+        help_text=_("Price for one unit of this addon (snapshot at booking time)")
+    )
+    currency = models.CharField(
+        max_length=3,
+        default="ETB",
+        verbose_name=_("Currency"),
+        help_text=_("Currency code (snapshot at booking time)")
     )
     
     class Meta:

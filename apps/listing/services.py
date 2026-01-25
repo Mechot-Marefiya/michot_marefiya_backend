@@ -990,7 +990,8 @@ class BookingService:
                 "price_per_unit": str(booking_item.price_per_unit),
                 "currency": str(booking.currency),
                 "units_booked": booking_item.units_booked,
-                "subtotal": str(booking_item.subtotal()),
+                "nights": (booking.check_out_date - booking.check_in_date).days,
+                "subtotal": str(booking_item.subtotal(nights=(booking.check_out_date - booking.check_in_date).days)),
                 "rate_id": None,
                 "available_units_at_booking_time": available_units_at_booking,
             }
@@ -998,6 +999,31 @@ class BookingService:
             # store snapshot on booking item
             booking_item.snapshot = item_snapshot
             booking_item.save(update_fields=['snapshot'])
+
+            addons_data = item.get("addons", [])
+            if addons_data:
+                for addon_input in addons_data:
+                    offering = addon_input.get('_offering')
+                    if not offering:
+                        continue 
+                    
+                    if offering.hotel_id != room.hotel_id:
+                        from rest_framework.exceptions import ValidationError
+                        raise ValidationError({
+                            "addons": f"{offering.name} is not available for {room.hotel.name}"
+                        })
+                    
+                    from apps.listing.models import BookingAddon
+                    BookingAddon.objects.create(
+                        booking_item=booking_item,
+                        offering=offering,
+                        name=offering.name,
+                        description=offering.description,
+                        category=offering.category,
+                        quantity=addon_input.get('quantity', 1),
+                        price_per_unit=offering.price_per_unit,
+                        currency=offering.currency
+                    )
 
             # create per-night price lines if feature enabled
             if use_seasonal:
@@ -1049,8 +1075,19 @@ class BookingService:
                     "title": it.room.title,
                     "price_per_unit": str(it.price_per_unit),
                     "units_booked": it.units_booked,
-                    "subtotal": str(it.subtotal()),
+                    "nights": (booking.check_out_date - booking.check_in_date).days,
+                    "subtotal": str(it.subtotal(nights=(booking.check_out_date - booking.check_in_date).days)),
                     "images": it.snapshot.get('images') if isinstance(it.snapshot, dict) else None,
+                    "addons": [
+                        {
+                            "name": addon.name,
+                            "quantity": addon.quantity,
+                            "price_per_unit": str(addon.price_per_unit),
+                            "subtotal": str(addon.subtotal()),
+                            "currency": addon.currency,
+                        }
+                        for addon in it.addons.all()
+                    ]
                 }
                 for it in booking.items.all()
             ]
@@ -1197,6 +1234,11 @@ class BookingService:
             nights = (booking.check_out_date - booking.check_in_date).days
             for item in booking.items.all():
                 item_subtotals.append(Decimal(item.price_per_unit) * Decimal(item.units_booked) * Decimal(nights))
+        
+        from apps.listing.models import BookingAddon
+        for addon in BookingAddon.objects.filter(booking_item__booking=booking):
+            addon_subtotal = Decimal(addon.price_per_unit) * Decimal(addon.quantity)
+            item_subtotals.append(addon_subtotal)
         
         calculation = PriceCalculationService.calculate_totals(item_subtotals)
         return calculation["grand_total"]

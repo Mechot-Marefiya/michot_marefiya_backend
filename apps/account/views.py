@@ -14,7 +14,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, OpenApiTypes
-from apps.listing.models import Booking, RoomListing
+from apps.listing.models import Booking, RoomListing, AddonOffering
 from apps.listing.services import StayAvailabilityService
 from apps.account.docs.schemas import HotelProfileDocSerializer
 from apps.account.filters import HotelFilter
@@ -43,6 +43,7 @@ from apps.account.serializers import (
     UserUpdateSerializer,
     ChangePasswordSerializer,
 )
+from apps.listing.serializers import AddonOfferingListSerializer
 from apps.account.enums import RoleCode
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -466,3 +467,16 @@ class HotelProfileViewSet(AbstractModelViewSet):
         featured_hotels = HotelProfile.objects.filter(featured=True)
         serializer = self.get_serializer(featured_hotels, many=True)
         return Response(serializer.data)
+
+    @extend_schema(
+        summary="List addons for this hotel",
+        description="Returns all active addon offerings provided by this hotel.",
+        responses={200: AddonOfferingListSerializer(many=True)}
+    )
+    @action(detail=True, methods=['get'], url_path='addons')
+    def get_hotel_addons(self, request, pk=None):
+        hotel = self.get_object()
+        addons = AddonOffering.objects.filter(hotel=hotel, is_active=True)
+        serializer = AddonOfferingListSerializer(addons, many=True, context=self.get_serializer_context())
+        return Response(serializer.data)
+
