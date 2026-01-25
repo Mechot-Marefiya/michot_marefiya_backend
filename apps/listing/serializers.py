@@ -508,6 +508,12 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
     terms_accepted = serializers.BooleanField(required=True, write_only=True)
     terms_version = serializers.CharField(required=True, write_only=True)
     
+    guest_first_name = serializers.CharField(max_length=100, required=False, help_text="First name of the guest (Required if not logged in)")
+    guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the guest (Required if not logged in)")
+    guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
+    guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
+    special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests for the guesthouse stay")
+
     class Meta:
         model = GuestHouseBooking
         fields = [
@@ -526,8 +532,14 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
             "terms_content_snapshot",
             "is_legacy",
             "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests",
+            "booking_reference",
         ]
-        read_only_fields = ["id", "status", "renter", "total_price", "created_at", "updated_at"]
+        read_only_fields = ["id", "status", "renter", "total_price", "created_at", "updated_at", "booking_reference"]
+
+    booking_reference = serializers.CharField(read_only=True, help_text="Unique human-readable reference code (e.g., G-X7Y2Z9)")
+    terms_accepted_at = serializers.DateTimeField(read_only=True, help_text="Timestamp when the T&C were accepted")
+    terms_content_snapshot = serializers.CharField(read_only=True, help_text="Full text of the T&C at the time of booking")
+    is_legacy = serializers.BooleanField(read_only=True, help_text="Indicates if this booking was created before the T&C/Guest details update")
         
     def validate_terms_accepted(self, value):
         if not value:
@@ -882,7 +894,6 @@ class CarListingSerializer(serializers.ModelSerializer):
 
 class CarRentalItemSerializer(serializers.ModelSerializer):
     car_listing_details = serializers.SerializerMethodField()
-    car_listing_details = serializers.SerializerMethodField()
     subtotal = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     
     class Meta:
@@ -916,17 +927,29 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     terms_accepted = serializers.BooleanField(required=True, write_only=True)
     terms_version = serializers.CharField(required=True, write_only=True)
     
+    guest_first_name = serializers.CharField(max_length=100, required=False, help_text="First name of the renter (Required if not logged in)")
+    guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the renter (Required if not logged in)")
+    guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
+    guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
+    special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests for the rental")
+
     class Meta:
         model = CarRental
         fields = [
             'id', 'renter', 'renter_name', 'start_date', 'end_date', 
             'total_price', 'currency', 'status', 'rental_items', 'items_details',
             'created_at', 'updated_at', 'converted_price', 'converted_currency',
-            'terms_accepted', 'terms_version', 'terms_accepted_at', 'terms_content_snapshot',
+            'terms_accepted_at', 'terms_content_snapshot',
             'is_legacy',
             'guest_first_name', 'guest_last_name', 'guest_email', 'guest_phone', 'special_requests',
+            'booking_reference',
         ]
-        read_only_fields = ['id', 'status', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'status', 'created_at', 'updated_at', 'booking_reference']
+    
+    booking_reference = serializers.CharField(read_only=True, help_text="Unique human-readable reference code (e.g., C-X7Y2Z9)")
+    terms_accepted_at = serializers.DateTimeField(read_only=True, help_text="Timestamp when the T&C were accepted")
+    terms_content_snapshot = serializers.CharField(read_only=True, help_text="Full text of the T&C at the time of booking")
+    is_legacy = serializers.BooleanField(read_only=True, help_text="Indicates if this booking was created before the T&C/Guest details update")
     
     def validate_terms_accepted(self, value):
         if not value:
@@ -1216,7 +1239,7 @@ class BookingItemResponseSerializer(serializers.ModelSerializer):
     room_description = serializers.CharField(source="room.description", read_only=True)
     subtotal = serializers.SerializerMethodField()
     snapshot = serializers.JSONField(read_only=True)
-    addons = BookingAddonSerializer(many=True, read_only=True)
+    addons = BookingAddonSerializer(many=True, read_only=True, help_text="Additional services selected for this room.")
 
     class Meta:
         model = BookingItem
@@ -1263,7 +1286,13 @@ class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerial
             "terms_accepted_at",
             "terms_content_snapshot",
             "is_legacy",
+            "booking_reference",
         ]
+
+    booking_reference = serializers.CharField(read_only=True, help_text="Unique human-readable reference code (e.g., H-X7Y2Z9)")
+    terms_accepted_at = serializers.DateTimeField(read_only=True, help_text="Timestamp when the T&C were accepted")
+    terms_content_snapshot = serializers.CharField(read_only=True, help_text="Full text of the T&C at the time of booking")
+    is_legacy = serializers.BooleanField(read_only=True, help_text="Indicates if this booking was created before the T&C/Guest details update")
 
     def get_is_resumable(self, obj):
         from django.conf import settings
@@ -1318,6 +1347,12 @@ class BookingSerializer(serializers.ModelSerializer):
         write_only=True,
         help_text="The version of the T&C document that was accepted (e.g., '1.0')."
     )
+
+    guest_first_name = serializers.CharField(max_length=100, required=False, help_text="First name of the person staying (Required if not logged in)")
+    guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the person staying (Required if not logged in)")
+    guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
+    guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
+    special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests (e.g., late check-in, room preferences)")
 
     class Meta:
         model = Booking
@@ -1382,6 +1417,8 @@ class BookingSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if not user and request:
             user = request.user
+            if not user.is_authenticated:
+                user = None
         is_front_desk = False
         
         if user and user.is_authenticated and user.role and user.role.code == RoleCode.FRONT_DESK.value:
@@ -1578,7 +1615,13 @@ class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.M
             "terms_accepted_at",
             "terms_content_snapshot",
             "is_legacy",
+            "booking_reference",
         ]
+
+    booking_reference = serializers.CharField(read_only=True, help_text="Unique human-readable reference code (e.g., E-X7Y2Z9)")
+    terms_accepted_at = serializers.DateTimeField(read_only=True, help_text="Timestamp when the T&C were accepted")
+    terms_content_snapshot = serializers.CharField(read_only=True, help_text="Full text of the T&C at the time of booking")
+    is_legacy = serializers.BooleanField(read_only=True, help_text="Indicates if this booking was created before the T&C/Guest details update")
 
 # --- Write (Create) Serializers ---
 
@@ -1598,6 +1641,12 @@ class EventSpaceBookingSerializer(serializers.ModelSerializer):
     
     terms_accepted = serializers.BooleanField(required=True, write_only=True)
     terms_version = serializers.CharField(required=True, write_only=True)
+
+    guest_first_name = serializers.CharField(max_length=100, required=False, help_text="First name of the guest (Required if not logged in)")
+    guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the guest (Required if not logged in)")
+    guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
+    guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
+    special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests for the event")
 
     class Meta:
         model = EventSpaceBooking # Mapped to the dedicated model

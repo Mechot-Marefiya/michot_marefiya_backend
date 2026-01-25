@@ -339,7 +339,6 @@ class CarRental(AbstractBaseModel):
     )
 
     @property
-    @property
     def is_legacy(self):
         return not self.terms_accepted and not self.terms_version
 

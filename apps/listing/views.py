@@ -588,8 +588,14 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         return queryset.filter(query).distinct()
 
     @extend_schema(
-        summary="Create a guesthouse booking",
-        description="Create a new guesthouse booking with T&C acceptance. Validates availability and captures T&C snapshot.",
+        summary="Create a new guesthouse booking (supports guest checkout)",
+        description="""
+        Initiates a booking for one or more rooms in a guest house.
+        - Supports both authenticated users and guest checkout.
+        - Required guest fields: `guest_email`, `guest_phone`, `guest_first_name`, `guest_last_name`.
+        - `terms_accepted` and `terms_version` are mandatory.
+        - Returns a pending booking with a `booking_reference` (prefix 'G').
+        """,
         request=GuestHouseBookingSerializer,
         responses={201: GuestHouseBookingSerializer}
     )
@@ -942,6 +948,18 @@ class CarRentalViewSet(AbstractModelViewSet):
         return user_rentals
 
     @transaction.atomic
+    @extend_schema(
+        summary="Create a new car rental booking (supports guest checkout)",
+        description="""
+        Initiates a rental booking for one or more vehicles.
+        - Supports both authenticated users and guest checkout.
+        - If guest, provide renter details in `guest_*` fields.
+        - Checks vehicle availability across the requested date range.
+        - Returns a pending booking with a `booking_reference` (prefix 'C').
+        """,
+        request=CarRentalSerializer,
+        responses={201: CarRentalSerializer}
+    )
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -1171,13 +1189,14 @@ class BookingViewSet(AbstractModelViewSet):
     filterset_class = BookingFilter
 
     @extend_schema(
-        summary="Create a new room booking",
+        summary="Create a new room booking (supports guest checkout)",
         description="""
         Initiates a booking for one or more hotel rooms. 
-        - Requires an authenticated user.
+        - Supports both authenticated users and guest checkout.
+        - If not logged in, `guest_email`, `guest_phone`, `guest_first_name`, and `guest_last_name` are required.
         - `terms_accepted` must be true.
         - `terms_version` must match the hotel's latest active T&C version.
-        - Returns a pending booking that must be processed via the Payment initiation endpoint.
+        - Returns a pending booking with a human-readable `booking_reference` (e.g., H-X7Y2Z9).
         """,
         request=BookingSerializer,
         responses={201: BookingResponseSerializer}
@@ -1760,7 +1779,22 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
 
         serializer = self.get_serializer(available_listings, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
-@extend_schema(responses=EventSpaceBookingResponseSerializer)
+@extend_schema(
+    responses=EventSpaceBookingResponseSerializer,
+)
+@extend_schema(
+    methods=['post'],
+    summary="Create a new event space booking (supports guest checkout)",
+    description="""
+    Initiates a booking for an event space.
+    - Supports both authenticated users and guest checkout.
+    - If not logged in, guest details must be provided.
+    - Captures additional fields for `event_type`.
+    - Returns a pending booking with a `booking_reference`.
+    """,
+    request=EventSpaceBookingSerializer,
+    responses={201: EventSpaceBookingResponseSerializer}
+)
 class EventSpaceBookingViewSet(AbstractModelViewSet):
     """
     ViewSet for viewing and managing Event Space Bookings (Create/List/Retrieve only).
