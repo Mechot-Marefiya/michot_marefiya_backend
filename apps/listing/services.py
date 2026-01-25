@@ -714,7 +714,7 @@ class PriceService:
                 p = Decimal(inv.price).quantize(Decimal('0.01'))
                 results.append({
                     "date": date_val,
-                    "price_per_unit": p,
+                    "price_per_unit": f"{p:.2f}",
                     "source": "inventory",
                     "rate_id": None,
                     "note": None,
@@ -746,7 +746,7 @@ class PriceService:
                     p = Decimal(chosen.price_override).quantize(Decimal('0.01'))
                     results.append({
                         "date": date_val,
-                        "price_per_unit": p,
+                        "price_per_unit": f"{p:.2f}",
                         "source": "seasonal",
                         "rate_id": str(chosen.id),
                         "note": None,
@@ -758,7 +758,7 @@ class PriceService:
                     p = (base_price * Decimal(chosen.multiplier)).quantize(Decimal('0.01'))
                     results.append({
                         "date": date_val,
-                        "price_per_unit": p,
+                        "price_per_unit": f"{p:.2f}",
                         "source": "seasonal",
                         "rate_id": str(chosen.id),
                         "note": f"multiplier {chosen.multiplier}",
@@ -770,7 +770,7 @@ class PriceService:
             p = base_price.quantize(Decimal('0.01'))
             results.append({
                 "date": date_val,
-                "price_per_unit": p,
+                "price_per_unit": f"{p:.2f}",
                 "source": "base",
                 "rate_id": None,
                 "note": None,
@@ -801,7 +801,7 @@ class PriceService:
                 p = Decimal(inv.price).quantize(Decimal('0.01'))
                 results.append({
                     "date": date_val,
-                    "price_per_unit": p,
+                    "price_per_unit": f"{p:.2f}",
                     "source": "inventory",
                     "rate_id": None,
                     "note": None,
@@ -811,7 +811,7 @@ class PriceService:
                 p = base_price.quantize(Decimal('0.01'))
                 results.append({
                     "date": date_val,
-                    "price_per_unit": p,
+                    "price_per_unit": f"{p:.2f}",
                     "source": "base",
                     "rate_id": None,
                     "note": None,
@@ -847,10 +847,10 @@ class PriceCalculationService:
         
         response = {
             "totals": {
-                "items_subtotal": str(base_res["items_subtotal"].quantize(Decimal('0.01'))),
-                "platform_fee": str(base_res["platform_fee"].quantize(Decimal('0.01'))),
-                "platform_fee_percentage": str(base_res["platform_fee_percentage"].quantize(Decimal('0.01'))),
-                "grand_total": str(base_res["grand_total"].quantize(Decimal('0.01'))),
+                "items_subtotal": f"{base_res['items_subtotal']:.2f}",
+                "platform_fee": f"{base_res['platform_fee']:.2f}",
+                "platform_fee_percentage": f"{base_res['platform_fee_percentage']:.2f}",
+                "grand_total": f"{base_res['grand_total']:.2f}",
                 "currency": currency
             },
             "converted_totals": None
@@ -863,10 +863,10 @@ class PriceCalculationService:
                 conv_grand = convert_currency(base_res["grand_total"], currency, display_currency)
                 
                 response["converted_totals"] = {
-                    "items_subtotal": str(conv_subtotal.quantize(Decimal('0.01'))),
-                    "platform_fee": str(conv_fee.quantize(Decimal('0.01'))),
-                    "platform_fee_percentage": str(base_res["platform_fee_percentage"].quantize(Decimal('0.01'))),
-                    "grand_total": str(conv_grand.quantize(Decimal('0.01'))),
+                    "items_subtotal": f"{conv_subtotal:.2f}",
+                    "platform_fee": f"{conv_fee:.2f}",
+                    "platform_fee_percentage": f"{base_res['platform_fee_percentage']:.2f}",
+                    "grand_total": f"{conv_grand:.2f}",
                     "currency": display_currency.upper()
                 }
             except Exception as e:
@@ -983,16 +983,17 @@ class BookingService:
             except Exception:
                 available_units_at_booking = None
 
+            nights = (booking.check_out_date - booking.check_in_date).days
             item_snapshot = {
                 "room_id": str(room.id),
                 "title": room.title,
                 "images": image_urls,
-                "price_per_unit": str(booking_item.price_per_unit),
+                "nightly_rate": f"{booking_item.price_per_unit:.2f}",
+                "stay_total": f"{booking_item.subtotal(nights=nights):.2f}",
+                "subtotal": f"{booking_item.subtotal(nights=nights):.2f}",  # Legacy alias
                 "currency": str(booking.currency),
                 "units_booked": booking_item.units_booked,
-                "nights": (booking.check_out_date - booking.check_in_date).days,
-                "subtotal": str(booking_item.subtotal(nights=(booking.check_out_date - booking.check_in_date).days)),
-                "rate_id": None,
+                "nights": nights,
                 "available_units_at_booking_time": available_units_at_booking,
             }
 
@@ -1068,39 +1069,57 @@ class BookingService:
                     "image": hotel_image,
                 }
 
-            items_snapshots = [
-                {
+            nights = (booking.check_out_date - booking.check_in_date).days
+            items_snapshots = []
+            raw_rooms_subtotal = Decimal('0.00')
+            raw_addons_subtotal = Decimal('0.00')
+
+            for it in booking.items.all():
+                room_total = it.subtotal(nights=nights)
+                raw_rooms_subtotal += room_total
+                
+                addon_list = []
+                for addon in it.addons.all():
+                    addon_total = addon.subtotal()
+                    raw_addons_subtotal += addon_total
+                    addon_list.append({
+                        "name": addon.name,
+                        "quantity": addon.quantity,
+                        "unit_price": f"{addon.price_per_unit:.2f}",
+                        "total": f"{addon_total:.2f}",
+                        "currency": addon.currency,
+                    })
+
+                items_snapshots.append({
                     "room_id": str(it.room.id),
-                    "room_size_sqm": it.room.room_size_sqm,
                     "title": it.room.title,
-                    "price_per_unit": str(it.price_per_unit),
                     "units_booked": it.units_booked,
-                    "nights": (booking.check_out_date - booking.check_in_date).days,
-                    "subtotal": str(it.subtotal(nights=(booking.check_out_date - booking.check_in_date).days)),
-                    "images": it.snapshot.get('images') if isinstance(it.snapshot, dict) else None,
-                    "addons": [
-                        {
-                            "name": addon.name,
-                            "quantity": addon.quantity,
-                            "price_per_unit": str(addon.price_per_unit),
-                            "subtotal": str(addon.subtotal()),
-                            "currency": addon.currency,
-                        }
-                        for addon in it.addons.all()
-                    ]
-                }
-                for it in booking.items.all()
-            ]
+                    "nights": nights,
+                    "nightly_rate": f"{it.price_per_unit:.2f}",
+                    "stay_total": f"{room_total:.2f}",
+                    "subtotal": f"{room_total:.2f}",  # Legacy alias
+                    "addons": addon_list,
+                    "images": it.snapshot.get('images') if isinstance(it.snapshot, dict) else [],
+                })
+
+            base_subtotal = raw_rooms_subtotal + raw_addons_subtotal
+            platform_fee = base_subtotal * Decimal('0.05')
+            grand_total = base_subtotal + platform_fee
 
             booking_snapshot = {
                 "booking_id": str(booking.id),
                 "check_in_date": booking.check_in_date.isoformat(),
                 "check_out_date": booking.check_out_date.isoformat(),
-                "total_price": str(booking.total_price),
                 "currency": str(booking.currency),
                 "hotel": hotel_info,
+                "billing": {
+                    "subtotal_rooms": f"{raw_rooms_subtotal:.2f}",
+                    "subtotal_addons": f"{raw_addons_subtotal:.2f}",
+                    "platform_fee": f"{platform_fee:.2f}",
+                    "grand_total": f"{grand_total:.2f}",
+                },
                 "items": items_snapshots,
-                "snapshot_version": 2,
+                "snapshot_version": 3,
             }
 
             booking.snapshot = booking_snapshot
@@ -1352,7 +1371,45 @@ class EventSpaceBookingService:
         )
 
         booking.total_price = EventSpaceBookingService.get_booking_total(booking)
-        booking.save(update_fields=['total_price'])
+        
+        try:
+            duration = (booking.check_out_date - booking.check_in_date).days or 1
+            items_snapshots = []
+            raw_base_subtotal = Decimal('0.00')
+
+            for it in booking.items.all():
+                item_total = it.units_booked * it.price_per_unit
+                raw_base_subtotal += item_total
+                items_snapshots.append({
+                "title": it.event_space.title,
+                "units_booked": it.units_booked,
+                "nights": duration,
+                "nightly_rate": f"{it.price_per_unit:.2f}",
+                "stay_total": f"{item_total:.2f}",
+                "subtotal": f"{item_total:.2f}", # Legacy alias
+                "currency": booking.currency,
+            })
+
+            platform_fee = raw_base_subtotal * Decimal('0.05')
+            grand_total = raw_base_subtotal + platform_fee
+
+            booking.snapshot = {
+                "booking_id": str(booking.id),
+                "check_in_date": booking.check_in_date.isoformat(),
+                "check_out_date": booking.check_out_date.isoformat(),
+                "currency": booking.currency,
+                "billing": {
+                    "subtotal_items": f"{raw_base_subtotal:.2f}",
+                    "platform_fee": f"{platform_fee:.2f}",
+                    "grand_total": f"{grand_total:.2f}",
+                },
+                "audit_items": items_snapshots,
+                "snapshot_version": 3,
+            }
+        except Exception as e:
+            logger.error(f"Snapshot creation failed for EventSpace booking: {e}")
+
+        booking.save(update_fields=['total_price', 'snapshot'])
         
         return booking
 
@@ -2183,7 +2240,45 @@ class GuestHouseBookingService:
         )
 
         booking.total_price = GuestHouseBookingService.get_booking_total(booking)
-        booking.save(update_fields=['total_price'])
+        
+        try:
+            duration = (booking.end_date - booking.start_date).days or 1
+            items_snapshots = []
+            raw_rooms_subtotal = Decimal('0.00')
+
+            for it in booking.items.all():
+                room_total = it.units_booked * it.price_per_unit
+                raw_rooms_subtotal += room_total
+                items_snapshots.append({
+                    "title": it.room.title,
+                    "units_booked": it.units_booked,
+                    "nights": duration,
+                    "nightly_rate": f"{it.price_per_unit:.2f}",
+                    "stay_total": f"{room_total:.2f}",
+                    "subtotal": f"{room_total:.2f}", # Legacy alias
+                    "currency": booking.currency,
+                })
+
+            platform_fee = raw_rooms_subtotal * Decimal('0.05')
+            grand_total = raw_rooms_subtotal + platform_fee
+
+            booking.snapshot = {
+                "booking_id": str(booking.id),
+                "start_date": booking.start_date.isoformat(),
+                "end_date": booking.end_date.isoformat(),
+                "currency": booking.currency,
+                "billing": {
+                    "subtotal_items": f"{raw_rooms_subtotal:.2f}",
+                    "platform_fee": f"{platform_fee:.2f}",
+                    "grand_total": f"{grand_total:.2f}",
+                },
+                "audit_items": items_snapshots,
+                "snapshot_version": 3,
+            }
+        except Exception as e:
+            logger.error(f"Snapshot creation failed for GuestHouse booking: {e}")
+
+        booking.save(update_fields=['total_price', 'snapshot'])
 
         return booking
 
@@ -2325,6 +2420,45 @@ class CarRentalService:
             CarAvailabilityService.reserve_daily_units(
                 listing, rental.start_date, rental.end_date, units
             )
+
+        try:
+            duration = (rental.end_date - rental.start_date).days or 1
+            items_snapshots = []
+            raw_rental_subtotal = Decimal('0.00')
+
+            for it in rental.rental_items.all():
+                it_total = it.units_rent * it.price_per_unit
+                raw_rental_subtotal += it_total
+                items_snapshots.append({
+                    "title": f"{it.car_listing.brand} {it.car_listing.model}",
+                    "units_booked": it.units_rent,
+                    "nights": duration,
+                    "nightly_rate": f"{it.price_per_unit:.2f}",
+                    "stay_total": f"{it_total:.2f}",
+                    "subtotal": f"{it_total:.2f}", # Legacy alias
+                    "currency": rental.currency,
+                })
+
+            platform_fee = raw_rental_subtotal * Decimal('0.05')
+            grand_total = raw_rental_subtotal + platform_fee
+
+            rental.snapshot = {
+                "rental_id": str(rental.id),
+                "start_date": rental.start_date.isoformat(),
+                "end_date": rental.end_date.isoformat(),
+                "currency": rental.currency,
+                "billing": {
+                    "subtotal_items": f"{raw_rental_subtotal:.2f}",
+                    "platform_fee": f"{platform_fee:.2f}",
+                    "grand_total": f"{grand_total:.2f}",
+                },
+                "audit_items": items_snapshots,
+                "snapshot_version": 3,
+            }
+        except Exception as e:
+            logger.error(f"Snapshot creation failed for CarRental: {e}")
+            
+        rental.save(update_fields=['snapshot'])
 
         # Update Total Price (Includes 5% Platform Fee)
         rental.total_price = CarRentalService.get_booking_total(rental)

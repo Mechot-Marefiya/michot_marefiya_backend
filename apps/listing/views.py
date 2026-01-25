@@ -192,12 +192,12 @@ class RoomListingViewSet(AbstractModelViewSet):
             return Response({"detail": "check_out must be after check_in"}, status=400)
 
         lines = PriceService.resolve_price_details_batch(room, check_in_date, check_out_date)
-        total = sum(Decimal(str(l['price'])) for l in lines)
+        total = sum(Decimal(str(l['price_per_unit'])) for l in lines)
         has_discount = any(l.get('is_discounted') for l in lines)
 
         response = Response({
             'lines': lines,
-            'total': str(total.quantize(Decimal('0.01'))),
+            'total': f"{total:.2f}",
             'has_discount': bool(has_discount),
             'warning': (
                 'DEPRECATED: This endpoint does not include platform fees. '
@@ -272,12 +272,12 @@ class RoomListingViewSet(AbstractModelViewSet):
             prices = [Decimal(line['price_per_unit']) for line in quote['breakdown']]
             if prices:
                 preview_min = min(prices)
-                data['preview_min_price'] = str(preview_min)
-                data['preview_total'] = quote['items_subtotal']
+                data['preview_min_price'] = f"{preview_min:.2f}"
+                data['preview_total'] = f"{quote['items_subtotal']}" if isinstance(quote.get('items_subtotal'), str) else f"{quote.get('items_subtotal'):.2f}"
                 data['preview_has_discount'] = quote['has_discount']
-                data['display_price'] = str(preview_min) if quote['has_discount'] else data.get('base_price')
+                data['display_price'] = f"{preview_min:.2f}" if quote['has_discount'] else f"{data.get('base_price'):.2f}"
         else:
-            data['display_price'] = data.get('base_price')
+            data['display_price'] = f"{data.get('base_price'):.2f}"
 
         return Response(data)
 
@@ -308,12 +308,12 @@ class RoomListingViewSet(AbstractModelViewSet):
                 prices = [Decimal(line['price_per_unit']) for line in quote['breakdown']]
                 if prices:
                     preview_min = min(prices)
-                    data['preview_min_price'] = str(preview_min)
-                    data['preview_total'] = quote['items_subtotal']
+                    data['preview_min_price'] = f"{preview_min:.2f}"
+                    data['preview_total'] = f"{quote['items_subtotal']}" if isinstance(quote.get('items_subtotal'), str) else f"{quote.get('items_subtotal'):.2f}"
                     data['preview_has_discount'] = quote['has_discount']
-                    data['display_price'] = str(preview_min) if quote['has_discount'] else data.get('base_price')
+                    data['display_price'] = f"{preview_min:.2f}" if quote['has_discount'] else f"{data.get('base_price'):.2f}"
             else:
-                data['display_price'] = data.get('base_price')
+                data['display_price'] = f"{data.get('base_price'):.2f}"
 
             serialized.append(data)
 
@@ -750,8 +750,8 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
                 "id": str(room.id),
                 "title": room.title,
                 "units": units,
-                "price_per_unit": str(room.base_price),
-                "subtotal": str(item_base_total.quantize(Decimal('0.01'))),
+                "price_per_unit": f"{room.base_price:.2f}",
+                "subtotal": f"{item_base_total:.2f}",
                 "breakdown": price_details
             })
             
@@ -1548,7 +1548,7 @@ class StaySearchView(APIView):
 
                 if use_seasonal:
                     room_lines = PriceService.resolve_price_details_batch(room, check_in_date, check_out_date)
-                    room_prices = [Decimal(str(line['price'])) for line in room_lines]
+                    room_prices = [Decimal(str(line['price_per_unit'])) for line in room_lines]
 
                     if room_prices:
                         preview_total = sum(room_prices)
@@ -2037,8 +2037,8 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
                 "id": str(space.id),
                 "title": space.title,
                 "units": units,
-                "price_per_unit": str(price_details[0]['price_per_unit']) if price_details else str(space.base_price),
-                "subtotal": str(item_base_total.quantize(Decimal('0.01'))),
+                "price_per_unit": f"{(price_details[0]['price_per_unit'] if price_details else space.base_price):.2f}",
+                "subtotal": f"{item_base_total:.2f}",
                 "breakdown": price_details
             })
             
