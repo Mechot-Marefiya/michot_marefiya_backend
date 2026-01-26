@@ -2006,6 +2006,7 @@ class PricePreviewTotalsSerializer(serializers.Serializer):
     currency = serializers.CharField(help_text="ISO currency code (e.g., ETB)")
 
 class PricePreviewResponseSerializer(serializers.Serializer):
+    nights = serializers.IntegerField(help_text="Total number of nights for the stay")
     items = PricePreviewItemSerializer(many=True, help_text="Breakdown of individual items in the selection")
     totals = PricePreviewTotalsSerializer(help_text="Consolidated cost summary in the base booking currency")
     converted_totals = PricePreviewTotalsSerializer(

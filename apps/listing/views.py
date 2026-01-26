@@ -757,6 +757,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
             })
             
         return Response({
+            "nights": nights,
             "items": total_items,
             **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency)
         })
@@ -1412,7 +1413,9 @@ class BookingViewSet(AbstractModelViewSet):
                 "breakdown": price_details
             })
             
+        nights = (check_out - check_in).days
         return Response({
+            "nights": nights,
             "items": total_items,
             **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency)
         })
@@ -2079,6 +2082,7 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
             })
             
         return Response({
+            "nights": nights,
             "items": total_items,
             **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency)
         })
