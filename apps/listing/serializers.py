@@ -50,37 +50,47 @@ from datetime import timedelta
 
 
 class CurrencyConversionMixin(metaclass=serializers.SerializerMetaclass):
-    converted_price = serializers.SerializerMethodField()
-    converted_currency = serializers.SerializerMethodField()
+    conversion = serializers.SerializerMethodField(help_text="Metadata about currency conversion if requested")
 
-    def get_converted_price(self, obj):
+    def get_conversion(self, obj):
         target_currency = self.context.get("display_currency")
         if not target_currency:
             return None
         
         # Determine source price and currency
-        # Supports both model instances (getattr) and dictionaries (bracket access)
         def get_val(o, attr, default=None):
             if isinstance(o, dict):
                 return o.get(attr, default)
             return getattr(o, attr, default)
 
-        source_price = get_val(obj, "base_price")
-        if source_price is None:
-            source_price = get_val(obj, "total_price")
+        source_price = get_val(obj, "total_price") or get_val(obj, "base_price")
+        
+        if source_price is not None:
+            source_price = Decimal(str(source_price))
             
         source_currency = get_val(obj, "currency", "ETB")
 
         if source_price is None:
             return None
 
+        from apps.core.utils import convert_currency
+        from django.utils.timezone import now
         try:
-            return convert_currency(source_price, source_currency, target_currency)
+            converted_amount, rate = convert_currency(
+                source_price, 
+                source_currency, 
+                target_currency, 
+                return_rate=True
+            )
+            return {
+                "from": source_currency,
+                "to": target_currency,
+                "rate": f"{rate:.8g}",
+                "total": f"{converted_amount:.2f}",
+                "calculated_at": now().isoformat()
+            }
         except Exception:
             return None
-
-    def get_converted_currency(self, obj):
-        return self.context.get("display_currency")
 
 
 class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
@@ -131,7 +141,7 @@ class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
         subtotal = Decimal('0.00')
         
         for detail in price_details_list:
-            price_in_source = detail['price_per_unit']
+            price_in_source = Decimal(str(detail['price_per_unit']))
             
             if display_currency and display_currency != source_currency:
                 try:
@@ -226,8 +236,7 @@ class RoomListingResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin, se
             "children_allowed",
             "refundable",
             "available_units",
-            "converted_price",
-            "converted_currency",
+            "conversion",
             "price_quote",
         ]
 
@@ -540,21 +549,25 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
             "currency",
             "status",
             "items",
-            "converted_price",
-            "converted_currency",
+            "conversion",
             "terms_accepted",
             "terms_version",
             "terms_accepted_at",
             "terms_content_snapshot",
             "terms_url",
             "is_legacy",
+            "stay_total",
             "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests",
         ]
         read_only_fields = ["id", "status", "renter", "total_price", "created_at", "updated_at", "booking_reference"]
 
     total_price = serializers.SerializerMethodField()
     total_item_cost = serializers.SerializerMethodField()
+    stay_total = serializers.SerializerMethodField()
     terms_url = serializers.SerializerMethodField()
+
+    def get_stay_total(self, obj):
+        return self.get_total_item_cost(obj)
 
     def get_total_price(self, obj):
         return f"{obj.total_price:.2f}"
@@ -823,8 +836,7 @@ class CarListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, ser
             "current_availability",
             "created_at",
             "updated_at",
-            "converted_price",
-            "converted_currency",
+            "conversion",
             "price_quote",
         ]
     
@@ -984,16 +996,21 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
         fields = [
             'id', 'renter', 'renter_name', 'booking_reference', 'start_date', 'end_date', 
             'total_price', 'total_rental_cost', 'currency', 'status', 'rental_items', 'items_details',
-            'created_at', 'updated_at', 'converted_price', 'converted_currency',
+            'created_at', 'updated_at', 'conversion',
             'terms_accepted', 'terms_version', 'terms_accepted_at', 'terms_content_snapshot', 'terms_url',
             'is_legacy',
+            'stay_total',
             'guest_first_name', 'guest_last_name', 'guest_email', 'guest_phone', 'special_requests',
         ]
         read_only_fields = ['id', 'status', 'created_at', 'updated_at', 'booking_reference']
     
     total_price = serializers.SerializerMethodField()
     total_rental_cost = serializers.SerializerMethodField()
+    stay_total = serializers.SerializerMethodField()
     terms_url = serializers.SerializerMethodField()
+
+    def get_stay_total(self, obj):
+        return self.get_total_rental_cost(obj)
 
     def get_total_price(self, obj):
         return f"{obj.total_price:.2f}"
@@ -1369,7 +1386,7 @@ class BookingAddonInputSerializer(serializers.Serializer):
 
 
 class BookingAddonSerializer(serializers.ModelSerializer):
-    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, read_only=True)
+    subtotal = serializers.ReadOnlyField(help_text="Quantity x Price per unit (as string)")
     offering_name = serializers.CharField(source='offering.name', read_only=True, allow_null=True)
     offering_id = serializers.UUIDField(source='offering.id', read_only=True, allow_null=True)
     
@@ -1380,16 +1397,20 @@ class BookingAddonSerializer(serializers.ModelSerializer):
             'name', 'description', 'category', 'quantity', 
             'price_per_unit', 'currency', 'subtotal'
         ]
-        read_only_fields = ['id', 'subtotal', 'offering_id', 'offering_name']
+        read_only_fields = ['id', 'subtotal']
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data['price_per_unit'] = f"{instance.price_per_unit:.2f}"
+        data['subtotal'] = f"{instance.subtotal():.2f}"
+        return data
+
 
 class BookingItemResponseSerializer(serializers.ModelSerializer):
-    room_id = serializers.UUIDField(source="room.id", read_only=True)
-    room_title = serializers.CharField(source="room.title", read_only=True)
-    room_description = serializers.CharField(source="room.description", read_only=True)
+    room = serializers.SerializerMethodField(help_text="Nested room identification")
     stay_total = serializers.SerializerMethodField(help_text="Total cost for this item for the entire stay duration (Units x Rate x Nights)")
     nightly_rate = serializers.SerializerMethodField(help_text="The price per unit per night at the time of booking")
     nights = serializers.SerializerMethodField(help_text="Number of nights for this stay")
-    subtotal = serializers.SerializerMethodField(help_text="Kept for backward compatibility (mirrors stay_total)")
     snapshot = serializers.JSONField(read_only=True)
     addons = BookingAddonSerializer(many=True, read_only=True, help_text="Additional services selected for this room.")
 
@@ -1397,17 +1418,21 @@ class BookingItemResponseSerializer(serializers.ModelSerializer):
         model = BookingItem
         fields = [
             "id",
-            "room_id",
-            "room_title",
-            "room_description",
+            "room",
             "units_booked",
             "nights",
             "nightly_rate",
             "stay_total",
-            "subtotal",
             "snapshot",
             "addons",
         ]
+
+    def get_room(self, obj):
+        return {
+            "id": str(obj.room.id),
+            "title": obj.room.title,
+            "description": obj.room.description
+        }
 
     def get_nights(self, obj):
         return (obj.booking.check_out_date - obj.booking.check_in_date).days
@@ -1419,9 +1444,6 @@ class BookingItemResponseSerializer(serializers.ModelSerializer):
         nights = self.get_nights(obj)
         sub = obj.subtotal(nights=nights)
         return f"{sub:.2f}"
-
-    def get_subtotal(self, obj):
-        return self.get_stay_total(obj)
 
 
 class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
@@ -1445,8 +1467,7 @@ class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerial
             "status",
             "items",
             "snapshot",
-            "converted_price",
-            "converted_currency",
+            "conversion",
             "is_resumable",
             "terms_accepted",
             "terms_version",
@@ -1454,13 +1475,18 @@ class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerial
             "terms_content_snapshot",
             "terms_url",
             "is_legacy",
+            "stay_total",
             "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests",
         ]
 
     total_price = serializers.SerializerMethodField()
     total_room_cost = serializers.SerializerMethodField()
+    stay_total = serializers.SerializerMethodField()
     total_addon_cost = serializers.SerializerMethodField()
     terms_url = serializers.SerializerMethodField()
+
+    def get_stay_total(self, obj):
+        return self.get_total_room_cost(obj)
 
     def get_total_price(self, obj):
         return f"{obj.total_price:.2f}"
@@ -1672,6 +1698,7 @@ class SearchRoomSerializer(CurrencyConversionMixin, serializers.Serializer):
     preview_min_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
     preview_total = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     preview_has_discount = serializers.BooleanField(required=False)
+    nights = serializers.IntegerField(required=False)
 
 
 class SearchResultSerializer(CurrencyConversionMixin, serializers.Serializer):
@@ -1722,8 +1749,7 @@ class EventSpaceListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMix
             "total_units",
             "space_type",
             "floor_area_sqm",
-            "converted_price",
-            "converted_currency",
+            "conversion",
             "price_quote",
         ]
 class EventSpaceListingSerializer(serializers.ModelSerializer):
@@ -1840,20 +1866,24 @@ class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.M
             "status",
             "items",
             "event_type",
-            "converted_price",
-            "converted_currency",
+            "conversion",
             "terms_accepted",
             "terms_version",
             "terms_accepted_at",
             "terms_content_snapshot",
             "terms_url",
             "is_legacy",
+            "stay_total",
             "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests",
         ]
 
     total_price = serializers.SerializerMethodField()
     total_item_cost = serializers.SerializerMethodField()
+    stay_total = serializers.SerializerMethodField()
     terms_url = serializers.SerializerMethodField()
+
+    def get_stay_total(self, obj):
+        return self.get_total_item_cost(obj)
 
     def get_total_price(self, obj):
         return f"{obj.total_price:.2f}"
@@ -2009,10 +2039,10 @@ class PricePreviewResponseSerializer(serializers.Serializer):
     nights = serializers.IntegerField(help_text="Total number of nights for the stay")
     items = PricePreviewItemSerializer(many=True, help_text="Breakdown of individual items in the selection")
     totals = PricePreviewTotalsSerializer(help_text="Consolidated cost summary in the base booking currency")
-    converted_totals = PricePreviewTotalsSerializer(
+    conversion = serializers.JSONField(
         required=False, 
         allow_null=True, 
-        help_text="Optional: Consolidated cost summary converted to requested display currency"
+        help_text="Metadata and converted totals in the requested display currency"
     )
 
 

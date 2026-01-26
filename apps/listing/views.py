@@ -1575,16 +1575,17 @@ class StaySearchView(APIView):
                 "rooms": []
             }
             
+            duration = (check_out_date - check_in_date).days or 1
             for room_data in stay_data["rooms"]:
                 room = room_data["room"]
-                # compute seasonal preview if feature enabled
                 base_price = room.base_price
-                use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
-                display_price = base_price
-                preview_min = None
-                preview_total = None
+                
+                preview_total = base_price * duration
+                preview_min = base_price
                 preview_has_discount = False
-
+                display_price = base_price
+                
+                use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
                 if use_seasonal:
                     room_lines = PriceService.resolve_price_details_batch(room, check_in_date, check_out_date)
                     room_prices = [Decimal(str(line['price_per_unit'])) for line in room_lines]
@@ -1604,18 +1605,17 @@ class StaySearchView(APIView):
                     "preview_min_price": preview_min,
                     "preview_total": preview_total,
                     "preview_has_discount": preview_has_discount,
+                    "nights": duration,
                     "number_of_guests": room.number_of_guests,
                     "bed_type": room.bed_type,
                     "room_size_sqm": room.room_size_sqm,
                     "available_units": room_data["available_units"]
                 })
-
-            # Populate hotel-level base_price using the cheapest room's display_price or base_price
-            # to enable converted_price calculation in SearchResultSerializer
+            
+            # Use the stay total for the cheapest room as the hotel-level total
             if hotel_result["rooms"]:
+                hotel_result["total_price"] = min(r["preview_total"] for r in hotel_result["rooms"])
                 hotel_result["base_price"] = min(r["display_price"] for r in hotel_result["rooms"])
-                # We assume currency is consistent across rooms of the same hotel
-                # or we default to the first room's currency.
                 first_room = stay_data["rooms"][0]["room"]
                 hotel_result["currency"] = getattr(first_room, "currency", "ETB")
             
