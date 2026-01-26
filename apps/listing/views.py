@@ -268,17 +268,15 @@ class RoomListingViewSet(AbstractModelViewSet):
 
         quote = data.get('price_quote')
         if quote:
-            # price_quote already uses optimized resolve_price_details_batch internally
-            # so we map its components back to legacy fields for backward compatibility
-            prices = [Decimal(line['price_per_unit']) for line in quote['breakdown']]
+            prices = [Decimal(str(line['price_per_unit'])) for line in quote['breakdown']]
             if prices:
                 preview_min = min(prices)
                 data['preview_min_price'] = f"{preview_min:.2f}"
-                data['preview_total'] = f"{quote['items_subtotal']}" if isinstance(quote.get('items_subtotal'), str) else f"{quote.get('items_subtotal'):.2f}"
+                data['preview_total'] = str(quote['items_subtotal'])
                 data['preview_has_discount'] = quote['has_discount']
-                data['display_price'] = f"{preview_min:.2f}" if quote['has_discount'] else f"{data.get('base_price'):.2f}"
+                data['display_price'] = f"{preview_min:.2f}" if quote['has_discount'] else f"{Decimal(str(data.get('base_price'))):.2f}"
         else:
-            data['display_price'] = f"{data.get('base_price'):.2f}"
+            data['display_price'] = f"{Decimal(str(data.get('base_price'))):.2f}"
 
         return Response(data)
 
@@ -306,15 +304,15 @@ class RoomListingViewSet(AbstractModelViewSet):
             
             quote = data.get('price_quote')
             if quote:
-                prices = [Decimal(line['price_per_unit']) for line in quote['breakdown']]
+                prices = [Decimal(str(line['price_per_unit'])) for line in quote['breakdown']]
                 if prices:
                     preview_min = min(prices)
                     data['preview_min_price'] = f"{preview_min:.2f}"
-                    data['preview_total'] = f"{quote['items_subtotal']}" if isinstance(quote.get('items_subtotal'), str) else f"{quote.get('items_subtotal'):.2f}"
+                    data['preview_total'] = str(quote['items_subtotal'])
                     data['preview_has_discount'] = quote['has_discount']
-                    data['display_price'] = f"{preview_min:.2f}" if quote['has_discount'] else f"{data.get('base_price'):.2f}"
+                    data['display_price'] = f"{preview_min:.2f}" if quote['has_discount'] else f"{Decimal(str(data.get('base_price'))):.2f}"
             else:
-                data['display_price'] = f"{data.get('base_price'):.2f}"
+                data['display_price'] = f"{Decimal(str(data.get('base_price'))):.2f}"
 
             serialized.append(data)
 
