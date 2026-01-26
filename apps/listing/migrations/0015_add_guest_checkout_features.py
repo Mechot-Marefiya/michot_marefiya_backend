@@ -41,21 +41,7 @@ class Migration(migrations.Migration):
                     field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, to=settings.AUTH_USER_MODEL, verbose_name='Renter Account'),
                 ),
             ],
-            database_operations=[
-                # Physically rename tables to match the "new" names in state from 0014/0015
-                migrations.RunSQL(
-                    sql="""
-                    ALTER TABLE listing_carrental RENAME TO car_rentals;
-                    ALTER TABLE listing_guesthousebooking RENAME TO guest_house_bookings;
-                    ALTER TABLE listing_guesthousebookingitem RENAME TO guest_house_booking_items;
-                    """,
-                    reverse_sql="""
-                    ALTER TABLE car_rentals RENAME TO listing_carrental;
-                    ALTER TABLE guest_house_bookings RENAME TO listing_guesthousebooking;
-                    ALTER TABLE guest_house_booking_items RENAME TO listing_guesthousebookingitem;
-                    """
-                ),
-            ],
+            database_operations=[],
         ),
         migrations.CreateModel(
             name='BookingAddon',
