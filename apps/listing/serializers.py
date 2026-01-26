@@ -7,6 +7,7 @@ from django.utils.timezone import now
 from datetime import datetime
 from datetime import date
 from rest_framework.exceptions import ValidationError
+from drf_spectacular.utils import extend_schema_field, inline_serializer, OpenApiTypes
 from apps.account.services import ImageCreationService
 from apps.account.models import CompanyProfile, HotelProfile
 from django.shortcuts import get_object_or_404
@@ -52,6 +53,16 @@ from datetime import timedelta
 class CurrencyConversionMixin(metaclass=serializers.SerializerMetaclass):
     conversion = serializers.SerializerMethodField(help_text="Metadata about currency conversion if requested")
 
+    @extend_schema_field(inline_serializer(
+        name='CurrencyConversionMetadata',
+        fields={
+            'from': serializers.CharField(help_text="Original currency code (e.g., ETB)"),
+            'to': serializers.CharField(help_text="Target display currency code (e.g., USD)"),
+            'rate': serializers.CharField(help_text="Exchange rate used for calculation (as string)"),
+            'total': serializers.CharField(help_text="Total price converted to target currency (fixed 2 decimals)"),
+            'calculated_at': serializers.DateTimeField(help_text="ISO timestamp of when this rate was calculated")
+        }
+    ))
     def get_conversion(self, obj):
         target_currency = self.context.get("display_currency")
         if not target_currency:
@@ -335,8 +346,7 @@ class GuestHouseRoomResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin,
             "available_units",
             "bed_type",
             "room_size_sqm",
-            "converted_price",
-            "converted_currency",
+            "conversion",
             "price_quote",
         ]
         
@@ -561,17 +571,20 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
         ]
         read_only_fields = ["id", "status", "renter", "total_price", "created_at", "updated_at", "booking_reference"]
 
-    total_price = serializers.SerializerMethodField()
-    total_item_cost = serializers.SerializerMethodField()
-    stay_total = serializers.SerializerMethodField()
-    terms_url = serializers.SerializerMethodField()
+    total_price = serializers.SerializerMethodField(help_text="Grand total in base currency")
+    total_item_cost = serializers.SerializerMethodField(help_text="Total cost of all guesthouse units")
+    stay_total = serializers.SerializerMethodField(help_text="Alias for total_item_cost")
+    terms_url = serializers.SerializerMethodField(help_text="Link to view the latest terms for the guesthouse")
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_stay_total(self, obj):
         return self.get_total_item_cost(obj)
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_total_price(self, obj):
         return f"{obj.total_price:.2f}"
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_terms_url(self, obj):
         try:
             gh_id = obj.items.first().room.guest_house_id
@@ -579,6 +592,7 @@ class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSeri
         except Exception:
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_total_item_cost(self, obj):
         total = sum(item.subtotal() for item in obj.items.all())
         return f"{total:.2f}"
@@ -1004,17 +1018,20 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'status', 'created_at', 'updated_at', 'booking_reference']
     
-    total_price = serializers.SerializerMethodField()
-    total_rental_cost = serializers.SerializerMethodField()
-    stay_total = serializers.SerializerMethodField()
-    terms_url = serializers.SerializerMethodField()
+    total_price = serializers.SerializerMethodField(help_text="Grand total in base currency")
+    total_rental_cost = serializers.SerializerMethodField(help_text="Total cost of all rental units")
+    stay_total = serializers.SerializerMethodField(help_text="Alias for total_rental_cost")
+    terms_url = serializers.SerializerMethodField(help_text="Link to view the latest terms for the car rental company")
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_stay_total(self, obj):
         return self.get_total_rental_cost(obj)
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_total_price(self, obj):
         return f"{obj.total_price:.2f}"
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_terms_url(self, obj):
         try:
             company = obj.rental_items.first().car_listing.company
@@ -1024,6 +1041,7 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
         except Exception:
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_total_rental_cost(self, obj):
         total = sum(item.units_rent * item.price_per_unit for item in obj.rental_items.all())
         return f"{total:.2f}"
@@ -1229,8 +1247,7 @@ class PropertyListingResponseSerializer(CurrencyConversionMixin, serializers.Mod
             "bathrooms",
             "square_meters",
             "is_furnished",
-            "converted_price",
-            "converted_currency",
+            "conversion",
         ]
 
 
@@ -1411,7 +1428,7 @@ class BookingItemResponseSerializer(serializers.ModelSerializer):
     stay_total = serializers.SerializerMethodField(help_text="Total cost for this item for the entire stay duration (Units x Rate x Nights)")
     nightly_rate = serializers.SerializerMethodField(help_text="The price per unit per night at the time of booking")
     nights = serializers.SerializerMethodField(help_text="Number of nights for this stay")
-    snapshot = serializers.JSONField(read_only=True)
+    snapshot = serializers.JSONField(read_only=True, help_text="Immutable JSON snapshot of room details at booking time")
     addons = BookingAddonSerializer(many=True, read_only=True, help_text="Additional services selected for this room.")
 
     class Meta:
@@ -1427,6 +1444,14 @@ class BookingItemResponseSerializer(serializers.ModelSerializer):
             "addons",
         ]
 
+    @extend_schema_field(inline_serializer(
+        name='BookingItemRoomInfo',
+        fields={
+            'id': serializers.UUIDField(),
+            'title': serializers.CharField(),
+            'description': serializers.CharField()
+        }
+    ))
     def get_room(self, obj):
         return {
             "id": str(obj.room.id),
@@ -1434,12 +1459,15 @@ class BookingItemResponseSerializer(serializers.ModelSerializer):
             "description": obj.room.description
         }
 
+    @extend_schema_field(OpenApiTypes.INT)
     def get_nights(self, obj):
         return (obj.booking.check_out_date - obj.booking.check_in_date).days
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_nightly_rate(self, obj):
         return f"{obj.price_per_unit:.2f}"
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_stay_total(self, obj):
         nights = self.get_nights(obj)
         sub = obj.subtotal(nights=nights)
@@ -1479,18 +1507,21 @@ class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerial
             "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests",
         ]
 
-    total_price = serializers.SerializerMethodField()
-    total_room_cost = serializers.SerializerMethodField()
-    stay_total = serializers.SerializerMethodField()
-    total_addon_cost = serializers.SerializerMethodField()
-    terms_url = serializers.SerializerMethodField()
+    total_price = serializers.SerializerMethodField(help_text="Grand total (Rooms + Addons + Fees) in base currency")
+    total_room_cost = serializers.SerializerMethodField(help_text="Total cost of all rooms in the booking")
+    stay_total = serializers.SerializerMethodField(help_text="Alias for total_room_cost for consistency")
+    total_addon_cost = serializers.SerializerMethodField(help_text="Total cost of all selected addons")
+    terms_url = serializers.SerializerMethodField(help_text="Link to view the latest terms for this hotel")
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_stay_total(self, obj):
         return self.get_total_room_cost(obj)
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_total_price(self, obj):
         return f"{obj.total_price:.2f}"
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_terms_url(self, obj):
         try:
             hotel_id = obj.items.first().room.hotel_id
@@ -1498,11 +1529,13 @@ class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerial
         except Exception:
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_total_room_cost(self, obj):
         nights = (obj.check_out_date - obj.check_in_date).days
         total = sum(item.subtotal(nights=nights) for item in obj.items.all())
         return f"{total:.2f}"
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_total_addon_cost(self, obj):
         from apps.listing.models import BookingAddon
         addons = BookingAddon.objects.filter(booking_item__booking=obj)
@@ -1684,33 +1717,33 @@ class GuestCancellationSerializer(serializers.Serializer):
 
 
 class SearchRoomSerializer(CurrencyConversionMixin, serializers.Serializer):
-    id = serializers.UUIDField()
-    title = serializers.CharField()
-    description = serializers.CharField()
-    base_price = serializers.DecimalField(max_digits=10, decimal_places=2)
-    currency = serializers.CharField(required=False, default="ETB")
-    number_of_guests = serializers.IntegerField()
-    bed_type = serializers.CharField()
-    room_size_sqm = serializers.IntegerField()
-    available_units = serializers.IntegerField()
-    # Optional seasonal preview fields populated by StaySearchView when enabled
-    display_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
-    preview_min_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
-    preview_total = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
-    preview_has_discount = serializers.BooleanField(required=False)
-    nights = serializers.IntegerField(required=False)
+    id = serializers.UUIDField(help_text="Unique identifier for the room type")
+    title = serializers.CharField(help_text="Display title of the room (e.g., Deluxe Suite)")
+    description = serializers.CharField(help_text="Detailed description of room features")
+    base_price = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Starting nightly rate in base currency")
+    currency = serializers.CharField(required=False, default="ETB", help_text="ISO currency code")
+    number_of_guests = serializers.IntegerField(help_text="Maximum occupancy allowed")
+    bed_type = serializers.CharField(help_text="Bed configuration (e.g., King, Twin)")
+    room_size_sqm = serializers.IntegerField(help_text="Room area in square meters")
+    available_units = serializers.IntegerField(help_text="Total units remained for the selected dates")
+    
+    display_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, help_text="The price to show the user (takes into account seasonal discounts)")
+    preview_min_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, help_text="The lowest nightly rate found in the date range")
+    preview_total = serializers.DecimalField(max_digits=12, decimal_places=2, required=False, help_text="The grand total for the entire duration of the stay")
+    preview_has_discount = serializers.BooleanField(required=False, help_text="True if any night in the range has a seasonal discount")
+    nights = serializers.IntegerField(required=False, help_text="Number of nights for the stay duration")
 
 
 class SearchResultSerializer(CurrencyConversionMixin, serializers.Serializer):
-    hotel_id = serializers.UUIDField()
-    hotel_name = serializers.CharField()
-    city = serializers.CharField()
-    stars = serializers.IntegerField(allow_null=True)
-    images = ListingImageSerializer(many=True)
-    facilities = FacilityResponseSerializer(many=True)
-    featured = serializers.BooleanField()
-    is_favorite = serializers.SerializerMethodField()
-    rooms = SearchRoomSerializer(many=True)
+    hotel_id = serializers.UUIDField(help_text="Unique ID of the hotel")
+    hotel_name = serializers.CharField(help_text="Name of the hotel / property")
+    city = serializers.CharField(help_text="City location")
+    stars = serializers.IntegerField(allow_null=True, help_text="Star rating (1-5)")
+    images = ListingImageSerializer(many=True, help_text="Gallery of hotel images")
+    facilities = FacilityResponseSerializer(many=True, help_text="Hotel facilities (Pool, Spa, etc.)")
+    featured = serializers.BooleanField(help_text="True if this is a sponsored or featured property")
+    is_favorite = serializers.SerializerMethodField(help_text="True if the current user has favorited this hotel")
+    rooms = SearchRoomSerializer(many=True, help_text="Available room types in this hotel for the period")
 
     def get_is_favorite(self, obj):
         # pure serializer logic; expects `favorite_object_ids` in context
@@ -1877,17 +1910,20 @@ class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.M
             "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests",
         ]
 
-    total_price = serializers.SerializerMethodField()
-    total_item_cost = serializers.SerializerMethodField()
-    stay_total = serializers.SerializerMethodField()
-    terms_url = serializers.SerializerMethodField()
+    total_price = serializers.SerializerMethodField(help_text="Grand total in base currency")
+    total_item_cost = serializers.SerializerMethodField(help_text="Total cost of all event space units")
+    stay_total = serializers.SerializerMethodField(help_text="Alias for total_item_cost")
+    terms_url = serializers.SerializerMethodField(help_text="Link to view the latest terms for the hotel")
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_stay_total(self, obj):
         return self.get_total_item_cost(obj)
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_total_price(self, obj):
         return f"{obj.total_price:.2f}"
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_terms_url(self, obj):
         try:
             hotel_id = obj.items.first().event_space.hotel_id
@@ -1895,6 +1931,7 @@ class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.M
         except Exception:
             return None
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_total_item_cost(self, obj):
         total = sum(item.units_booked * item.price_per_unit for item in obj.items.all())
         return f"{total:.2f}"
