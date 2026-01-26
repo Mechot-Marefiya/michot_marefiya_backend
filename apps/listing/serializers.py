@@ -985,7 +985,7 @@ class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
             'id', 'renter', 'renter_name', 'booking_reference', 'start_date', 'end_date', 
             'total_price', 'total_rental_cost', 'currency', 'status', 'rental_items', 'items_details',
             'created_at', 'updated_at', 'converted_price', 'converted_currency',
-            'terms_accepted_at', 'terms_content_snapshot', 'terms_url',
+            'terms_accepted', 'terms_version', 'terms_accepted_at', 'terms_content_snapshot', 'terms_url',
             'is_legacy',
             'guest_first_name', 'guest_last_name', 'guest_email', 'guest_phone', 'special_requests',
         ]
@@ -1454,6 +1454,7 @@ class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerial
             "terms_content_snapshot",
             "terms_url",
             "is_legacy",
+            "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests",
         ]
 
     total_price = serializers.SerializerMethodField()
@@ -1847,6 +1848,7 @@ class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.M
             "terms_content_snapshot",
             "terms_url",
             "is_legacy",
+            "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests",
         ]
 
     total_price = serializers.SerializerMethodField()

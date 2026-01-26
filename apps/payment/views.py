@@ -33,6 +33,10 @@ class InitiatePaymentView(APIView):
         Initiates a payment transaction via Chapa for a specific booking.
         The server calculates and locks the exchange rate at the moment of initiation 
         to ensure price consistency throughout the payment flow.
+        
+        **Access Control**:
+        - **Authenticated**: Users can pay for their own bookings.
+        - **Guest**: Public access allowed if the booking is a 'Guest Booking' (no registered user).
         """,
         request=PaymentInitializeSerializer,
         responses={

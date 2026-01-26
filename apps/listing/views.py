@@ -592,18 +592,6 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         return queryset.filter(query).distinct()
 
     @extend_schema(
-        summary="Create a new guesthouse booking (supports guest checkout)",
-        description="""
-        Initiates a booking for one or more rooms in a guest house.
-        - Supports both authenticated users and guest checkout.
-        - Required guest fields: `guest_email`, `guest_phone`, `guest_first_name`, `guest_last_name`.
-        - `terms_accepted` and `terms_version` are mandatory.
-        - Returns a pending booking with a `booking_reference` (prefix 'G').
-        """,
-        request=GuestHouseBookingSerializer,
-        responses={201: GuestHouseBookingSerializer}
-    )
-    @extend_schema(
         summary="Lookup guest house booking status (Guest)",
         description="Retrieve booking details using reference and guest email. No login required.",
         parameters=[
@@ -629,6 +617,18 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         response_serializer = GuestHouseBookingSerializer(booking, context=self.get_serializer_context())
         return Response(response_serializer.data)
     
+    @extend_schema(
+        summary="Create a new guesthouse booking (supports guest checkout)",
+        description="""
+        Initiates a booking for one or more rooms in a guest house.
+        - Supports both authenticated users and guest checkout.
+        - Required guest fields: `guest_email`, `guest_phone`, `guest_first_name`, `guest_last_name`.
+        - `terms_accepted` and `terms_version` are mandatory.
+        - Returns a pending booking with a `booking_reference` (prefix 'G').
+        """,
+        request=GuestHouseBookingSerializer,
+        responses={201: GuestHouseBookingSerializer}
+    )
     @transaction.atomic
     def create(self, request, *args, **kwargs):
         """
