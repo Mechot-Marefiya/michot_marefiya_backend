@@ -518,7 +518,8 @@ class GuestHouseProfileViewSet(AbstractModelViewSet):
                 )
             
             context = self.get_serializer_context()
-            context["availability_map"] = meta
+            availability_map = {row["guest_house_room"]: row["min_available"] for row in meta}
+            context["availability_map"] = availability_map
             
             serializer = GuestHouseProfileResponseSerializer(qs, many=True, context=context)
             return Response({
