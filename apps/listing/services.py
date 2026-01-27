@@ -2227,7 +2227,7 @@ class GuestHouseBookingService:
             units = item["units_booked"]
             
             price_details = PriceService.resolve_price_details_batch(room, booking.start_date, booking.end_date)
-            total_price_for_one_unit = sum(d["price_per_unit"] for d in price_details)
+            total_price_for_one_unit = sum(Decimal(str(d["price_per_unit"])) for d in price_details)
 
             obj = GuestHouseBookingItem.objects.create(
                 booking=booking, 
