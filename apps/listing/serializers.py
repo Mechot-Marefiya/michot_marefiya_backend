@@ -75,7 +75,7 @@ class CurrencyConversionMixin(metaclass=serializers.SerializerMetaclass):
                 return o.get(attr, default)
             return getattr(o, attr, default)
 
-        source_price = get_val(obj, "total_price") or get_val(obj, "base_price")
+        source_price = get_val(obj, "total_price") or get_val(obj, "base_price") or get_val(obj, "price_per_unit")
         
         if source_price is not None:
             source_price = Decimal(str(source_price))
@@ -1357,7 +1357,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
         ).to_representation(instance)
 
 
-class AddonOfferingSerializer(serializers.ModelSerializer):
+class AddonOfferingSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     class Meta:
         model = AddonOffering
         fields = [
@@ -1366,7 +1366,7 @@ class AddonOfferingSerializer(serializers.ModelSerializer):
             'is_active', 'max_quantity_per_booking',
             'requires_inventory', 'daily_capacity',
             'icon', 'display_order',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at', 'conversion'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     
@@ -1388,7 +1388,7 @@ class AddonOfferingSerializer(serializers.ModelSerializer):
         return data
 
 
-class AddonOfferingListSerializer(serializers.ModelSerializer):
+class AddonOfferingListSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     hotel_name = serializers.CharField(source='hotel.name', read_only=True)
     
     class Meta:
@@ -1396,7 +1396,7 @@ class AddonOfferingListSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'hotel', 'hotel_name', 'name', 'description', 'category',
             'price_per_unit', 'currency', 'pricing_type',
-            'max_quantity_per_booking', 'icon'
+            'max_quantity_per_booking', 'icon', 'conversion'
         ]
         read_only_fields = fields
 

@@ -386,7 +386,7 @@ class GuestHouseProfileViewSet(AbstractModelViewSet):
         """
         if self.action == 'create':
             return [IsAuthenticated()]
-        elif self.action in ['list', 'retrieve']:
+        elif self.action in ['list', 'retrieve', 'check_availability']:
             return [AllowAny()]
         else:
             return [IsListingOwner()]
@@ -548,7 +548,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         - READ: Authenticated users (see own + companies see their guesthouses)
         - UPDATE/DELETE: Booking owner or guesthouse owner
         """
-        if self.action in ['create', 'lookup']:
+        if self.action in ['create', 'lookup', 'price_preview']:
             return [AllowAny()]
         elif self.action in ['list', 'retrieve', 'my_bookings']:
             return [IsAuthenticated()]
@@ -755,7 +755,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         return Response({
             "nights": nights,
             "items": total_items,
-            **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency)
+            **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency, items=total_items)
         })
 
 # Car Listing ViewSet
@@ -1268,7 +1268,7 @@ class BookingViewSet(AbstractModelViewSet):
         - READ: Users see own bookings, companies see bookings for their listings, admin sees all
         - Special actions: partial_cancel, rate require ownership
         """
-        if self.action in ['create', 'lookup', 'cancel']:
+        if self.action in ['create', 'lookup', 'cancel', 'price_preview']:
             return [AllowAny()]
         elif self.action in ['list', 'retrieve']:
             return [IsAuthenticated()]
@@ -1413,7 +1413,7 @@ class BookingViewSet(AbstractModelViewSet):
         return Response({
             "nights": nights,
             "items": total_items,
-            **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency)
+            **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency, items=total_items)
         })
     @extend_schema(
         summary="Cancel a booking (User or Guest)",
@@ -1729,7 +1729,7 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
         if self.action == 'create':
             # Only authenticated users (Company/Admin) can create listings
             return [IsAuthenticated()]
-        elif self.action in ['list', 'retrieve']:
+        elif self.action in ['list', 'retrieve', 'search']:
             # Public access for reading listings
             return [AllowAny()]
         else:
@@ -1928,7 +1928,7 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         """
         Applies access control based on the action and user role.
         """
-        if self.action in ['create', 'lookup']:
+        if self.action in ['create', 'lookup', 'price_preview']:
             # Allow guests to create and lookup bookings
             return [AllowAny()]
         elif self.action in ['list', 'retrieve']:
@@ -2070,7 +2070,7 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         return Response({
             "nights": nights,
             "items": total_items,
-            **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency)
+            **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency, items=total_items)
         })
 
 
@@ -2168,6 +2168,11 @@ class AddonOfferingViewSet(AbstractModelViewSet):
     search_fields = ['name', 'description']
     ordering_fields = ['display_order', 'price_per_unit', 'name']
     ordering = ['display_order', 'name']
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["display_currency"] = get_display_currency(self.request)
+        return context
 
     def get_queryset(self):
         queryset = super().get_queryset()

@@ -841,7 +841,7 @@ class PriceCalculationService:
         }
 
     @staticmethod
-    def calculate_preview_totals(item_subtotals, currency="ETB", display_currency=None):
+    def calculate_preview_totals(item_subtotals, currency="ETB", display_currency=None, items=None):
         
         base_res = PriceCalculationService.calculate_totals(item_subtotals)
         
@@ -864,7 +864,7 @@ class PriceCalculationService:
                 conv_fee = convert_currency(base_res["platform_fee"], currency, display_currency)
                 conv_grand = convert_currency(base_res["grand_total"], currency, display_currency)
                 
-                response["conversion"] = {
+                conversion_data = {
                     "from": currency,
                     "to": display_currency.upper(),
                     "rate": f"{rate:g}",
@@ -874,6 +874,30 @@ class PriceCalculationService:
                     "platform_fee_percentage": f"{base_res['platform_fee_percentage']:.2f}",
                     "grand_total": f"{conv_grand:.2f}",
                 }
+                
+                if items:
+                    for item in items:
+                        ppu = Decimal(str(item.get("price_per_unit", 0)))
+                        sub = Decimal(str(item.get("subtotal", 0)))
+                        
+                        conv_ppu = convert_currency(ppu, currency, display_currency)
+                        conv_sub = convert_currency(sub, currency, display_currency)
+                        
+                        item["conversion"] = {
+                            "price_per_unit": f"{conv_ppu:.2f}",
+                            "subtotal": f"{conv_sub:.2f}",
+                            "currency": display_currency.upper()
+                        }
+                        
+                        for entry in item.get("breakdown", []):
+                            entry_ppu = Decimal(str(entry.get("price_per_unit", 0)))
+                            conv_entry_ppu = convert_currency(entry_ppu, currency, display_currency)
+                            entry["conversion"] = {
+                                "price_per_unit": f"{conv_entry_ppu:.2f}",
+                                "currency": display_currency.upper()
+                            }
+                
+                response["conversion"] = conversion_data
             except Exception as e:
                 import logging
                 logger = logging.getLogger(__name__)
