@@ -2113,6 +2113,52 @@ class TermsAndConditionsViewSet(viewsets.ReadOnlyModelViewSet):
         serializer = self.serializer_class(terms)
         return Response(serializer.data)
 
+    @extend_schema(
+        summary="Get active Terms & Conditions for a guest house",
+        description="Retrieve the currently active T&C for a specific guest house profile",
+        responses={200: TermsAndConditionsSerializer, 404: None}
+    )
+    @action(detail=False, methods=['get'], url_path='guesthouse/(?P<gh_id>[^/.]+)')
+    def guesthouse_terms(self, request, gh_id=None):
+        """Get active T&C for a guest house"""
+        from apps.listing.models import GuestHouseProfile
+        from apps.listing.services import TermsService
+        
+        gh = get_object_or_404(GuestHouseProfile, id=gh_id)
+        terms = TermsService.get_active_terms(content_object=gh)
+        
+        if not terms:
+            return Response(
+                {"detail": "No terms and conditions available for this guest house."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        serializer = self.serializer_class(terms)
+        return Response(serializer.data)
+
+    @extend_schema(
+        summary="Get active Terms & Conditions for a company (Car Rental)",
+        description="Retrieve the currently active T&C for a specific company (Car Rental, etc.)",
+        responses={200: TermsAndConditionsSerializer, 404: None}
+    )
+    @action(detail=False, methods=['get'], url_path='company/(?P<company_id>[^/.]+)')
+    def company_terms(self, request, company_id=None):
+        """Get active T&C for a company"""
+        from apps.account.models import CompanyProfile
+        from apps.listing.services import TermsService
+        
+        company = get_object_or_404(CompanyProfile, id=company_id)
+        terms = TermsService.get_active_terms(content_object=company)
+        
+        if not terms:
+            return Response(
+                {"detail": "No terms and conditions available for this company."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        serializer = self.serializer_class(terms)
+        return Response(serializer.data)
+
 
 @extend_schema(tags=["Accommodations"])
 class AddonOfferingViewSet(AbstractModelViewSet):
