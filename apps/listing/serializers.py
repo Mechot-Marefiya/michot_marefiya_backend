@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.utils.dateparse import parse_date
+from django.utils.html import strip_tags
 from django.db import transaction
 from rest_framework import serializers
 from datetime import timedelta
@@ -205,6 +206,21 @@ class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
             'min_nightly_price': str(min_nightly_price.quantize(Decimal('0.01'))), # legacy
             'units_count': len(breakdown)
         }
+
+
+class SanitizeGuestDetailsMixin:
+
+    def validate_guest_first_name(self, value):
+        return strip_tags(value) if value else value
+
+    def validate_guest_last_name(self, value):
+        return strip_tags(value) if value else value
+
+    def validate_special_requests(self, value):
+        return strip_tags(value) if value else value
+
+    def validate_guest_phone(self, value):
+        return strip_tags(value) if value else value
 
 
 class TermsAndConditionsSerializer(serializers.ModelSerializer):
@@ -569,7 +585,7 @@ class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
 
     def get_subtotal(self, obj):
         return self.get_stay_total(obj)
-class GuestHouseBookingSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
+class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, serializers.ModelSerializer):
     items = GuestHouseBookingItemSerializer(many=True, write_only=True)
     
     terms_accepted = serializers.BooleanField(required=True, write_only=True)
@@ -1022,7 +1038,7 @@ class CarRentalItemSerializer(serializers.ModelSerializer):
         }
 
 
-class CarRentalSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
+class CarRentalSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, serializers.ModelSerializer):
     rental_items = CarRentalItemSerializer(many=True, write_only=True)
     items_details = CarRentalItemSerializer(
         source='rental_items', many=True, read_only=True
@@ -1643,7 +1659,7 @@ class BookingItemSerializer(serializers.ModelSerializer):
         return addons_data
 
 
-class BookingSerializer(serializers.ModelSerializer):
+class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
     items = BookingItemSerializer(many=True, help_text="List of rooms and quantities to book.")
     
     # T&C fields (write_only, required for booking creation)
@@ -1998,7 +2014,7 @@ class EventSpaceBookingItemSerializer(serializers.ModelSerializer):
         fields = ["event_space", "units_booked", "price_per_unit"] 
 
 
-class EventSpaceBookingSerializer(serializers.ModelSerializer):
+class EventSpaceBookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
     """Main serializer for creating a new Event Space Booking."""
     items = EventSpaceBookingItemSerializer(many=True) 
     
