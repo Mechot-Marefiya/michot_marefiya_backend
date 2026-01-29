@@ -30,6 +30,7 @@ from apps.listing.filters import PropertyFilter, RoomFilter, BookingFilter,Event
 from apps.core.pagination import StandardResultsSetPagination
 from apps.account.permissions import (
     IsAuthenticatedOrReadOnly,
+    IsCompanyOwner,
     IsPublicReadOnly,
     IsAdmin,
     IsListingOwner,
@@ -57,6 +58,7 @@ from apps.listing.models import (
     GuestHouseBooking,
     GuestHouseBookingItem,
     AddonOffering,
+    Season, SeasonalRate,
 )
 from apps.account.models import(CompanyProfile,IndividualOwnerProfile,HotelProfile)
 from apps.listing.serializers import (
@@ -92,6 +94,7 @@ from apps.listing.serializers import (
     AddonOfferingListSerializer,
     BookingLookupSerializer,
     GuestCancellationSerializer,
+    SeasonSerializer, SeasonalRateSerializer,
 )
 from apps.listing.services import (
     StayAvailabilityService, BookingService, CarAvailabilityService, 
@@ -122,12 +125,6 @@ class RoomListingViewSet(AbstractModelViewSet):
             return [IsListingOwner()]
 
     def get_queryset(self):
-        """
-        Filter queryset based on user role:
-        - Public/Users: See all active rooms
-        - Company users: See all rooms (for their own, can modify)
-        - Admin: See all rooms
-        """
         queryset = super().get_queryset().select_related(
             'hotel', 
             'address'
@@ -136,27 +133,25 @@ class RoomListingViewSet(AbstractModelViewSet):
             'amenities'
         )
         
-        # If user is not authenticated, show only active listings
-        if not self.request.user or not self.request.user.is_authenticated:
-            return queryset.filter(is_active=True)
-        
+        user = self.request.user
+        managed_only = self.request.query_params.get('managed') == 'true'
+
         # Admin sees all
-        if self.request.user.is_superuser or (
-            hasattr(self.request.user, 'role') and
-            self.request.user.role and
-            self.request.user.role.code == RoleCode.ADMIN.value
-        ):
+        if user and (user.is_superuser or (hasattr(user, 'role') and user.role and user.role.code == RoleCode.ADMIN.value)):
             return queryset
-        
-        # For companies, show all but they can only modify their own (enforced by permission)
-        # For regular users, show only active
-        if hasattr(self.request.user, 'role') and self.request.user.role:
-            if self.request.user.role.code == RoleCode.COMPANY.value:
-                return queryset  # Companies see all for reference
-            else:
-                return queryset.filter(is_active=True)
-        
-        return queryset.filter(is_active=True)
+
+        if managed_only and user and user.is_authenticated:
+            company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+            individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+            
+            q = Q()
+            if company:
+                q |= Q(hotel__company=company)
+            if individual_owner:
+                pass
+            return queryset.filter(q).order_by("-created_at")
+
+        return queryset.filter(is_active=True).order_by("-created_at")
 
     @extend_schema(
         summary="Price Preview for specific dates",
@@ -402,7 +397,6 @@ class GuestHouseProfileViewSet(AbstractModelViewSet):
         return GuestHouseProfileSerializer
 
     def get_queryset(self):
-        """Filter queryset - show all active to public, all to companies/admin."""
         queryset = super().get_queryset().select_related(
             'company',
             'individual_owner'
@@ -413,21 +407,24 @@ class GuestHouseProfileViewSet(AbstractModelViewSet):
             'rooms'
         )
         
-        if not self.request.user or not self.request.user.is_authenticated:
-            return queryset.filter(is_active=True)
-        
-        if self.request.user.is_superuser or (
-            hasattr(self.request.user, 'role') and
-            self.request.user.role and
-            self.request.user.role.code == RoleCode.ADMIN.value
-        ):
+        user = self.request.user
+        managed_only = self.request.query_params.get('managed') == 'true'
+
+        if user and (user.is_superuser or (hasattr(user, 'role') and user.role and user.role.code == RoleCode.ADMIN.value)):
             return queryset
-        
-        if hasattr(self.request.user, 'role') and self.request.user.role:
-            if self.request.user.role.code == RoleCode.COMPANY.value:
-                return queryset
-        
-        return queryset.filter(is_active=True)
+
+        if managed_only and user and user.is_authenticated:
+            company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+            individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+            
+            q = Q()
+            if company:
+                q |= Q(company=company)
+            if individual_owner:
+                q |= Q(individual_owner=individual_owner)
+            return queryset.filter(q).order_by("-created_at")
+
+        return queryset.filter(is_active=True).order_by("-created_at")
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -1741,32 +1738,22 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
 
     # --- Queryset Logic ---
     def get_queryset(self):
-        """
-        Filters queryset based on user role, matching the logic of RoomListing.
-        """
         queryset = super().get_queryset()
         
-        # If user is not authenticated, show only active listings (assuming an 'is_active' field)
-        if not self.request.user or not self.request.user.is_authenticated:
-            return queryset.filter(is_active=True)
-        
-        if self.request.user.is_superuser or (
-            hasattr(self.request.user, 'role') and
-            self.request.user.role and
-            self.request.user.role.code == RoleCode.ADMIN.value
-        ):
+        user = self.request.user
+        managed_only = self.request.query_params.get('managed') == 'true'
+
+        # Admin sees all
+        if user and (user.is_superuser or (hasattr(user, 'role') and user.role and user.role.code == RoleCode.ADMIN.value)):
             return queryset
-        
-        # Company/Other user roles logic
-        if hasattr(self.request.user, 'role') and self.request.user.role:
-            if self.request.user.role.code == RoleCode.COMPANY.value:
-                # Companies see all listings for reference
-                return queryset
-            else:
-                # Regular users see only active listings
-                return queryset.filter(is_active=True)
-        
-        return queryset.filter(is_active=True)
+
+        if managed_only and user and user.is_authenticated:
+            company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+            from apps.account.models import HotelProfile
+            owned_hotels = HotelProfile.objects.filter(company=company)
+            return queryset.filter(hotel__in=owned_hotels).order_by("-created_at")
+
+        return queryset.filter(is_active=True).order_by("-created_at")
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -2186,6 +2173,154 @@ class AddonOfferingViewSet(AbstractModelViewSet):
     )
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
+
+
+@extend_schema(tags=["Season Management"])
+class SeasonViewSet(viewsets.ModelViewSet):
+    """
+    API for Owners to manage Seasons (e.g., Summer, Christmas).
+    """
+    serializer_class = SeasonSerializer
+    permission_classes = [IsCompanyOwner]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return Season.objects.none()
+
+        if user.is_superuser or (hasattr(user, 'role') and user.role and user.role.code == 'admin'):
+            return Season.objects.all()
+
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+        individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+
+        from django.db.models import Q
+        q = Q(company=None, individual_owner=None) # Global seasons
+
+        if company:
+            q |= Q(company=company)
+        if individual_owner:
+            q |= Q(individual_owner=individual_owner)
+            
+        return Season.objects.filter(q).order_by("-created_at")
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+        individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+        
+        # Only admins can create global seasons (both null)
+        # For owners/staff, we MUST assign their profile
+        kwargs = {}
+        if not user.is_superuser and not (hasattr(user, 'role') and user.role and user.role.code == 'admin'):
+            if company:
+                kwargs['company'] = company
+            if individual_owner:
+                kwargs['individual_owner'] = individual_owner
+                
+        serializer.save(**kwargs)
+
+
+@extend_schema(tags=["Season Management"])
+class SeasonalRateViewSet(viewsets.ModelViewSet):
+    """
+    API for Owners to manage Rates associated with Seasons.
+    """
+    serializer_class = SeasonalRateSerializer
+    permission_classes = [IsCompanyOwner]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return SeasonalRate.objects.none()
+
+        if user.is_superuser or (hasattr(user, 'role') and user.role and user.role.code == 'admin'):
+            return SeasonalRate.objects.all()
+
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+        individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+
+        from django.db.models import Q
+        q = Q(company=None, individual_owner=None)
+
+        if company:
+            q |= Q(company=company)
+        if individual_owner:
+            q |= Q(individual_owner=individual_owner)
+            
+        return SeasonalRate.objects.filter(q).order_by("-created_at")
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+        individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+        
+        kwargs = {}
+        if not user.is_superuser and not (hasattr(user, 'role') and user.role and user.role.code == 'admin'):
+            if company:
+                kwargs['company'] = company
+            if individual_owner:
+                kwargs['individual_owner'] = individual_owner
+                
+        serializer.save(**kwargs)
+
+
+class InventoryGridView(APIView):
+    """
+    Unified endpoint for the Owner Dashboard availability grid.
+    Returns 30 days of availability and pricing for all units in a property.
+    """
+    permission_classes = [IsAuthenticated, IsListingOwner]
+
+    @extend_schema(
+        tags=["Inventory Management"],
+        summary="Get 30-day availability and pricing grid",
+        parameters=[
+            OpenApiParameter("property_id", OpenApiTypes.UUID, OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("property_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=True, enum=['hotel', 'guesthouse', 'eventspace']),
+            OpenApiParameter("start_date", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Default is today"),
+            OpenApiParameter("days", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False, default=30),
+        ]
+    )
+    def get(self, request):
+        property_id = request.query_params.get('property_id')
+        property_type = request.query_params.get('property_type')
+        start_date_str = request.query_params.get('start_date')
+        days = int(request.query_params.get('days', 30))
+
+        if not property_id or not property_type:
+            return Response({"error": "property_id and property_type are required."}, status=400)
+
+        from django.apps import apps
+        try:
+            if property_type == 'hotel' or property_type == 'eventspace':
+                model = apps.get_model('account', 'HotelProfile')
+            elif property_type == 'guesthouse':
+                model = apps.get_model('listing', 'GuestHouseProfile')
+            else:
+                return Response({"error": "Invalid property_type"}, status=400)
+            
+            prop_obj = model.objects.get(id=property_id)
+            self.check_object_permissions(request, prop_obj)
+        except Exception as e:
+            return Response({"error": f"Access Denied or Property Not Found: {str(e)}"}, status=403)
+
+        if start_date_str:
+            start_date = parse_date(start_date_str)
+        else:
+            start_date = date.today()
+
+        from apps.listing.services import InventoryGridService
+        try:
+            grid_data = InventoryGridService.get_availability_grid(
+                property_id=property_id,
+                property_type=property_type,
+                start_date=start_date,
+                days=days
+            )
+            return Response(grid_data)
+        except Exception as e:
+            return Response({"error": str(e)}, status=400)
 
 
     

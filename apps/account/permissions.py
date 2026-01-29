@@ -95,6 +95,15 @@ class IsAuthenticatedOrReadOnly(permissions.BasePermission):
 
 
 class IsCompanyOwner(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+            
+        return request.user.is_superuser or (
+            hasattr(request.user, 'role') and 
+            request.user.role and 
+            request.user.role.code in [RoleCode.ADMIN.value, RoleCode.COMPANY.value]
+        )
 
     def has_object_permission(self, request, view, obj):
         if not request.user or not request.user.is_authenticated:
@@ -110,14 +119,28 @@ class IsCompanyOwner(permissions.BasePermission):
         if hasattr(obj, 'user'):
             return obj.user == request.user
 
+
         if hasattr(obj, 'company') and hasattr(obj.company, 'user'):
             return obj.company.user == request.user
+            
+        if hasattr(obj, 'individual_owner') and hasattr(request.user, 'individual_owner'):
+             if obj.individual_owner == request.user.individual_owner:
+                 return True
 
         return False
 
 
 class IsListingOwner(permissions.BasePermission):
-    
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+            
+        return request.user.is_superuser or (
+            hasattr(request.user, 'role') and 
+            request.user.role and 
+            request.user.role.code in [RoleCode.ADMIN.value, RoleCode.COMPANY.value, RoleCode.FRONT_DESK.value]
+        )
+
     def has_object_permission(self, request, view, obj):
         if not request.user or not request.user.is_authenticated:
             return False
@@ -130,17 +153,33 @@ class IsListingOwner(permissions.BasePermission):
             return True
         
         if hasattr(obj, 'company') and obj.company:
-            if hasattr(obj.company, 'user') and obj.company.user:
-                return obj.company.user == request.user
+            if hasattr(obj.company, 'user') and obj.company.user == request.user:
+                return True
+            if hasattr(request.user, 'company') and request.user.company == obj.company:
+                return True
         
         if hasattr(obj, 'individual_owner') and obj.individual_owner:
-            return False
+            if hasattr(request.user, 'individual_owner') and request.user.individual_owner == obj.individual_owner:
+                return True
+
+        if hasattr(obj, 'guest_house') and obj.guest_house:
+            gh = obj.guest_house
+            if hasattr(gh, 'company') and gh.company:
+                if hasattr(gh.company, 'user') and gh.company.user == request.user:
+                    return True
+                if hasattr(request.user, 'company') and request.user.company == gh.company:
+                    return True
+            if hasattr(gh, 'individual_owner') and gh.individual_owner:
+                if hasattr(request.user, 'individual_owner') and request.user.individual_owner == gh.individual_owner:
+                    return True
         
         if hasattr(obj, 'hotel') and obj.hotel:
-            if hasattr(obj.hotel, 'company') and obj.hotel.company:
-                if hasattr(obj.hotel.company, 'user') and obj.hotel.company.user:
-                    return obj.hotel.company.user == request.user
-        
+            hotel = obj.hotel
+            if hasattr(hotel, 'company') and hotel.company:
+                if hasattr(hotel.company, 'user') and hotel.company.user == request.user:
+                    return True
+                if hasattr(request.user, 'company') and request.user.company == hotel.company:
+                    return True
         return False
 
 

@@ -116,3 +116,79 @@ class ChapaWebhookSerializer(serializers.Serializer):
         if not tx:
             raise serializers.ValidationError("Transaction reference missing in webhook.")
         return data
+
+
+class OwnerPaymentTransactionSerializer(serializers.ModelSerializer):
+    """
+    Serializer for the Owner Dashboard financial ledger.
+    Flattens booking information for easier frontend consumption.
+    """
+    booking_reference = serializers.SerializerMethodField()
+    listing_title = serializers.SerializerMethodField()
+    customer_name = serializers.SerializerMethodField()
+    booking_dates = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PaymentTransaction
+        fields = [
+            "id",
+            "tx_ref",
+            "amount",
+            "currency",
+            "status",
+            "payment_method",
+            "created_at",
+            "booking_type",
+            "booking_reference",
+            "listing_title",
+            "customer_name",
+            "booking_dates",
+        ]
+
+    def get_booking_reference(self, obj):
+        booking = obj.resolved_booking
+        return getattr(booking, 'booking_reference', 'N/A')
+
+    def get_listing_title(self, obj):
+        booking = obj.resolved_booking
+        if not booking:
+            return "N/A"
+        
+        # Stays
+        if hasattr(booking, 'items') and booking.items.exists():
+            item = booking.items.first()
+            if hasattr(item, 'room') and item.room:
+                return item.room.title
+        
+        # GuestHouseBooking
+        if hasattr(booking, 'items') and obj.booking_type == 'guesthouse':
+             item = booking.items.first()
+             if hasattr(item, 'guest_house_room') and item.guest_house_room:
+                 return item.guest_house_room.title
+
+        # CarRental
+        if hasattr(booking, 'rental_items') and booking.rental_items.exists():
+            item = booking.rental_items.first()
+            if hasattr(item, 'car_listing') and item.car_listing:
+                return item.car_listing.title
+
+        return "Listing"
+
+    def get_customer_name(self, obj):
+        booking = obj.resolved_booking
+        if hasattr(booking, 'guest_full_name'):
+            return booking.guest_full_name
+        return "Customer"
+
+    def get_booking_dates(self, obj):
+        booking = obj.resolved_booking
+        if not booking:
+            return None
+        
+        start = getattr(booking, 'check_in_date', getattr(booking, 'start_date', None))
+        end = getattr(booking, 'check_out_date', getattr(booking, 'end_date', None))
+        
+        return {
+            "start": start,
+            "end": end
+        }

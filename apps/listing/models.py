@@ -1455,6 +1455,21 @@ class Season(AbstractBaseModel):
     active = models.BooleanField(default=True)
     notes = models.TextField(blank=True)
 
+    company = models.ForeignKey(
+        "account.CompanyProfile",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="seasons"
+    )
+    individual_owner = models.ForeignKey(
+        "account.IndividualOwnerProfile",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="seasons"
+    )
+
     class Meta:
         db_table = "seasons"
 
@@ -1467,6 +1482,13 @@ class SeasonalRate(AbstractBaseModel):
     hotel = models.ForeignKey(HotelProfile, on_delete=models.CASCADE, null=True, blank=True)
     company = models.ForeignKey(CompanyProfile, on_delete=models.CASCADE, null=True, blank=True)
     room = models.ForeignKey(RoomListing, on_delete=models.CASCADE, null=True, blank=True)
+    individual_owner = models.ForeignKey(
+        "account.IndividualOwnerProfile",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="seasonal_rates"
+    )
 
     price_override = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     multiplier = models.DecimalField(max_digits=6, decimal_places=4, null=True, blank=True)

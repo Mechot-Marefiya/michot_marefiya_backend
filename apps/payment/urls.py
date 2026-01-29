@@ -9,8 +9,13 @@ from .views import (
     test_chapa_key,
     test_chapa_direct,
     debug_config,
-    test_email_format
+    test_email_format,
+    OwnerPaymentViewSet
 )
+from rest_framework.routers import DefaultRouter
+
+router = DefaultRouter()
+router.register('ledger', OwnerPaymentViewSet, basename='owner-ledger')
 
 urlpatterns = [
     path('initiate/', InitiatePaymentView.as_view(), name='initiate-payment'),
@@ -24,3 +29,5 @@ urlpatterns = [
     path('test-email/', test_email_format, name='test-email-format'),
     path('debug-config/', debug_config, name='debug-config'),
 ]
+
+urlpatterns += router.urls

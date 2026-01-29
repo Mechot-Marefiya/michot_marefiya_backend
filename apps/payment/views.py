@@ -12,12 +12,18 @@ from django.utils import timezone
 from apps.listing.models import Booking
 from apps.account.enums import RoleCode
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample
+from .models import PaymentTransaction
+from .services import ChapaPaymentService
+from rest_framework import viewsets
+from django.db.models import Q
+from apps.account.permissions import IsCompanyOwner
 from .serializers import (
     PaymentInitializeSerializer, 
     PaymentTransactionSerializer, 
     PaymentInitializeResponseSerializer,
     ChapaCallbackSerializer,
-    ChapaWebhookSerializer
+    ChapaWebhookSerializer,
+    OwnerPaymentTransactionSerializer
 )
 from apps.core.utils import convert_currency
 from .models import PaymentTransaction
@@ -607,3 +613,79 @@ def test_email_format(request):
             })
     
     return Response({"email_tests": results})
+
+
+@extend_schema(tags=["Finance & Ledger"])
+class OwnerPaymentViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    API for Owners to view their financial ledger.
+    """
+    serializer_class = OwnerPaymentTransactionSerializer
+    permission_classes = [IsCompanyOwner]
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return PaymentTransaction.objects.none()
+
+        if hasattr(user, 'company') and user.company:
+            owner_q = Q(company=user.company)
+        elif hasattr(user, 'individual_owner') and user.individual_owner:
+            owner_q = Q(individual_owner=user.individual_owner)
+        else:
+            return PaymentTransaction.objects.none()
+
+        from django.apps import apps
+        HotelProfile = apps.get_model('account', 'HotelProfile')
+        GuestHouseProfile = apps.get_model('listing', 'GuestHouseProfile')
+        CarListing = apps.get_model('listing', 'CarListing')
+        
+        Booking = apps.get_model('listing', 'Booking')
+        GuestHouseBooking = apps.get_model('listing', 'GuestHouseBooking')
+        EventSpaceBooking = apps.get_model('listing', 'EventSpaceBooking')
+        CarRental = apps.get_model('listing', 'CarRental')
+
+        hotel_ids = HotelProfile.objects.filter(owner_q).values_list('id', flat=True)
+        gh_ids = GuestHouseProfile.objects.filter(owner_q).values_list('id', flat=True)
+        car_ids = CarListing.objects.filter(owner_q).values_list('id', flat=True)
+
+        booking_ids = Booking.objects.filter(items__room__hotel_id__in=hotel_ids).values_list('id', flat=True)
+        es_booking_ids = EventSpaceBooking.objects.filter(items__event_space__hotel_id__in=hotel_ids).values_list('id', flat=True)
+        
+        gh_booking_ids = GuestHouseBooking.objects.filter(items__room__guest_house_id__in=gh_ids).values_list('id', flat=True)
+        
+        car_rental_ids = CarRental.objects.filter(rental_items__car_listing_id__in=car_ids).values_list('id', flat=True)
+
+        all_booking_ids = list(booking_ids) + list(gh_booking_ids) + list(es_booking_ids) + list(car_rental_ids)
+        
+        return PaymentTransaction.objects.filter(
+            Q(object_id__in=all_booking_ids) | Q(booking_id__in=booking_ids)
+        ).distinct()
+
+    @extend_schema(summary="Get financial summary (Total Revenue)")
+    def list(self, request, *args, **kwargs):
+        queryset = self.get_queryset()
+        
+        success_qs = queryset.filter(status=PaymentTransaction.PaymentStatus.SUCCESS)
+        
+        total_revenue = sum(tx.amount for tx in success_qs) # simple sum for now, maybe group by currency
+        count = success_qs.count()
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = self.get_serializer(page, many=True)
+            response = self.get_paginated_response(serializer.data)
+            response.data['summary'] = {
+                "total_successful_transactions": count,
+                "total_revenue_etb": total_revenue # taking ETB is primary for now
+            }
+            return response
+
+        serializer = self.get_serializer(queryset, many=True)
+        return Response({
+            "results": serializer.data,
+            "summary": {
+                "total_successful_transactions": count,
+                "total_revenue_etb": total_revenue
+            }
+        })

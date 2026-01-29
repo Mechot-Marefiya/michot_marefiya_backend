@@ -3,7 +3,7 @@ from django.utils.dateparse import parse_date
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework import status, serializers
+from rest_framework import status, serializers, viewsets
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.conf import settings
 from django.utils import timezone
@@ -41,7 +41,11 @@ from apps.account.serializers import (
     CompanyApplicationSerializer,
     UserResponseSerializer,
     UserUpdateSerializer,
+    UserResponseSerializer,
+    UserUpdateSerializer,
     ChangePasswordSerializer,
+    StaffCreateSerializer,
+    StaffResponseSerializer
 )
 from apps.listing.serializers import AddonOfferingListSerializer
 from apps.account.enums import RoleCode
@@ -98,9 +102,45 @@ class LogoutView(APIView):
     @extend_schema(
         summary="Logout (Blacklist token)",
         description="Blacklist a refresh token to end the session.",
-        request=OpenApiTypes.OBJECT,
-        responses={205: None, 400: OpenApiTypes.OBJECT}
+        request=None,
+        responses={200: OpenApiTypes.OBJECT}
     )
+    def post(self, request):
+        try:
+            refresh_token = request.data["refresh"]
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+            return Response(status=status.HTTP_200_OK)
+        except Exception:
+            return Response(status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(tags=["Account Management"])
+class StaffViewSet(viewsets.ModelViewSet):
+    permission_classes = [IsCompanyOwner] # Uses the custom permission that checks company OR individual owner
+    serializer_class = StaffResponseSerializer
+    http_method_names = ['get', 'post', 'delete']
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = User.objects.filter(role__code=RoleCode.FRONT_DESK.value)
+        
+        if user.company:
+            return qs.filter(company=user.company)
+        elif user.individual_owner:
+            return qs.filter(individual_owner=user.individual_owner)
+            
+        return qs.none() 
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return StaffCreateSerializer
+        return StaffResponseSerializer
+
+    def perform_create(self, serializer):
+        # Automated owner assignment happens in StaffCreateSerializer.create
+        serializer.save()
+    
     def post(self, request, *args, **kwargs):
         refresh_token = request.data.get("refresh")
         if not refresh_token:
@@ -371,6 +411,24 @@ class HotelProfileViewSet(AbstractModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         
+        user = self.request.user
+        managed_only = self.request.query_params.get('managed') == 'true'
+
+        if user and (user.is_superuser or (hasattr(user, 'role') and user.role and user.role.code == RoleCode.ADMIN.value)):
+            pass
+        elif managed_only and user and user.is_authenticated:
+            company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+            individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+            
+            q = Q()
+            if company:
+                q |= Q(company=company)
+            if individual_owner:
+                pass
+            queryset = queryset.filter(q)
+        else:
+            pass
+
         if self.action in ['list', 'retrieve', 'get_featured_hotels']:
             queryset = queryset.select_related(
                 "company",

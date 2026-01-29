@@ -42,17 +42,126 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         if self.user.role:
             data["role"] = self.user.role.code
 
-            if self.user.role.code == RoleCode.COMPANY.value and hasattr(
-                self.user, "profile"
-            ):
-                data["company"] = {
-                    "id": self.user.profile.id,
-                    "name": self.user.profile.name,
-                }
+            if self.user.role.code == RoleCode.COMPANY.value:
+                if hasattr(self.user, "profile"):
+                    data["company"] = {
+                        "id": self.user.profile.id,
+                        "name": self.user.profile.name,
+                    }
+                elif hasattr(self.user, "individual_owner") and self.user.individual_owner:
+                     data["individual_owner"] = {
+                        "id": self.user.individual_owner.id,
+                        "name": f"{self.user.individual_owner.first_name} {self.user.individual_owner.last_name}",
+                    }
         else:
             data["role"] = None
 
         return data
+
+
+class StaffResponseSerializer(serializers.ModelSerializer):
+    workspace = serializers.SerializerMethodField()
+    role = serializers.CharField(source="role.name")
+
+    class Meta:
+        model = User
+        fields = ["id", "email", "first_name", "last_name", "role", "workspace", "created_at"]
+
+    def get_workspace(self, instance):
+        if instance.workspace:
+            return str(instance.workspace)
+        return None
+
+
+class StaffCreateSerializer(serializers.ModelSerializer):
+    workspace_id = serializers.UUIDField(write_only=True)
+    workspace_type = serializers.ChoiceField(
+        choices=["hotel", "guesthouse", "car_rental", "event_space"],
+        write_only=True
+    )
+
+    class Meta:
+        model = User
+        fields = ["email", "first_name", "last_name", "workspace_id", "workspace_type"]
+
+    def validate(self, attrs):
+        from django.apps import apps
+        request = self.context.get("request")
+        user = request.user
+        
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+        individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+
+        if not (company or individual_owner):
+             raise serializers.ValidationError("Only company or individual owners can create staff.")
+
+        workspace_id = attrs.get("workspace_id")
+        workspace_type = attrs.get("workspace_type")
+        
+        model_map = {
+            "hotel": ("account", "HotelProfile"),
+            "guesthouse": ("listing", "GuestHouseProfile"),
+            "car_rental": ("listing", "CarListing"),
+            "event_space": ("listing", "EventSpaceListing")
+        }
+        
+        if workspace_type not in model_map:
+             raise serializers.ValidationError({"workspace_type": "Invalid workspace type."})
+             
+        app_label, model_name = model_map[workspace_type]
+        try:
+            model_class = apps.get_model(app_label, model_name)
+            workspace = model_class.objects.get(id=workspace_id)
+        except (LookupError, model_class.DoesNotExist):
+              raise serializers.ValidationError({"workspace_id": f"{model_name} not found."})
+              
+        is_owner = False
+        if company:
+             if hasattr(workspace, "company") and workspace.company == company:
+                 is_owner = True
+             elif hasattr(workspace, "hotel") and workspace.hotel.company == company:
+                 is_owner = True
+        
+        if not is_owner and individual_owner:
+             if hasattr(workspace, "individual_owner") and workspace.individual_owner == individual_owner:
+                 is_owner = True
+                  
+        if not is_owner and not user.is_superuser:
+            raise serializers.ValidationError({"workspace_id": "You do not have permission to add staff to this workspace."})
+            
+        attrs["workspace_instance"] = workspace
+        return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        workspace = validated_data.pop("workspace_instance")
+        validated_data.pop("workspace_id")
+        validated_data.pop("workspace_type")
+        
+        email = validated_data.get("email")
+        
+        try:
+            role = Role.objects.get(code=RoleCode.FRONT_DESK.value)
+        except Role.DoesNotExist:
+            raise serializers.ValidationError({"error": "Front Desk role configuration missing."})
+
+        password = generate_password(email)
+        
+        user = User(
+            role=role,
+            is_active=True,
+            company=self.context["request"].user.company,
+            individual_owner=self.context["request"].user.individual_owner,
+            workspace=workspace,
+            **validated_data
+        )
+        user.set_password(password)
+        user.save()
+        
+        # TODO: Send email with credentials (mocked for now)
+        # EmailService.send_staff_credentials(user, password)
+        
+        return user
 
 
 class ListingImageSerializer(serializers.ModelSerializer):

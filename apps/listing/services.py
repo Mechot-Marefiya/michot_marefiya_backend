@@ -2503,3 +2503,102 @@ class CarRentalService:
         BookingEmailService.send_booking_confirmation(rental)
         
         return rental
+
+
+class InventoryGridService:
+    @staticmethod
+    def get_availability_grid(property_id: str, property_type: str, start_date: date, days: int = 30):
+        end_date = start_date + timedelta(days=days)
+        dates = [start_date + timedelta(days=i) for i in range(days)]
+        
+        results = {
+            "property_id": property_id,
+            "property_type": property_type,
+            "start_date": start_date,
+            "days": days,
+            "units": []
+        }
+
+        if property_type == 'hotel':
+            hotel = get_object_or_404(HotelProfile, id=property_id)
+            rooms = RoomListing.objects.filter(hotel=hotel, is_active=True)
+            for room in rooms:
+                availability_qs = StayAvailability.objects.filter(
+                    room=room, date__range=[start_date, end_date - timedelta(days=1)]
+                ).values('date', 'available_rooms')
+                avail_map = {a['date']: a['available_rooms'] for a in availability_qs}
+                
+                prices = PriceService.resolve_price_details_batch(room, start_date, end_date)
+                
+                unit_days = []
+                for p in prices:
+                    d = p['date']
+                    unit_days.append({
+                        "date": d,
+                        "available": avail_map.get(d, 0),
+                        "price": p['price_per_unit'],
+                        "source": p['source'],
+                        "is_discounted": p['is_discounted']
+                    })
+                
+                results['units'].append({
+                    "id": str(room.id),
+                    "title": room.title,
+                    "days": unit_days
+                })
+
+        elif property_type == 'guesthouse':
+            gh = get_object_or_404(GuestHouseProfile, id=property_id)
+            rooms = GuestHouseRoom.objects.filter(guest_house=gh, is_active=True)
+            for room in rooms:
+                availability_qs = GuestHouseInventory.objects.filter(
+                    guest_house_room=room, date__range=[start_date, end_date - timedelta(days=1)]
+                ).values('date', 'available_rooms')
+                avail_map = {a['date']: a['available_rooms'] for a in availability_qs}
+                
+                prices = PriceService.resolve_price_details_batch(room, start_date, end_date)
+                
+                unit_days = []
+                for p in prices:
+                    d = p['date']
+                    unit_days.append({
+                        "date": d,
+                        "available": avail_map.get(d, 0),
+                        "price": p['price_per_unit'],
+                        "source": p['source'],
+                        "is_discounted": p['is_discounted']
+                    })
+                
+                results['units'].append({
+                    "id": str(room.id),
+                    "title": room.title,
+                    "days": unit_days
+                })
+        
+        elif property_type == 'eventspace':
+            hotel = get_object_or_404(HotelProfile, id=property_id)
+            spaces = EventSpaceListing.objects.filter(hotel=hotel, is_active=True)
+            for space in spaces:
+                availability_qs = EventSpaceAvailability.objects.filter(
+                    space_listing=space, date__range=[start_date, end_date - timedelta(days=1)]
+                ).values('date', 'available_eventspace')
+                avail_map = {a['date']: a['available_eventspace'] for a in availability_qs}
+                
+                unit_days = []
+                for d in dates:
+                    p = PriceService.resolve_price_detail(space, d)
+                    unit_days.append({
+                        "date": d,
+                        "available": avail_map.get(d, 0),
+                        "price": p['price_per_unit'],
+                        "source": p['source'],
+                        "is_discounted": p['is_discounted']
+                    })
+                
+                results['units'].append({
+                    "id": str(space.id),
+                    "title": space.title,
+                    "days": unit_days
+                })
+
+        return results

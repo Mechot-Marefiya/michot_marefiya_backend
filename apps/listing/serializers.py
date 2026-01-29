@@ -9,7 +9,7 @@ from datetime import date
 from rest_framework.exceptions import ValidationError
 from drf_spectacular.utils import extend_schema_field, inline_serializer, OpenApiTypes
 from apps.account.services import ImageCreationService
-from apps.account.models import CompanyProfile, HotelProfile
+from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile
 from django.shortcuts import get_object_or_404
 from apps.account.serializers import AddressSerializer, ListingImageSerializer
 from apps.core.serializers import (
@@ -34,6 +34,7 @@ from apps.listing.models import (
     RoomListing,EventSpaceListing,
     CarRental,CarRentalItem,GuestHouseBookingItem,GuestHouseBooking,
     TermsAndConditions,
+    Season, SeasonalRate,
 )
 from apps.listing.exceptions import RatingException
 from .services import CarAvailabilityService
@@ -306,13 +307,22 @@ class RoomListingSerializer(serializers.ModelSerializer):
         return serializer.validated_data
 
     def validate_hotel_id(self, value):
-        """Ensure the hotel exists and belongs to an approved company."""
+        """Ensure the hotel exists, belongs to an approved company, and is owned by the user."""
         try:
             hotel = HotelProfile.objects.select_related('company').get(id=value)
+            
             if hotel.company.status != CompanyProfile.StatusChoice.APPROVED:
                 raise serializers.ValidationError(
                     "Cannot create rooms for hotels with non-approved company profiles."
                 )
+            
+            user = self.context['request'].user
+            company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+            
+            if not user.is_superuser and not (hasattr(user, 'role') and user.role and user.role.code == 'admin'):
+                if hotel.company != company:
+                    raise serializers.ValidationError("You do not have permission to manage this hotel.")
+                    
             return value
         except HotelProfile.DoesNotExist:
             raise serializers.ValidationError(f"Hotel with id {value} does not exist.")
@@ -470,21 +480,46 @@ class GuestHouseProfileSerializer(serializers.ModelSerializer):
         return serializer.validated_data
 
     def validate(self, data):
+        user = self.context['request'].user
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+        individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+
         company_id = data.get("company")
         individual_id = data.get("individual_owner")
 
         if company_id and individual_id:
             raise serializers.ValidationError("Only one owner type allowed.")
-        if not company_id and not individual_id:
-            raise serializers.ValidationError("An owner is required.")
-        if company_id:
-            company_obj = company_id if isinstance(company_id, CompanyProfile) else get_object_or_404(CompanyProfile, id=company_id)
-            if company_obj.status != CompanyProfile.StatusChoice.APPROVED:
-                raise serializers.ValidationError({"company": "Company profile is not approved."})
+        
+        # If both are missing, we'll auto-assign in create based on context
+        # But if they ARE provided, they must match the user
+        if not user.is_superuser and not (hasattr(user, 'role') and user.role and user.role.code == 'admin'):
+            if company_id:
+                company_obj = company_id if isinstance(company_id, CompanyProfile) else get_object_or_404(CompanyProfile, id=company_id)
+                if company_obj != company:
+                    raise serializers.ValidationError({"company": "You do not have permission to manage this company."})
+                if company_obj.status != CompanyProfile.StatusChoice.APPROVED:
+                    raise serializers.ValidationError({"company": "Company profile is not approved."})
+            
+            if individual_id:
+                indiv_obj = individual_id if isinstance(individual_id, IndividualOwnerProfile) else get_object_or_404(IndividualOwnerProfile, id=individual_id)
+                if indiv_obj != individual_owner:
+                    raise serializers.ValidationError({"individual_owner": "You do not have permission to manage this profile."})
+        
         return data
 
     @transaction.atomic
     def create(self, validated_data):
+        user = self.context['request'].user
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+        individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+
+        # Auto-assign if missing
+        if not validated_data.get('company') and not validated_data.get('individual_owner'):
+            if company:
+                validated_data['company'] = company
+            elif individual_owner:
+                validated_data['individual_owner'] = individual_owner
+
         images = validated_data.pop("images", [])
         amenities = validated_data.pop("amenities", [])
         facilities = validated_data.pop("facility", [])
@@ -1812,6 +1847,16 @@ class EventSpaceListingSerializer(serializers.ModelSerializer):
             # Add other fields as needed for creation
         ]
 
+    def validate_company_id(self, value):
+        user = self.context['request'].user
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+
+        if not user.is_superuser and not (hasattr(user, 'role') and user.role and user.role.code == 'admin'):
+            if str(value) != str(getattr(company, 'id', '')):
+                raise serializers.ValidationError("You do not have permission to manage this company.")
+                
+        return value
+
     def validate_currency(self, value):
         if not value:
             return value
@@ -2130,3 +2175,113 @@ class EventSpaceBookingPreviewSerializer(serializers.Serializer):
         if not items:
             raise serializers.ValidationError("At least one booking item is required.")
         return data
+
+class SeasonSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Season
+        fields = [
+            'id', 'name', 'start_date', 'end_date', 'recurring', 
+            'active', 'notes', 'company', 'individual_owner'
+        ]
+        read_only_fields = ['company', 'individual_owner']
+
+    def validate(self, attrs):
+        start_date = attrs.get('start_date')
+        end_date = attrs.get('end_date')
+        
+        if self.instance:
+            start_date = start_date or self.instance.start_date
+            end_date = end_date or self.instance.end_date
+            
+        if start_date and end_date and start_date > end_date:
+            raise serializers.ValidationError({"end_date": "End date must be after start date."})
+            
+        return attrs
+
+    def create(self, validated_data):
+        user = self.context['request'].user
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+        individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+        
+        if company:
+            validated_data['company'] = company
+        elif individual_owner:
+            validated_data['individual_owner'] = individual_owner
+        elif not user.is_superuser and not (hasattr(user, 'role') and user.role and user.role.code == 'admin'):
+            raise serializers.ValidationError("User must be an owner to create a season.")
+            
+        return super().create(validated_data)
+
+
+class SeasonalRateSerializer(serializers.ModelSerializer):
+    season_name = serializers.CharField(source='season.name', read_only=True)
+    target_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SeasonalRate
+        fields = [
+            'id', 'season', 'season_name', 'hotel', 'company', 'room', 
+            'individual_owner', 'price_override', 'multiplier', 'priority', 'active', 
+            'days_of_week', 'min_stay', 'target_name'
+        ]
+        read_only_fields = ['company', 'hotel', 'individual_owner'] 
+
+    def get_target_name(self, obj):
+        if obj.room:
+            return f"Room: {obj.room.title}"
+        if obj.hotel:
+            return f"Hotel: {obj.hotel.company.name}" # HotelProfile doesn't have a name directly usually, accessing company name or specific hotel field
+        if obj.company:
+             return "Entire Company"
+        return "Global"
+
+    def validate(self, attrs):
+        user = self.context['request'].user
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+        individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+
+        multiplier = attrs.get('multiplier')
+        price_override = attrs.get('price_override')
+        if not multiplier and not price_override:
+            if not self.instance or (not self.instance.multiplier and not self.instance.price_override):
+                 raise serializers.ValidationError("Either a Multiplier or a Price Override must be set.")
+
+        season = attrs.get('season')
+        if season:
+            is_global = season.company is None and season.individual_owner is None
+            is_owner = (company and season.company == company) or \
+                       (individual_owner and season.individual_owner == individual_owner)
+            
+            if not user.is_superuser and not is_global and not is_owner:
+                raise serializers.ValidationError({"season": "You do not have permission to use this season."})
+
+        room = attrs.get('room')
+        hotel = attrs.get('hotel')
+
+        if room:
+            if hasattr(room, 'hotel') and room.hotel:
+                if not user.is_superuser and room.hotel.company != company:
+                    raise serializers.ValidationError({"room": "This room does not belong to your company."})
+            
+        if hotel:
+            if not user.is_superuser and hotel.company != company:
+                 raise serializers.ValidationError({"hotel": "This hotel does not belong to your company."})
+                 
+        return attrs
+
+    def create(self, validated_data):
+        user = self.context['request'].user
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+        individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+        
+        if company:
+             validated_data['company'] = company
+        if individual_owner:
+             validated_data['individual_owner'] = individual_owner
+             
+        room = validated_data.get('room')
+        if room and hasattr(room, 'hotel') and room.hotel:
+            validated_data['hotel'] = room.hotel
+            validated_data['company'] = room.hotel.company
+        
+        return super().create(validated_data)

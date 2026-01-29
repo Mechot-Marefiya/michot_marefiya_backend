@@ -18,6 +18,9 @@ from apps.listing.views import (
     GuestHouseBookingViewSet,
     TermsAndConditionsViewSet,
     AddonOfferingViewSet,
+    SeasonViewSet,
+    SeasonalRateViewSet,
+    InventoryGridView,
 )
 
 router = DefaultRouter()
@@ -35,6 +38,8 @@ router.register('bookings-eventspaces',EventSpaceBookingViewSet,basename="bookin
 router.register('guesthouse-bookings', GuestHouseBookingViewSet, basename='guesthouse-bookings')
 router.register('terms', TermsAndConditionsViewSet, basename='terms')
 router.register('addon-offerings', AddonOfferingViewSet, basename='addon-offerings')
+router.register('seasons', SeasonViewSet, basename='seasons')
+router.register('seasonal-rates', SeasonalRateViewSet, basename='seasonal-rates')
 
 urlpatterns = [
    path(
@@ -45,6 +50,7 @@ urlpatterns = [
     path("stays/search/", StaySearchView.as_view(), name="stay-search"),
     path("car-availabilities/by-car-and-date/", CarAvailabilityByCarAndDateView.as_view(),  name="car-availability-by-car-and-date"),
     path("car-availabilities/by-dates/", CarAvailabilityByDateRangeView.as_view(), name="car-availability-by-date-range"),
+    path("inventory/grid/", InventoryGridView.as_view(), name="inventory-grid"),
 ]
 
 urlpatterns += router.urls

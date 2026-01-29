@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.contrib.contenttypes.models import ContentType
@@ -37,6 +38,34 @@ class User(AbstractUser, AbstractBaseModel):
     first_name = models.CharField(_("first name"), max_length=150, blank=True)
     last_name = models.CharField(_("last name"), max_length=150, blank=True)
 
+    company = models.ForeignKey(
+        'CompanyProfile',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='staff_members',
+        help_text=_('Company this staff member belongs to (for hired employees)')
+    )
+
+    individual_owner = models.ForeignKey(
+        'IndividualOwnerProfile',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='staff_members',
+        help_text=_('Individual owner this staff works for (for small guesthouses/rentals)')
+    )
+
+    workspace_content_type = models.ForeignKey(
+        ContentType,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        limit_choices_to={'model__in': ['hotelprofile', 'guesthouseprofile', 'carlisting', 'eventspacelisting']}
+    )
+    workspace_object_id = models.UUIDField(null=True, blank=True)
+    workspace = GenericForeignKey('workspace_content_type', 'workspace_object_id')
+
     USERNAME_FIELD = "email"
 
     REQUIRED_FIELDS = []
@@ -48,6 +77,13 @@ class User(AbstractUser, AbstractBaseModel):
         verbose_name_plural = _("users")
         ordering = ("-created_at",)
         db_table = "users"
+        constraints = [
+            models.CheckConstraint(
+                check=Q(company__isnull=False) | Q(individual_owner__isnull=False) | 
+                      (Q(company__isnull=True) & Q(individual_owner__isnull=True)),
+                name='user_has_at_most_one_employer'
+            )
+        ]
 
     def __str__(self) -> str:
         return self.email
