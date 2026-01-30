@@ -19,8 +19,8 @@ class PaymentInitializeSerializer(serializers.Serializer):
         help_text="Optional: The amount you expect to pay. The server will verify this against its own calculation."
     )
     currency = serializers.CharField(
-        default="ETB", 
-        help_text="Payment currency (e.g., 'ETB', 'USD')."
+        required=False,
+        help_text="Payment currency (e.g., 'ETB', 'USD'). If not provided, defaults to booking currency."
     )
 
 

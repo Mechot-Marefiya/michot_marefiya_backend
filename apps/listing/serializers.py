@@ -596,6 +596,13 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
     guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
     guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
     special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests for the guesthouse stay")
+    
+    payment_currency = serializers.ChoiceField(
+        choices=["USD", "ETB"],
+        required=False,
+        write_only=True,
+        help_text="Preferred currency for payment (USD or ETB). Defaults to ETB if not specified."
+    )
 
     class Meta:
         model = GuestHouseBooking
@@ -618,9 +625,10 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
             "terms_url",
             "is_legacy",
             "stay_total",
-            "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests",
+            "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency",
         ]
-        read_only_fields = ["id", "status", "renter", "total_price", "created_at", "updated_at", "booking_reference"]
+
+        read_only_fields = ["id", "status", "renter", "total_price", "created_at", "updated_at", "booking_reference", "currency"]
 
     total_price = serializers.SerializerMethodField(help_text="Grand total in base currency")
     total_item_cost = serializers.SerializerMethodField(help_text="Total cost of all guesthouse units")
@@ -1055,6 +1063,14 @@ class CarRentalSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, se
     guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
     guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
     special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests for the rental")
+    
+    payment_currency = serializers.ChoiceField(
+        choices=["USD", "ETB"],
+        required=False,
+        write_only=True,
+        help_text="Preferred currency for payment (USD or ETB). Defaults to ETB if not specified."
+    )
+
 
     class Meta:
         model = CarRental
@@ -1065,8 +1081,9 @@ class CarRentalSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, se
             'terms_accepted', 'terms_version', 'terms_accepted_at', 'terms_content_snapshot', 'terms_url',
             'is_legacy',
             'stay_total',
-            'guest_first_name', 'guest_last_name', 'guest_email', 'guest_phone', 'special_requests',
+            'guest_first_name', 'guest_last_name', 'guest_email', 'guest_phone', 'special_requests', 'payment_currency',
         ]
+
         read_only_fields = ['id', 'status', 'created_at', 'updated_at', 'booking_reference']
     
     total_price = serializers.SerializerMethodField(help_text="Grand total in base currency")
@@ -1678,14 +1695,22 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
     guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the person staying (Required if not logged in)")
     guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
     guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
+    guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
     special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests (e.g., late check-in, room preferences)")
+
+    payment_currency = serializers.ChoiceField(
+        choices=["USD", "ETB"],
+        required=False,
+        write_only=True,
+        help_text="Preferred currency for payment (USD or ETB). Defaults to ETB if not specified."
+    )
 
     class Meta:
         model = Booking
         fields = ["items", "check_in_date", "check_out_date", "currency", "status", 
-                  "terms_accepted", "terms_version",
-                  "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests"]
-        read_only_fields = ["status"]
+                   "terms_accepted", "terms_version",
+                  "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency"]
+        read_only_fields = ["status", "currency"]
         
     def validate_terms_accepted(self, value):
         if not value:
@@ -2025,14 +2050,22 @@ class EventSpaceBookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSe
     guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the guest (Required if not logged in)")
     guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
     guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
+    guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
     special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests for the event")
+
+    payment_currency = serializers.ChoiceField(
+        choices=["USD", "ETB"],
+        required=False,
+        write_only=True,
+        help_text="Preferred currency for payment (USD or ETB). Defaults to ETB if not specified."
+    )
 
     class Meta:
         model = EventSpaceBooking # Mapped to the dedicated model
         fields = ["items", "check_in_date", "check_out_date", "currency", "event_type",
                   "terms_accepted", "terms_version",
-                  "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests"]
-        read_only_fields = ["status"]
+                  "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency"]
+        read_only_fields = ["status", "currency"]
 
     def validate_terms_accepted(self, value):
         if not value:

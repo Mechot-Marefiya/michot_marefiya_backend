@@ -1,5 +1,6 @@
 import json
 import uuid
+from decimal import Decimal
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, permission_classes
@@ -205,16 +206,22 @@ class InitiatePaymentView(APIView):
                 )
         
         # Determine the target currency for payment
+        # Default to booking's currency logic (USD or ETB)
         payment_currency = serializer.validated_data.get('currency') or booking.currency or 'ETB'
         
         # PRICE GUARD & RATE LOCK: Calculate and lock the correct amount on the server
         try:
-            expected_amount, exchange_rate = convert_currency(
-                amount=booking.total_price,
-                source_currency=booking.currency or 'ETB',
-                target_currency=payment_currency,
-                return_rate=True
-            )
+            # Only convert if the payment currency differs from booking currency
+            if booking.currency == payment_currency:
+                expected_amount = booking.total_price
+                exchange_rate = Decimal("1.0")
+            else:
+                expected_amount, exchange_rate = convert_currency(
+                    amount=booking.total_price,
+                    source_currency=booking.currency or 'ETB',
+                    target_currency=payment_currency,
+                    return_rate=True
+                )
             
             # Locked metadata for audit trail
             locked_metadata = {

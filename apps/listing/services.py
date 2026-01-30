@@ -920,6 +920,8 @@ class BookingService:
         terms_accepted = validated_data.pop("terms_accepted", False)
         terms_version = validated_data.pop("terms_version", "")
         
+        payment_currency = validated_data.pop("payment_currency", "ETB")
+        
         if user:
             validated_data["user"] = user
         
@@ -955,40 +957,34 @@ class BookingService:
                 logger.error(f"T&C validation failed: {e}")
                 raise
         
-        booking = Booking.objects.create(**validated_data)
+        booking = Booking.objects.create(currency=payment_currency, **validated_data)
 
-        currencies = set()
-        for item in items_data:
-            room = item["room"]
-            room_currency = getattr(room, "currency", None)
-            if room_currency:
-                currencies.add(room_currency)
-        
-        if len(currencies) > 1:
-            raise ValidationError({
-                "items": f"All rooms must have the same currency. Found: {', '.join(currencies)}"
-            })
-        
-        if rooms_info and currencies:
-            booking.currency = currencies.pop()
-        elif rooms_info:
-            booking.currency = "ETB"
-        else:
-            raise ValidationError("Booking must contain at least one room")
-        
-        booking.save(update_fields=["currency"]) 
 
-        use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
+        nights = (check_out_date - check_in_date).days
 
         for item in items_data:
             room = item["room"]
             units = item["units_booked"]
 
+            price_details = PriceService.resolve_price_details_batch(
+                 room, check_in_date, check_out_date
+            )
+            total_room_native = sum(d['price_per_unit'] for d in price_details)
+            avg_rate_native = total_room_native / nights if nights > 0 else 0
+            
+            converted_rate = avg_rate_native
+            if room.currency != payment_currency:
+                try:
+                    from apps.core.utils import convert_currency
+                    converted_rate = convert_currency(avg_rate_native, room.currency, payment_currency)
+                except Exception:
+                     converted_rate = avg_rate_native
+
             booking_item = BookingItem.objects.create(
                 booking=booking,
                 room=room,
                 units_booked=units,
-                price_per_unit=room.base_price,
+                price_per_unit=converted_rate,
             )
 
             # Build item snapshot (capture display-ready fields at booking time)
@@ -1012,7 +1008,6 @@ class BookingService:
             except Exception:
                 available_units_at_booking = None
 
-            nights = (booking.check_out_date - booking.check_in_date).days
             item_snapshot = {
                 "room_id": str(room.id),
                 "title": room.title,
@@ -1024,6 +1019,14 @@ class BookingService:
                 "units_booked": booking_item.units_booked,
                 "nights": nights,
                 "available_units_at_booking_time": available_units_at_booking,
+                "original_price_currency": room.currency,
+                "original_price_details": [
+                    {
+                        k: (v.isoformat() if hasattr(v, 'isoformat') else str(v) if isinstance(v, Decimal) else v) 
+                        for k, v in d.items()
+                    }
+                    for d in price_details
+                 ]
             }
 
             # store snapshot on booking item
@@ -1043,6 +1046,14 @@ class BookingService:
                             "addons": f"{offering.name} is not available for {room.hotel.name}"
                         })
                     
+                    addon_price = offering.price_per_unit
+                    if offering.currency != payment_currency:
+                        try:
+                            from apps.core.utils import convert_currency
+                            addon_price = convert_currency(offering.price_per_unit, offering.currency, payment_currency)
+                        except Exception:
+                            addon_price = offering.price_per_unit
+
                     from apps.listing.models import BookingAddon
                     BookingAddon.objects.create(
                         booking_item=booking_item,
@@ -1051,23 +1062,9 @@ class BookingService:
                         description=offering.description,
                         category=offering.category,
                         quantity=addon_input.get('quantity', 1),
-                        price_per_unit=offering.price_per_unit,
-                        currency=offering.currency
+                        price_per_unit=addon_price,
+                        currency=payment_currency # now matches booking
                     )
-
-            # create per-night price lines if feature enabled
-            if use_seasonal:
-                date_cursor = booking.check_in_date
-                while date_cursor < booking.check_out_date:
-                    price = PriceService.resolve_price(room, date_cursor)
-                    BookingItemPrice.objects.create(
-                        booking_item=booking_item,
-                        date=date_cursor,
-                        price_per_unit=price,
-                        units=units,
-                    )
-                    date_cursor += timedelta(days=1)
-
             StayAvailabilityService.update_availability(
                 hotel=room.hotel,
                 rooms_info=[{"room": room, "quantity": units}],
@@ -1078,7 +1075,7 @@ class BookingService:
 
         # Calculate total using the shared logic (Base + 5% Fee)
         booking.total_price = BookingService.get_booking_total(booking)
-
+        
         booking.save()
 
         # build booking-level snapshot and persist
@@ -1311,92 +1308,83 @@ class EventSpaceBookingService:
         if user:
             validated_data["user"] = user
         
-        check_in_date = validated_data.get("check_in_date")
-        check_out_date = validated_data.get("check_out_date")
+        check_in = validated_data["check_in_date"]
+        check_out = validated_data["check_out_date"]
+        items_data = validated_data.pop("items")
+        terms_accepted = validated_data.pop("terms_accepted", False)
+        terms_version = validated_data.pop("terms_version", "")
+        payment_currency = validated_data.pop("payment_currency", "ETB")
+
+        if not items_data:
+            raise ValidationError("Items are required")
         
-        spaces_info = []
-        for item in items_data:
-            event_space = item["event_space"]
-            units = item["units_booked"]
-            spaces_info.append({"space_listing": event_space, "quantity": units})
+        first_space = items_data[0]["event_space"]
+        hotel = first_space.hotel
         
-        # 1. Availability Check (and locking records)
-        if spaces_info:
-            EventSpaceAvailabilityService.validate_availability(
-                spaces_info, check_in_date, check_out_date
+        try:
+            snapshot_data = TermsService.validate_and_snapshot_terms(
+                 content_object=hotel,
+                 terms_version=terms_version,
+                 terms_accepted=terms_accepted
             )
-            
-            try:
-                hotel = spaces_info[0]["space_listing"].hotel
-                tc_data = TermsService.validate_and_snapshot_terms(
-                    content_object=hotel,
-                    terms_version=terms_version,
-                    terms_accepted=terms_accepted
-                )
-                
-                validated_data['terms_accepted'] = True
-                validated_data['terms_version'] = tc_data['version']
-                validated_data['terms_accepted_at'] = tc_data['accepted_at']
-                validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
-            except Exception as e:
-                logger.error(f"T&C validation failed for EventSpace booking: {e}")
-                raise
-        
-        # 2. Create the parent Booking object
-        booking = EventSpaceBooking.objects.create(**validated_data)
+        except Exception as e:
+            logger.error(f"T&C validation failed: {e}")
+            raise
 
-        currencies = set()
-        for item in items_data:
-            space = item["event_space"]
-            space_currency = getattr(space, "currency", None)
-            if space_currency:
-                currencies.add(space_currency)
+        booking = EventSpaceBooking(
+             check_in_date=check_in,
+             check_out_date=check_out,
+             status=validated_data.get("status", EventSpaceBooking.BookingStatus.PENDING),
+             currency=payment_currency,
+             **validated_data
+        )
+        if user:
+            booking.user = user
         
-        if len(currencies) > 1:
-            raise ValidationError({
-                "items": f"All event spaces must have the same currency. Found: {', '.join(currencies)}"
-            })
-        
-        if items_data and currencies:
-            booking.currency = currencies.pop()
-        elif items_data:
-            booking.currency = "ETB"
-        else:
-            raise ValidationError("Booking must contain at least one event space")
-        
-        booking.save(update_fields=["currency"])
+        booking.terms_accepted = True
+        booking.terms_version = snapshot_data['version']
+        booking.terms_content_snapshot = snapshot_data['content_snapshot']
+        booking.terms_accepted_at = snapshot_data['accepted_at']
 
-        total_price = Decimal('0.00')
-        booking_items_to_create = []
+        booking.save()
+
         space_infos = []
-        duration = (check_out_date - check_in_date).days
-        
-        for item in items_data:
-            event_space: EventSpaceListing = item["event_space"]
-            units = item["units_booked"]
-            
-            # subtotal for the stay (simplified per-day resolve could be added later if needed)
-            price_per_unit_total = event_space.base_price * duration 
-            
-            booking_item = EventSpaceBookingItem(
-                booking=booking,
-                event_space=event_space,
-                units_booked=units,
-                price_per_unit=price_per_unit_total, 
-            )
-            booking_items_to_create.append(booking_item)
-            
+        for item_data in items_data:
             space_infos.append({
-                "space_listing": event_space,
-                "quantity": units
+                "space_listing": item_data["event_space"],
+                "quantity": item_data["units_booked"] 
             })
 
-        EventSpaceBookingItem.objects.bulk_create(booking_items_to_create)
-        
+        EventSpaceAvailabilityService.validate_availability(
+            space_infos, check_in, check_out
+        )
+
+        for item_data in items_data:
+            space = item_data["event_space"]
+            
+            price_per_unit = space.base_price
+            if space.currency != payment_currency:
+                try:
+                    price_per_unit = convert_currency(space.base_price, space.currency, payment_currency)
+                except Exception:
+                    price_per_unit = space.base_price
+
+            EventSpaceBookingItem.objects.create(
+                booking=booking,
+                event_space=space,
+                units_booked=item_data["units_booked"],
+                price_per_unit=price_per_unit,
+                snapshot = {
+                    "original_currency": space.currency,
+                    "original_price": float(space.base_price),
+                    "space_title": space.title
+                }
+            )
+
         EventSpaceAvailabilityService.update_availability(
-            space_infos=space_infos,
-            check_in_date=booking.check_in_date,
-            check_out_date=booking.check_out_date,
+            space_infos, 
+            check_in, 
+            check_out,
             increment=False, 
         )
 
@@ -2188,6 +2176,7 @@ class GuestHouseBookingService:
         items_data = validated_data.pop("items")
         terms_accepted = validated_data.pop("terms_accepted", False)
         terms_version = validated_data.pop("terms_version", "")
+        payment_currency = validated_data.pop("payment_currency", "ETB")
 
         if user:
             validated_data["renter"] = user
@@ -2195,126 +2184,144 @@ class GuestHouseBookingService:
         # T&C Validation & Snapshot
         if items_data:
             from apps.listing.services import TermsService
+            
+            if len(items_data) == 0:
+                raise ValidationError("Booking items are required")
+            
             try:
-                # Get first room listing to identify the entity (Guest House Profile)
-                first_room = items_data[0]["room"]
+                first_room = items_data[0]['room']
+                hotel = first_room.guest_house 
 
-                first_guesthouse_profile = first_room.guest_house
-                
-                tc_data = TermsService.validate_and_snapshot_terms(
-                    content_object=first_guesthouse_profile,
+                if not terms_accepted:
+                     raise ValidationError({"terms_accepted": "You must accept the terms and conditions."})
+
+                snapshot_data = TermsService.validate_and_snapshot_terms(
+                    content_object=hotel,
                     terms_version=terms_version,
                     terms_accepted=terms_accepted
                 )
-                validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
-                validated_data['terms_accepted_at'] = tc_data['accepted_at']
-                validated_data['terms_version'] = tc_data['version']
-                validated_data['terms_accepted'] = True
             except Exception as e:
-                logger.error(f"T&C validation failed for GuestHouse booking: {e}")
+                logger.error(f"T&C validation failed: {e}")
                 raise
 
-        from apps.listing.models import GuestHouseBooking, GuestHouseBookingItem
+            from apps.listing.models import GuestHouseBooking, GuestHouseBookingItem
+            from apps.listing.services import PriceService, StayAvailabilityService
+            from apps.core.currency import convert_currency
+            from django.conf import settings
+            from decimal import Decimal
 
-        validated_data['total_price'] = Decimal('0.00')
-        booking = GuestHouseBooking.objects.create(**validated_data)
-
-        currencies = set()
-        for item in items_data:
-            room = item["room"]
-            room_currency = getattr(room, "currency", None)
-            if room_currency:
-                currencies.add(room_currency)
-        
-        if len(currencies) > 1:
-            raise ValidationError({
-                "items": f"All units must have the same currency. Found: {', '.join(currencies)}"
-            })
-        
-        if items_data and currencies:
-            booking.currency = currencies.pop()
-        elif items_data:
-            booking.currency = "ETB"
-        else:
-            raise ValidationError("Booking must contain at least one unit")
-        
-        booking.save(update_fields=["currency"])
-
-        # Create Items & Prep Availability Update
-        room_infos = []
-        duration = (booking.end_date - booking.start_date).days
-        if duration <= 0:
-            duration = 1
-
-        for item in items_data:
-            room = item["room"]
-            units = item["units_booked"]
-            
-            price_details = PriceService.resolve_price_details_batch(room, booking.start_date, booking.end_date)
-            total_price_for_one_unit = sum(Decimal(str(d["price_per_unit"])) for d in price_details)
-
-            obj = GuestHouseBookingItem.objects.create(
-                booking=booking, 
-                room=room,
-                units_booked=units,
-                price_per_unit=total_price_for_one_unit
+            booking = GuestHouseBooking(
+                start_date=validated_data.get("start_date"),
+                end_date=validated_data.get("end_date"),
+                status=validated_data.get("status", GuestHouseBooking.RentStatus.PENDING),
+                currency=payment_currency,
+                **validated_data
             )
-            room_infos.append({
-                "guesthouse_room": obj.room,
-                "quantity": obj.units_booked
-            })
 
-        # Decrement Availability
-        GuestHouseAvailabilityService.update_availability(
-            room_infos,
-            booking.start_date,
-            booking.end_date
-        )
+            if user:
+                booking.renter = user
 
-        booking.total_price = GuestHouseBookingService.get_booking_total(booking)
-        
-        try:
-            duration = (booking.end_date - booking.start_date).days or 1
-            items_snapshots = []
-            raw_rooms_subtotal = Decimal('0.00')
-
-            for it in booking.items.all():
-                room_total = it.units_booked * it.price_per_unit
-                raw_rooms_subtotal += room_total
-                items_snapshots.append({
-                    "room": {
-                        "id": str(it.room.id),
-                        "title": it.room.title,
-                    },
-                    "units_booked": it.units_booked,
-                    "nights": duration,
-                    "nightly_rate": f"{(it.price_per_unit / duration if duration > 0 else it.price_per_unit):.2f}",
-                    "stay_total": f"{room_total:.2f}",
-                    "currency": booking.currency,
+            booking.save()
+            
+            rooms_info = []
+            for item_data in items_data:
+                rooms_info.append({
+                     "guesthouse_room": item_data['room'],
+                     "quantity": item_data['units_booked']
                 })
 
-            platform_fee = raw_rooms_subtotal * Decimal('0.05')
-            grand_total = raw_rooms_subtotal + platform_fee
+            GuestHouseAvailabilityService.validate_availability(
+                rooms_info, booking.start_date, booking.end_date
+            )
 
-            booking.snapshot = {
-                "booking_id": str(booking.id),
-                "start_date": booking.start_date.isoformat(),
-                "end_date": booking.end_date.isoformat(),
-                "currency": booking.currency,
-                "billing": {
-                    "subtotal_items": f"{raw_rooms_subtotal:.2f}",
-                    "platform_fee": f"{platform_fee:.2f}",
-                    "grand_total": f"{grand_total:.2f}",
-                },
-                "audit_items": items_snapshots,
-                "snapshot_version": 3,
-            }
-        except Exception as e:
-            logger.error(f"Snapshot creation failed for GuestHouse booking: {e}")
+            total_price = Decimal(0)
+            nights = (booking.end_date - booking.start_date).days
+            
+            for item_data in items_data:
+                room = item_data['room']
+                
+                price_details = PriceService.resolve_price_details_batch(
+                     room, booking.start_date, booking.end_date
+                )
+                
+                total_room_native = sum(d['price_per_unit'] for d in price_details)
+                avg_rate_native = total_room_native / nights if nights > 0 else 0
+                
+                converted_rate = avg_rate_native
+                if room.currency != payment_currency:
+                    try:
+                        converted_rate = convert_currency(avg_rate_native, room.currency, payment_currency)
+                    except Exception:
+                        converted_rate = avg_rate_native 
 
-        booking.save(update_fields=['total_price', 'snapshot'])
+                booking_item = GuestHouseBookingItem.objects.create(
+                    booking=booking,
+                    room=room,
+                    units_booked=item_data['units_booked'],
+                    price_per_unit=converted_rate,
+                    snapshot={
+                        "original_currency": room.currency,
+                        "original_price": float(avg_rate_native),
+                        "room_title": room.title,
+                        "hotel_name": hotel.name if hotel else "N/A",
+                        "price_details": [
+                            {k: str(v) if isinstance(v, Decimal) else v for k, v in d.items()}
+                            for d in price_details
+                        ]
+                    }
+                )
+                
+                total_price += booking_item.subtotal() # Removed nights parameter, assuming subtotal handles it internally
 
-        return booking
+                # Process Addons (Assuming GuestHouseBooking has addons, if not, this part needs adjustment)
+                # addons_data = item_data.get('addons', [])
+                # for addon_input in addons_data:
+                #     offering = addon_input.get('_offering')
+                #     if not offering:
+                #         continue
+                    
+                #     # Convert Addon Price
+                #     addon_price = offering.price_per_unit
+                #     if offering.currency != payment_currency:
+                #         try:
+                #             addon_price = convert_currency(offering.price_per_unit, offering.currency, payment_currency)
+                #         except Exception:
+                #             addon_price = offering.price_per_unit
+
+                #     BookingAddon.objects.create(
+                #         booking_item=booking_item,
+                #         offering=offering,
+                #         name=offering.name,
+                #         description=offering.description,
+                #         category=offering.category,
+                #         quantity=addon_input.get('quantity', 1),
+                #         price_per_unit=addon_price,
+                #         currency=payment_currency # Now matches booking
+                #     )
+            
+            grand_total = Decimal(0)
+            for item in booking.items.all():
+                grand_total += item.subtotal()
+            
+            platform_fee_rate = Decimal(getattr(settings, 'PLATFORM_FEE_RATE', '0.05'))
+            platform_fee = grand_total * platform_fee_rate
+            booking.total_price = grand_total + platform_fee
+            
+            booking.terms_accepted = True
+            booking.terms_version = snapshot_data['version']
+            booking.terms_content_snapshot = snapshot_data['content_snapshot']
+            booking.terms_accepted_at = snapshot_data['accepted_at']
+            
+            booking.save()
+
+            GuestHouseAvailabilityService.update_availability( # Changed to GuestHouseAvailabilityService
+                rooms_info, booking.start_date, booking.end_date, increment=False
+            )
+
+            from apps.core.services import BookingEmailService # Assuming this service exists
+            BookingEmailService.send_booking_confirmation(booking)
+            
+            return booking
 
     @staticmethod
     def confirm_booking(booking):

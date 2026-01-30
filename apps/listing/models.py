@@ -397,8 +397,12 @@ class CarRentalItem(AbstractBaseModel):
     class Meta:
         verbose_name = _("Car Rental Item")
         verbose_name_plural = _("Car Rental Items")
-    def subtotal(self):
-        return self.units_rent * self.price_per_unit
+    def subtotal(self, days=None):
+        base = self.units_rent * self.price_per_unit
+        if days:
+            return base * days
+        return base
+
 
     def __str__(self) -> str:
         return f"Car {self.car_listing} rent for {self.car_rental.start_date}"
@@ -867,8 +871,12 @@ class GuestHouseBookingItem(AbstractBaseModel):
         verbose_name_plural = _("Guesthouse Booking Items")
         db_table = "guest_house_booking_items"
 
-    def subtotal(self):
-        return self.units_booked * self.price_per_unit
+    def subtotal(self, nights=None):
+        base = self.units_booked * self.price_per_unit
+        if nights:
+            return base * nights
+        return base
+
 
     def __str__(self):
         return f"{self.room.title} booked on {self.booking.start_date}"
@@ -1782,8 +1790,12 @@ class EventSpaceBookingItem(AbstractBaseModel):
         verbose_name_plural = _("Event Space Booking Items")
         db_table = "event_space_booking_items" 
 
-    def subtotal(self):
-        return self.units_booked * self.price_per_unit
+    def subtotal(self, nights=None):
+        base = self.units_booked * self.price_per_unit
+        if nights:
+            return base * nights
+        return base
+
 
     def __str__(self) -> str:
         return f"Space {self.event_space.title} booked for {self.booking.check_in_date}"
