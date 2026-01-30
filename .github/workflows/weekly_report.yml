@@ -7,6 +7,11 @@ on:
   workflow_dispatch:
     # Allows manual triggering
 
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -29,7 +34,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Replace with your actual project number if using Projects V2
-          PROJECT_NUMBER: "1" 
+          PROJECT_NUMBER: "2" 
         run: python scripts/gh_report.py
 
       - name: Create GitHub Issue

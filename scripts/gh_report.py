@@ -1,7 +1,7 @@
 import os
 import sys
 from datetime import datetime, timedelta, timezone
-from github import Github
+from github import Github, Auth
 import requests
 
 # --- Configuration ---
@@ -57,7 +57,8 @@ query($login: String!, $number: Int!) {
 
 class GitHubReporter:
     def __init__(self, token):
-        self.g = Github(token)
+        auth = Auth.Token(token)
+        self.g = Github(auth=auth)
         self.token = token
         self.since = datetime.now(timezone.utc) - timedelta(days=DAYS_LOOKBACK)
         self.report_data = {repo: {"commits": [], "issues": [], "comments": []} for repo in REPOS}
