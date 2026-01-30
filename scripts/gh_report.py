@@ -69,37 +69,41 @@ class GitHubReporter:
         for repo_name in REPOS:
             full_name = f"{ORG_NAME}/{repo_name}"
             print(f"  Processing {full_name}...")
-            repo = self.g.get_repo(full_name)
+            try:
+                repo = self.g.get_repo(full_name)
 
-            # Commits
-            commits = repo.get_commits(since=self.since)
-            for commit in commits:
-                self.report_data[repo_name]["commits"].append({
-                    "sha": commit.sha[:7],
-                    "msg": commit.commit.message.split('\n')[0],
-                    "author": commit.commit.author.name,
-                    "date": commit.commit.author.date
-                })
-
-            # Issues & Comments (Closed or updated recently)
-            issues = repo.get_issues(state='all', since=self.since)
-            for issue in issues:
-                self.report_data[repo_name]["issues"].append({
-                    "number": issue.number,
-                    "title": issue.title,
-                    "state": issue.state,
-                    "url": issue.html_url
-                })
-                
-                # Fetch comments
-                comments = issue.get_comments(since=self.since)
-                for comment in comments:
-                    self.report_data[repo_name]["comments"].append({
-                        "issue_number": issue.number,
-                        "author": comment.user.login,
-                        "body": comment.body[:100] + "..." if len(comment.body) > 100 else comment.body,
-                        "url": comment.html_url
+                # Commits
+                commits = repo.get_commits(since=self.since)
+                for commit in commits:
+                    self.report_data[repo_name]["commits"].append({
+                        "sha": commit.sha[:7],
+                        "msg": commit.commit.message.split('\n')[0],
+                        "author": commit.commit.author.name,
+                        "date": commit.commit.author.date
                     })
+
+                # Issues & Comments (Closed or updated recently)
+                issues = repo.get_issues(state='all', since=self.since)
+                for issue in issues:
+                    self.report_data[repo_name]["issues"].append({
+                        "number": issue.number,
+                        "title": issue.title,
+                        "state": issue.state,
+                        "url": issue.html_url
+                    })
+                    
+                    # Fetch comments
+                    comments = issue.get_comments(since=self.since)
+                    for comment in comments:
+                        self.report_data[repo_name]["comments"].append({
+                            "issue_number": issue.number,
+                            "author": comment.user.login,
+                            "body": comment.body[:100] + "..." if len(comment.body) > 100 else comment.body,
+                            "url": comment.html_url
+                        })
+            except Exception as e:
+                print(f"  [ERROR] Could not access {full_name}: {e}")
+                # We skip this repo but continue with others
 
     def fetch_project_v2(self, project_number):
         # Note: This logic assumes an Organization project. 
