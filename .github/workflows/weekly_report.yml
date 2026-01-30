@@ -32,14 +32,14 @@ jobs:
 
       - name: Run report script
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
           # Replace with your actual project number if using Projects V2
           PROJECT_NUMBER: "2" 
         run: python scripts/gh_report.py
 
       - name: Create GitHub Issue
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
         run: |
           REPORT_TITLE="📊 Weekly Status Report: $(date +'%Y-%m-%d')"
           REPORT_BODY=$(cat weekly_report.md)
