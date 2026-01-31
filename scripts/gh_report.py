@@ -1,6 +1,5 @@
 import os
 import sys
-import re
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from github import Github, Auth
@@ -14,6 +13,8 @@ REPOS = [
     "michot_marefiya_mobile"
 ]
 DAYS_LOOKBACK = 7
+STALE_DAYS = 7
+HOT_TOPIC_THRESHOLD = 3
 
 # --- GraphQL for Projects ---
 PROJECT_V2_QUERY = """
@@ -45,11 +46,11 @@ query($login: String!, $number: Int!) {
 class CommitAnalyzer:
     CATEGORIES = {
         "✨ Features": ["feat", "feature", "add", "implement"],
-        "🐛 Bug Fixes": ["fix", "bug", "patch", "resolve", "handle"],
-        "♻️ Refactor": ["refactor", "cleanup", "structure", "move"],
-        "🔧 Chore & CI": ["chore", "ci", "build", "test", "docs", "merge"],
+        "🐛 Bug Fixes": ["fix", "bug", "patch", "resolve", "handle", "hotfix"],
+        "♻️ Refactor": ["refactor", "cleanup", "structure", "move", "remove", "delete"],
+        "🔧 Chore & CI": ["chore", "ci", "build", "test", "docs", "merge", "bump"],
         "🚀 Performance": ["perf", "optimize"],
-        "💄 UI/Style": ["style", "ui", "css", "design"]
+        "💄 UI/Style": ["style", "ui", "css", "design", "theme"]
     }
 
     @staticmethod
@@ -72,19 +73,21 @@ class ReportFormatter:
             data_rows += "| " + " | ".join(str(x) for x in row) + " |\n"
         return f"\n{header_row}\n{separator}\n{data_rows}\n"
 
-class GitHubReporterV2:
+class GitHubReporterV3:
     def __init__(self, token):
         auth = Auth.Token(token)
         self.g = Github(auth=auth)
         self.token = token
         self.since = datetime.now(timezone.utc) - timedelta(days=DAYS_LOOKBACK)
-        # Data structures
         self.repo_data = {} 
         self.project_updates = []
+        self.update_log = []
         self.contributors = defaultdict(lambda: {"commits": 0, "prs": 0})
+        self.hot_topics = []
+        self.stale_prs = []
 
     def fetch_data(self):
-        print(f"Fetching V2 data since {self.since}...")
+        print(f"Fetching V3 Enterprise data since {self.since}...")
         for repo_name in REPOS:
             full_name = f"{ORG_NAME}/{repo_name}"
             print(f"  Processing {full_name}...")
@@ -113,28 +116,56 @@ class GitHubReporterV2:
                     })
                     self.contributors[author]["commits"] += 1
 
-                items = repo.get_issues(state='all', since=self.since)
+                items = repo.get_issues(state='all')
+                
                 for item in items:
+                    is_recent = item.updated_at >= self.since
+                    is_stale = item.state == 'open' and (datetime.now(timezone.utc) - item.created_at).days > STALE_DAYS
+                    
+                    if not (is_recent or (is_stale and item.pull_request)):
+                        continue
+
+                    if item.comments >= HOT_TOPIC_THRESHOLD and is_recent:
+                        self.hot_topics.append({
+                            "title": item.title,
+                            "url": item.html_url,
+                            "comments": item.comments,
+                            "repo": repo_name,
+                            "type": "PR" if item.pull_request else "Issue"
+                        })
+
                     if item.pull_request:
                         pr = item.as_pull_request()
                         pr_info = {
                             "number": pr.number,
                             "title": pr.title,
                             "user": pr.user.login,
-                            "url": pr.html_url
+                            "url": pr.html_url,
+                            "created_at": pr.created_at
                         }
-                        if pr.merged and pr.merged_at >= self.since:
+                        
+                        if pr.merged and pr.merged_at and pr.merged_at >= self.since:
                             repo_stats["merged_prs"].append(pr_info)
                             self.contributors[pr.user.login]["prs"] += 1
                         elif pr.state == 'open':
                             repo_stats["open_prs"].append(pr_info)
+                            days_open = (datetime.now(timezone.utc) - pr.created_at).days
+                            if days_open > STALE_DAYS:
+                                self.stale_prs.append({
+                                    "title": pr.title,
+                                    "url": pr.html_url,
+                                    "days": days_open,
+                                    "repo": repo_name,
+                                    "user": pr.user.login
+                                })
                     else:
-                        repo_stats["issues"].append({
-                            "number": item.number,
-                            "title": item.title,
-                            "state": item.state,
-                            "url": item.html_url
-                        })
+                        if is_recent:
+                            repo_stats["issues"].append({
+                                "number": item.number,
+                                "title": item.title,
+                                "state": item.state,
+                                "url": item.html_url
+                            })
 
                 self.repo_data[repo_name] = repo_stats
 
@@ -167,21 +198,32 @@ class GitHubReporterV2:
         total_merged = sum(len(d["merged_prs"]) for d in self.repo_data.values())
         total_open_prs = sum(len(d["open_prs"]) for d in self.repo_data.values())
         
-        md += "## 📊 Executive Summary\n"
-        md += f"| Metric | Count |\n|---|---|\n"
-        md += f"| 🔨 **Commits** | {total_commits} |\n"
-        md += f"| 🚢 **Shipped (Merged PRs)** | {total_merged} |\n"
-        md += f"| 🚧 **In Progress (Open PRs)** | {total_open_prs} |\n\n"
+        md += "## 📊 Executive Overview\n"
+        md += f"| Metric | Count | Status |\n|---|---|---|\n"
+        md += f"| 🔨 **Commits** | {total_commits} | 🟢 Active |\n"
+        md += f"| 🚢 **Shipped** | {total_merged} | 🟣 Delivered |\n"
+        md += f"| 🚧 **In Progress** | {total_open_prs} | 🟡 Continued |\n\n"
+
+        if self.stale_prs:
+            md += "## 🚨 Needs Attention (Stale PRs > 7 days)\n"
+            md += "> *These items are blocking flow. Please review.* \n\n"
+            rows = [[p['repo'], f"[{p['title']}]({p['url']})", f"{p['days']} days", p['user']] for p in self.stale_prs]
+            md += ReportFormatter.create_table(["Repo", "PR Title", "Age", "Author"], rows)
+        
+        if self.hot_topics:
+            md += "## 🔥 Hot Topics (High Activity)\n"
+            md += "> *Discussions with high engagement recently.* \n\n"
+            rows = [[t['repo'], t['type'], f"[{t['title']}]({t['url']})", f"💬 {t['comments']}"] for t in self.hot_topics]
+            md += ReportFormatter.create_table(["Repo", "Type", "Topic", "Comments"], rows)
 
         if self.contributors:
             md += "## 🏆 Top Contributors\n"
             sorted_contribs = sorted(self.contributors.items(), key=lambda x: x[1]['commits'], reverse=True)[:5]
             rows = [[user, data['commits'], data['prs']] for user, data in sorted_contribs]
-            md += ReportFormatter.create_table(["User", "Commits", "PRs Merged"], rows)
+            md += ReportFormatter.create_table(["User", "Commits", "Shipped"], rows)
 
         if self.project_updates:
             md += "## 🏗️ Project Board Snapshot\n"
-
             by_status = defaultdict(list)
             for p in self.project_updates: by_status[p["status"]].append(p)
             
@@ -189,6 +231,8 @@ class GitHubReporterV2:
                 if by_status[status]:
                     icon = "✅" if status == "Done" else "🚧" if status == "In Progress" else "📋"
                     md += f"### {icon} {status}\n"
+                    rows = [[f"[{item['title']}]({item['url']})"] for item in by_status[status][:5]]
+
                     for item in by_status[status][:5]:
                         md += f"- [{item['title']}]({item['url']})\n"
                     if len(by_status[status]) > 5: md += f"- *...and {len(by_status[status])-5} more*\n"
@@ -196,16 +240,17 @@ class GitHubReporterV2:
 
         md += "## 💻 Repository Deep Dive\n"
         for repo_name, data in self.repo_data.items():
-            if not any(data.values()): continue # Skip empty
+            if not any(data.values()): continue 
             
             md += f"### 📦 {repo_name.replace('_', ' ').title()}\n"
             
             # PRs Table
-            if data["merged_prs"] or data["open_prs"]:
+            rows = []
+            for pr in data["merged_prs"]: rows.append(["🟣 Merged", f"#{pr['number']} {pr['title']}", pr['user']])
+            for pr in data["open_prs"]: rows.append(["🟢 Open", f"#{pr['number']} {pr['title']}", pr['user']])
+            
+            if rows:
                 md += "**Pull Request Velocity**\n"
-                rows = []
-                for pr in data["merged_prs"]: rows.append(["🟣 Merged", f"#{pr['number']} {pr['title']}", pr['user']])
-                for pr in data["open_prs"]: rows.append(["🟢 Open", f"#{pr['number']} {pr['title']}", pr['user']])
                 md += ReportFormatter.create_table(["State", "PR", "Author"], rows)
 
             if data["commits"]:
@@ -215,14 +260,6 @@ class GitHubReporterV2:
                     for c in commit_list:
                         md += f"- [`{c['sha']}`]({c['url']}) {c['msg']} - *{c['author']}*\n"
                 md += "\n</details>\n\n"
-            
-            if data["issues"]:
-                active_issues = [i for i in data["issues"] if i['state'] == 'open']
-                if active_issues:
-                    md += "<details><summary><b>Active Issues</b></summary>\n\n"
-                    for i in active_issues:
-                        md += f"- 🟢 #{i['number']} [{i['title']}]({i['url']})\n"
-                    md += "\n</details>\n\n"
             
             md += "---\n"
 
@@ -235,8 +272,7 @@ def main():
     args = parser.parse_args()
 
     if args.mock:
-        print("Generating V2 Mock Report...")
-        print("Mock mode not fully implemented in V2 snippet, please test with real token.")
+        print("Mock mode not fully supported in V3 snippet.")
         return
 
     token = os.getenv("GITHUB_TOKEN")
@@ -246,7 +282,7 @@ def main():
         print("Error: GITHUB_TOKEN not set.")
         sys.exit(1)
 
-    reporter = GitHubReporterV2(token)
+    reporter = GitHubReporterV3(token)
     reporter.fetch_data()
     if project_num:
         reporter.fetch_project_v2(int(project_num))
