@@ -192,7 +192,7 @@ class GitHubReporterV3:
 
     def generate_report(self):
         date_str = datetime.now().strftime('%Y-%m-%d')
-        md = f"# 🚀 Engineering Weekly Report: {date_str}\n\n"
+        md = f"# 🚀 Michot Marefia Weekly Report: {date_str}\n\n"
         
         total_commits = sum(sum(len(v) for v in d["commits"].values()) for d in self.repo_data.values())
         total_merged = sum(len(d["merged_prs"]) for d in self.repo_data.values())
