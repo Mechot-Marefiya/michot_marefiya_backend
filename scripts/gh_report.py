@@ -1,6 +1,8 @@
 import os
 import sys
+import re
 from datetime import datetime, timedelta, timezone
+from collections import defaultdict
 from github import Github, Auth
 import requests
 
@@ -11,10 +13,9 @@ REPOS = [
     "michot_marefiya_ui",
     "michot_marefiya_mobile"
 ]
-PROJECT_OWNER = ORG_NAME  # Can be a user or org
 DAYS_LOOKBACK = 7
 
-# --- GraphQL Queries ---
+# --- GraphQL for Projects ---
 PROJECT_V2_QUERY = """
 query($login: String!, $number: Int!) {
   organization(login: $login) {
@@ -23,28 +24,14 @@ query($login: String!, $number: Int!) {
       items(first: 100) {
         nodes {
           content {
-            ... on Issue {
-              title
-              url
-              number
-              state
-            }
-            ... on PullRequest {
-              title
-              url
-              number
-              state
-            }
+            ... on Issue { title, url, number, state }
+            ... on PullRequest { title, url, number, state }
           }
           fieldValues(first: 10) {
             nodes {
               ... on ProjectV2ItemFieldSingleSelectValue {
                 name
-                field {
-                  ... on ProjectV2Field {
-                    name
-                  }
-                }
+                field { ... on ProjectV2Field { name } }
               }
             }
           }
@@ -55,185 +42,220 @@ query($login: String!, $number: Int!) {
 }
 """
 
-class GitHubReporter:
+class CommitAnalyzer:
+    CATEGORIES = {
+        "✨ Features": ["feat", "feature", "add", "implement"],
+        "🐛 Bug Fixes": ["fix", "bug", "patch", "resolve", "handle"],
+        "♻️ Refactor": ["refactor", "cleanup", "structure", "move"],
+        "🔧 Chore & CI": ["chore", "ci", "build", "test", "docs", "merge"],
+        "🚀 Performance": ["perf", "optimize"],
+        "💄 UI/Style": ["style", "ui", "css", "design"]
+    }
+
+    @staticmethod
+    def categorize(message):
+        lower_msg = message.lower()
+        for category, keywords in CommitAnalyzer.CATEGORIES.items():
+            for kw in keywords:
+                if lower_msg.startswith(kw) or f": {kw}" in lower_msg:
+                    return category
+        return "📦 Other Changes"
+
+class ReportFormatter:
+    @staticmethod
+    def create_table(headers, rows):
+        if not rows: return ""
+        header_row = "| " + " | ".join(headers) + " |"
+        separator = "| " + " | ".join(["---"] * len(headers)) + " |"
+        data_rows = ""
+        for row in rows:
+            data_rows += "| " + " | ".join(str(x) for x in row) + " |\n"
+        return f"\n{header_row}\n{separator}\n{data_rows}\n"
+
+class GitHubReporterV2:
     def __init__(self, token):
         auth = Auth.Token(token)
         self.g = Github(auth=auth)
         self.token = token
         self.since = datetime.now(timezone.utc) - timedelta(days=DAYS_LOOKBACK)
-        self.report_data = {repo: {"commits": [], "issues": [], "comments": []} for repo in REPOS}
+        # Data structures
+        self.repo_data = {} 
         self.project_updates = []
+        self.contributors = defaultdict(lambda: {"commits": 0, "prs": 0})
 
-    def fetch_repo_activity(self):
-        print(f"Fetching activity since {self.since}...")
+    def fetch_data(self):
+        print(f"Fetching V2 data since {self.since}...")
         for repo_name in REPOS:
             full_name = f"{ORG_NAME}/{repo_name}"
             print(f"  Processing {full_name}...")
+            
+            repo_stats = {
+                "commits": defaultdict(list),
+                "open_prs": [],
+                "merged_prs": [],
+                "issues": []
+            }
+
             try:
                 repo = self.g.get_repo(full_name)
 
-                # Commits
                 commits = repo.get_commits(since=self.since)
-                for commit in commits:
-                    self.report_data[repo_name]["commits"].append({
-                        "sha": commit.sha[:7],
-                        "msg": commit.commit.message.split('\n')[0],
-                        "author": commit.commit.author.name,
-                        "date": commit.commit.author.date
-                    })
-
-                # Issues & Comments (Closed or updated recently)
-                issues = repo.get_issues(state='all', since=self.since)
-                for issue in issues:
-                    self.report_data[repo_name]["issues"].append({
-                        "number": issue.number,
-                        "title": issue.title,
-                        "state": issue.state,
-                        "url": issue.html_url
-                    })
+                for c in commits:
+                    msg = c.commit.message.split('\n')[0]
+                    author = c.commit.author.name or c.author.login if c.author else "Unknown"
+                    category = CommitAnalyzer.categorize(msg)
                     
-                    # Fetch comments
-                    comments = issue.get_comments(since=self.since)
-                    for comment in comments:
-                        self.report_data[repo_name]["comments"].append({
-                            "issue_number": issue.number,
-                            "author": comment.user.login,
-                            "body": comment.body[:100] + "..." if len(comment.body) > 100 else comment.body,
-                            "url": comment.html_url
+                    repo_stats["commits"][category].append({
+                        "sha": c.sha[:7], 
+                        "msg": msg, 
+                        "author": author,
+                        "url": c.html_url
+                    })
+                    self.contributors[author]["commits"] += 1
+
+                items = repo.get_issues(state='all', since=self.since)
+                for item in items:
+                    if item.pull_request:
+                        pr = item.as_pull_request()
+                        pr_info = {
+                            "number": pr.number,
+                            "title": pr.title,
+                            "user": pr.user.login,
+                            "url": pr.html_url
+                        }
+                        if pr.merged and pr.merged_at >= self.since:
+                            repo_stats["merged_prs"].append(pr_info)
+                            self.contributors[pr.user.login]["prs"] += 1
+                        elif pr.state == 'open':
+                            repo_stats["open_prs"].append(pr_info)
+                    else:
+                        repo_stats["issues"].append({
+                            "number": item.number,
+                            "title": item.title,
+                            "state": item.state,
+                            "url": item.html_url
                         })
+
+                self.repo_data[repo_name] = repo_stats
+
             except Exception as e:
-                print(f"  [ERROR] Could not access {full_name}: {e}")
-                # We skip this repo but continue with others
+                print(f"  [ERROR] access failed for {full_name}: {e}")
 
     def fetch_project_v2(self, project_number):
-        # Note: This logic assumes an Organization project. 
-        # If it's a User project, the query needs to change from 'organization' to 'user'
         headers = {"Authorization": f"token {self.token}"}
         variables = {"login": ORG_NAME, "number": project_number}
+        try:
+            resp = requests.post("https://api.github.com/graphql", json={"query": PROJECT_V2_QUERY, "variables": variables}, headers=headers)
+            if resp.status_code == 200:
+                data = resp.json().get("data", {}).get("organization", {}).get("projectV2", {}).get("items", {}).get("nodes", [])
+                for item in data:
+                    status = next((f["name"] for f in item.get("fieldValues", {}).get("nodes", []) if f.get("field", {}).get("name") == "Status"), "Unknown")
+                    if status in ["Done", "In Progress", "Todo"]:
+                        self.project_updates.append({
+                            "title": item.get("content", {}).get("title"),
+                            "status": status,
+                            "url": item.get("content", {}).get("url")
+                        })
+        except Exception as e:
+            print(f"Project fetch error: {e}")
+
+    def generate_report(self):
+        date_str = datetime.now().strftime('%Y-%m-%d')
+        md = f"# 🚀 Engineering Weekly Report: {date_str}\n\n"
         
-        response = requests.post(
-            "https://api.github.com/graphql",
-            json={"query": PROJECT_V2_QUERY, "variables": variables},
-            headers=headers
-        )
+        total_commits = sum(sum(len(v) for v in d["commits"].values()) for d in self.repo_data.values())
+        total_merged = sum(len(d["merged_prs"]) for d in self.repo_data.values())
+        total_open_prs = sum(len(d["open_prs"]) for d in self.repo_data.values())
         
-        if response.status_code == 200:
-            data = response.json()
-            # Basic parsing of project items - this is a simplified version
-            # A truly "professional" one would compare states from a cache, 
-            # but here we just list current items in 'Done' or 'In Progress'
-            items = data.get("data", {}).get("organization", {}).get("projectV2", {}).get("items", {}).get("nodes", [])
-            for item in items:
-                content = item.get("content", {})
-                fields = item.get("fieldValues", {}).get("nodes", [])
-                status = "Unknown"
-                for f in fields:
-                    if f.get("field", {}).get("name") == "Status":
-                        status = f.get("name")
-                
-                if status in ["Done", "In Progress"]:
-                    self.project_updates.append({
-                        "title": content.get("title"),
-                        "status": status,
-                        "url": content.get("url")
-                    })
-        else:
-            print(f"Error fetching project: {response.status_code}")
+        md += "## 📊 Executive Summary\n"
+        md += f"| Metric | Count |\n|---|---|\n"
+        md += f"| 🔨 **Commits** | {total_commits} |\n"
+        md += f"| 🚢 **Shipped (Merged PRs)** | {total_merged} |\n"
+        md += f"| 🚧 **In Progress (Open PRs)** | {total_open_prs} |\n\n"
 
-    def generate_markdown(self):
-        report = f"# 🚀 Weekly Activity Report: {datetime.now().strftime('%Y-%m-%d')}\n\n"
-        report += f"Generated for **{ORG_NAME}** (Last {DAYS_LOOKBACK} days)\n\n"
+        if self.contributors:
+            md += "## 🏆 Top Contributors\n"
+            sorted_contribs = sorted(self.contributors.items(), key=lambda x: x[1]['commits'], reverse=True)[:5]
+            rows = [[user, data['commits'], data['prs']] for user, data in sorted_contribs]
+            md += ReportFormatter.create_table(["User", "Commits", "PRs Merged"], rows)
 
-        # Executive Summary
-        total_commits = sum(len(d["commits"]) for d in self.report_data.values())
-        total_issues = sum(len(d["issues"]) for d in self.report_data.values())
-        report += "## 📊 Executive Summary\n"
-        report += f"- **Total Commits:** {total_commits}\n"
-        report += f"- **Active Issues/PRs:** {total_issues}\n"
-        report += f"- **Project Updates:** {len(self.project_updates)}\n\n"
-
-        # Project Status
         if self.project_updates:
-            report += "## 🏗️ Project Board Highlights\n"
-            done = [i for i in self.project_updates if i["status"] == "Done"]
-            ip = [i for i in self.project_updates if i["status"] == "In Progress"]
+            md += "## 🏗️ Project Board Snapshot\n"
+
+            by_status = defaultdict(list)
+            for p in self.project_updates: by_status[p["status"]].append(p)
             
-            if done:
-                report += "### ✅ Completed\n"
-                for i in done: report += f"- [{i['title']}]({i['url']})\n"
-            if ip:
-                report += "\n### 🚧 In Progress\n"
-                for i in ip: report += f"- [{i['title']}]({i['url']})\n"
-            report += "\n"
+            for status in ["Done", "In Progress", "Todo"]:
+                if by_status[status]:
+                    icon = "✅" if status == "Done" else "🚧" if status == "In Progress" else "📋"
+                    md += f"### {icon} {status}\n"
+                    for item in by_status[status][:5]:
+                        md += f"- [{item['title']}]({item['url']})\n"
+                    if len(by_status[status]) > 5: md += f"- *...and {len(by_status[status])-5} more*\n"
+                    md += "\n"
 
-        # Repo Breakdown
-        report += "## 💻 Development Activity\n"
-        for repo_name in REPOS:
-            data = self.report_data[repo_name]
-            if data["commits"] or data["issues"] or data["comments"]:
-                report += f"### 📦 {repo_name.replace('_', ' ').title()}\n"
-                if data["commits"]:
-                    report += f"**Recent Commits ({len(data['commits'])}):**\n"
-                    for c in data["commits"][:5]:  # Show top 5
-                        report += f"- `{c['sha']}` {c['msg']} (by {c['author']})\n"
-                
-                if data["issues"]:
-                    report += f"\n**Active Issues/PRs:**\n"
-                    for i in data["issues"][:5]:
-                        state_icon = "🟢" if i["state"] == "open" else "🔴"
-                        report += f"- {state_icon} #{i['number']} [{i['title']}]({i['url']})\n"
-                report += "\n"
+        md += "## 💻 Repository Deep Dive\n"
+        for repo_name, data in self.repo_data.items():
+            if not any(data.values()): continue # Skip empty
+            
+            md += f"### 📦 {repo_name.replace('_', ' ').title()}\n"
+            
+            # PRs Table
+            if data["merged_prs"] or data["open_prs"]:
+                md += "**Pull Request Velocity**\n"
+                rows = []
+                for pr in data["merged_prs"]: rows.append(["🟣 Merged", f"#{pr['number']} {pr['title']}", pr['user']])
+                for pr in data["open_prs"]: rows.append(["🟢 Open", f"#{pr['number']} {pr['title']}", pr['user']])
+                md += ReportFormatter.create_table(["State", "PR", "Author"], rows)
 
-        return report
+            if data["commits"]:
+                md += "<details><summary><b>View Recent Commits (Categorized)</b></summary>\n\n"
+                for cat, commit_list in data["commits"].items():
+                    md += f"#### {cat}\n"
+                    for c in commit_list:
+                        md += f"- [`{c['sha']}`]({c['url']}) {c['msg']} - *{c['author']}*\n"
+                md += "\n</details>\n\n"
+            
+            if data["issues"]:
+                active_issues = [i for i in data["issues"] if i['state'] == 'open']
+                if active_issues:
+                    md += "<details><summary><b>Active Issues</b></summary>\n\n"
+                    for i in active_issues:
+                        md += f"- 🟢 #{i['number']} [{i['title']}]({i['url']})\n"
+                    md += "\n</details>\n\n"
+            
+            md += "---\n"
+
+        return md
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="GitHub Weekly Report Generator")
-    parser.add_argument("--mock", action="store_true", help="Generate a mock report for testing")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mock", action="store_true")
     args = parser.parse_args()
 
+    if args.mock:
+        print("Generating V2 Mock Report...")
+        print("Mock mode not fully implemented in V2 snippet, please test with real token.")
+        return
+
     token = os.getenv("GITHUB_TOKEN")
-    project_num = os.getenv("PROJECT_NUMBER") # e.g. 1
-    
-    if args.mock:
-        print("Running in MOCK mode...")
-        reporter = GitHubReporter("mock_token")
-        reporter.report_data["michot_marefiya_backend"]["commits"] = [
-            {"sha": "a1b2c3d", "msg": "Fixed auth bug", "author": "John Doe", "date": datetime.now()},
-            {"sha": "e5f6g7h", "msg": "Updated API docs", "author": "Jane Smith", "date": datetime.now()}
-        ]
-        reporter.report_data["michot_marefiya_ui"]["commits"] = [
-            {"sha": "i9j0k1l", "msg": "Added new dashboard component", "author": "Alice", "date": datetime.now()}
-        ]
-        reporter.project_updates = [
-            {"title": "Implement User Profiles", "status": "Done", "url": "https://github.com/org/repo/issues/1"},
-            {"title": "Fix Payment Gateway", "status": "In Progress", "url": "https://github.com/org/repo/issues/2"}
-        ]
-        report_md = reporter.generate_markdown()
-    else:
-        if not token:
-            print("Error: GITHUB_TOKEN environment variable not set.")
-            sys.exit(1)
+    project_num = os.getenv("PROJECT_NUMBER")
 
-        reporter = GitHubReporter(token)
-        reporter.fetch_repo_activity()
-        
-        if project_num:
-            try:
-                reporter.fetch_project_v2(int(project_num))
-            except ValueError:
-                print("Invalid project number.")
+    if not token:
+        print("Error: GITHUB_TOKEN not set.")
+        sys.exit(1)
 
-        report_md = reporter.generate_markdown()
+    reporter = GitHubReporterV2(token)
+    reporter.fetch_data()
+    if project_num:
+        reporter.fetch_project_v2(int(project_num))
     
-    # Write to file
+    report = reporter.generate_report()
+    
     with open("weekly_report.md", "w", encoding="utf-8") as f:
-        f.write(report_md)
-    
-    print("\nReport generated successfully in weekly_report.md")
-    if args.mock:
-        print("--- MOCK REPORT PREVIEW ---")
-        print(report_md)
+        f.write(report)
+    print("Report generated: weekly_report.md")
 
 if __name__ == "__main__":
     main()
