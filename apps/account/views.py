@@ -51,6 +51,7 @@ from apps.account.serializers import (
     PasswordResetSerializer,
     PasswordResetConfirmSerializer,
     VerifyEmailSerializer,
+    VerifyEmailChangeSerializer,
 )
 from apps.listing.serializers import AddonOfferingListSerializer
 from apps.account.enums import RoleCode
@@ -596,5 +597,23 @@ class VerifyEmailView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response({"detail": "Email verified successfully. You can now login."}, status=status.HTTP_200_OK)
+
+
+@extend_schema(tags=["Identity & Auth"])
+class VerifyEmailChangeView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = VerifyEmailChangeSerializer
+
+    @extend_schema(
+        summary="Verify Email Change",
+        description="Confirm email change request using signed token.",
+        request=VerifyEmailChangeSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
+    def post(self, request):
+        serializer = VerifyEmailChangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"detail": "Email address updated successfully."}, status=status.HTTP_200_OK)
 
 

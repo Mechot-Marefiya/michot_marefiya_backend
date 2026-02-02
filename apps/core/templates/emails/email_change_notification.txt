@@ -1,0 +1,14 @@
+Security Alert: Email Change Request
+
+Hello {{ first_name }},
+
+We received a request to change the email address for your Michot Marefiya account from {{ old_email }} to: {{ new_email }}.
+
+If you made this request:
+Please check the inbox of the new email address to complete the verification.
+
+If you did NOT make this request:
+Someone may be trying to access your account. Please reset your password immediately at:
+{{ frontend_url }}/auth/reset-password
+
+Account: {{ old_email }}
