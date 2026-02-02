@@ -1,0 +1,29 @@
+{% extends 'emails/base_email.html' %}
+
+{% block content %}
+<div class="header" style="background: linear-gradient(135deg, #ee3437 0%, #aa1111 100%);">
+    <h1>Security Alert: Email Change Request</h1>
+</div>
+<div class="content">
+    <p>Hello {{ first_name }},</p>
+    <p>We received a request to change the email address for your Michot Marefiya account from <strong>{{ old_email
+            }}</strong> to: <strong>{{ new_email }}</strong>.</p>
+
+    <div
+        style="background-color: #fff3cd; border: 1px solid #ffeeba; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <p style="margin: 0; color: #856404; font-weight: bold;">If you made this request:</p>
+        <p style="margin: 5px 0 0 0; color: #856404;">Please check the inbox of the new email address to complete the
+            verification.</p>
+    </div>
+
+    <div
+        style="background-color: #f8d7da; border: 1px solid #f5c6cb; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <p style="margin: 0; color: #721c24; font-weight: bold;">If you did NOT make this request:</p>
+        <p style="margin: 5px 0 0 0; color: #721c24;">Someone may be trying to access your account. Please <a
+                href="{{ frontend_url }}/auth/reset-password" style="color: #721c24; text-decoration: underline;">reset
+                your password immediately</a>.</p>
+    </div>
+
+    <p style="font-size: 13px; color: #666;">Account: {{ old_email }}</p>
+</div>
+{% endblock %}

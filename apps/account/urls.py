@@ -15,5 +15,6 @@ urlpatterns = [
     path('password-reset/', views.PasswordResetView.as_view(), name='password_reset'),
     path('password-reset/confirm/', views.PasswordResetConfirmView.as_view(), name='password_reset_confirm'),
     path('verify-email/', views.VerifyEmailView.as_view(), name='verify_email'),
+    path('verify-email-change/', views.VerifyEmailChangeView.as_view(), name='verify_email_change'),
     path('', include(router.urls)),
 ]

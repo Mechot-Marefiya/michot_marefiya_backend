@@ -178,6 +178,70 @@ Support: support@michotmarefia.com
             return False
 
     @staticmethod
+    def send_email_change_verification(user, new_email, verification_url):
+        try:
+            context = {
+                'first_name': user.first_name or "User",
+                'new_email': new_email,
+                'verification_url': verification_url
+            }
+            
+            subject = "Verify Your New Email Address - Michot Marefiya"
+            
+            html_body = render_to_string('emails/verify_email_change.html', context)
+            plain_body = render_to_string('emails/verify_email_change.txt', context)
+            
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=plain_body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[new_email]
+            )
+            email.attach_alternative(html_body, "text/html")
+            
+            email.send(fail_silently=False)
+            
+            logger.info(f"Email change verification sent successfully to {new_email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send email change verification to {new_email}: {str(e)}", exc_info=True)
+            return False
+
+    @staticmethod
+    def send_email_change_notice(user, old_email, new_email):
+        try:
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
+            context = {
+                'first_name': user.first_name or "User",
+                'old_email': old_email,
+                'new_email': new_email,
+                'frontend_url': frontend_url
+            }
+            
+            subject = "Security Alert: Email Change Request - Michot Marefiya"
+            
+            html_body = render_to_string('emails/email_change_notification.html', context)
+            plain_body = render_to_string('emails/email_change_notification.txt', context)
+            
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=plain_body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[old_email]  # Send to OLD email
+            )
+            email.attach_alternative(html_body, "text/html")
+            
+            email.send(fail_silently=False)
+            
+            logger.info(f"Security alert for email change sent to {old_email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send security alert to {old_email}: {str(e)}", exc_info=True)
+            return False
+
+    @staticmethod
     def send_payment_receipt(booking, payment_transaction):
         # send payment receipt email (future implementation)
         

@@ -1,0 +1,19 @@
+{% extends 'emails/base_email.html' %}
+
+{% block content %}
+<div class="header">
+    <h1>Verify Your New Email Address</h1>
+</div>
+<div class="content">
+    <p>Hello {{ first_name }},</p>
+    <p>We received a request to change the email address for your Michot Marefiya account to <strong>{{ new_email
+            }}</strong>.</p>
+    <p>To confirm this change, please click the button below:</p>
+
+    <a href="{{ verification_url }}" class="button">Verify New Email</a>
+
+    <p>If you did not request this change, please ignore this email. Your current email address will remain unchanged.
+    </p>
+    <p>This link will expire in 24 hours.</p>
+</div>
+{% endblock %}

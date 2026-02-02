@@ -264,9 +264,11 @@ class UserResponseSerializer(serializers.ModelSerializer):
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):
+    current_password = serializers.CharField(write_only=True, required=False)
+
     class Meta:
         model = User
-        fields = ["email", "first_name", "last_name"]
+        fields = ["email", "first_name", "last_name", "current_password"]
         extra_kwargs = {
             "email": {"required": False},
             "first_name": {"required": False},
@@ -279,20 +281,55 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         
         value = value.strip().lower()
         
-        if self.instance:
-            if User.objects.filter(email=value).exclude(id=self.instance.id).exists():
-                raise serializers.ValidationError("A user with this email already exists.")
-        else:
-            if User.objects.filter(email=value).exists():
-                raise serializers.ValidationError("A user with this email already exists.")
+        if self.instance and self.instance.email == value:
+            return value
+
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+            
         return value
 
+    def validate(self, attrs):
+        if 'email' in attrs and attrs['email'] != self.instance.email:
+            if 'current_password' not in attrs:
+                raise serializers.ValidationError({"current_password": "Current password is required to change email."})
+            
+            if not self.instance.check_password(attrs['current_password']):
+                raise serializers.ValidationError({"current_password": "Incorrect password."})
+        
+        return attrs
+
     def update(self, instance, validated_data):
-        if 'email' in validated_data:
-            validated_data['email'] = validated_data['email'].strip().lower()
+        new_email = validated_data.pop('email', None)
+        validated_data.pop('current_password', None)
+
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        
         instance.save()
+        
+        if new_email and new_email != instance.email:
+            uid = urlsafe_base64_encode(force_bytes(instance.pk))
+            token = default_token_generator.make_token(instance)
+            
+            from django.core.signing import TimestampSigner
+            signer = TimestampSigner()
+            signed_email = signer.sign(new_email)
+            
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
+            # Link format: /verify-email-change?uid=...&token=...&email=...
+            # We'll use a custom View to verify the signer and then update.
+            verification_url = f"{frontend_url}/auth/verify-email-change?uid={uid}&email={signed_email}"
+            
+            # 1. Send verification to NEW email
+            EmailService.send_email_change_verification(instance, new_email, verification_url)
+            
+            # 2. Send security alert to OLD email
+            EmailService.send_email_change_notice(instance, instance.email, new_email)
+            
+            # We can add a message to the response via context or just return instance
+            # The view can inspect and tell user "Verification sent"
+            
         return instance
 
     def to_representation(self, instance):
@@ -455,6 +492,38 @@ class VerifyEmailSerializer(serializers.Serializer):
 
     def save(self):
         self.user.is_active = True
+        self.user.save()
+        return self.user
+
+
+class VerifyEmailChangeSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    email = serializers.CharField()
+
+    def validate(self, attrs):
+        from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
+        
+        signer = TimestampSigner()
+        try:
+            self.new_email = signer.unsign(attrs['email'], max_age=60 * 60 * 24)
+        except SignatureExpired:
+            raise serializers.ValidationError({"email": "Verification link has expired."})
+        except BadSignature:
+             raise serializers.ValidationError({"email": "Invalid verification link."})
+
+        try:
+            uid = force_str(urlsafe_base64_decode(attrs['uid']))
+            self.user = User.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            raise serializers.ValidationError({"uid": "Invalid user link."})
+
+        if User.objects.filter(email=self.new_email).exclude(pk=self.user.pk).exists():
+             raise serializers.ValidationError({"email": "This email is already in use."})
+
+        return attrs
+
+    def save(self):
+        self.user.email = self.new_email
         self.user.save()
         return self.user
 
