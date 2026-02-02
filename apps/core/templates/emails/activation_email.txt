@@ -1,0 +1,12 @@
+Hello {{ first_name }},
+
+Thank you for signing up with Michot Marefiya!
+
+To activate your account, please verify your email address by clicking the link below:
+{{ activation_url }}
+
+If you didn't create an account with us, please ignore this email.
+
+Best regards,
+Michot Marefiya Team
+https://michotmarefia.com

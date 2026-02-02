@@ -45,7 +45,12 @@ from apps.account.serializers import (
     UserUpdateSerializer,
     ChangePasswordSerializer,
     StaffCreateSerializer,
-    StaffResponseSerializer
+    ChangePasswordSerializer,
+    StaffCreateSerializer,
+    StaffResponseSerializer,
+    PasswordResetSerializer,
+    PasswordResetConfirmSerializer,
+    VerifyEmailSerializer,
 )
 from apps.listing.serializers import AddonOfferingListSerializer
 from apps.account.enums import RoleCode
@@ -537,4 +542,59 @@ class HotelProfileViewSet(AbstractModelViewSet):
         addons = AddonOffering.objects.filter(hotel=hotel, is_active=True)
         serializer = AddonOfferingListSerializer(addons, many=True, context=self.get_serializer_context())
         return Response(serializer.data)
+
+
+@extend_schema(tags=["Identity & Auth"])
+class PasswordResetView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = PasswordResetSerializer
+
+    @extend_schema(
+        summary="Request Password Reset",
+        description="Send a password reset link to the provided email address.",
+        request=PasswordResetSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
+    def post(self, request):
+        serializer = PasswordResetSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"detail": "If an account with this email exists, a reset link has been sent."}, status=status.HTTP_200_OK)
+
+
+@extend_schema(tags=["Identity & Auth"])
+class PasswordResetConfirmView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = PasswordResetConfirmSerializer
+
+    @extend_schema(
+        summary="Confirm Password Reset",
+        description="Reset password using the token received in email.",
+        request=PasswordResetConfirmSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
+    def post(self, request):
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"detail": "Password has been reset successfully."}, status=status.HTTP_200_OK)
+
+
+@extend_schema(tags=["Identity & Auth"])
+class VerifyEmailView(APIView):
+    permission_classes = [AllowAny]
+    serializer_class = VerifyEmailSerializer
+
+    @extend_schema(
+        summary="Verify Email Address",
+        description="Activate user account using the token received in email.",
+        request=VerifyEmailSerializer,
+        responses={200: OpenApiTypes.OBJECT}
+    )
+    def post(self, request):
+        serializer = VerifyEmailSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({"detail": "Email verified successfully. You can now login."}, status=status.HTTP_200_OK)
+
 
