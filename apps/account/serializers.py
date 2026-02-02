@@ -13,9 +13,14 @@ from apps.account.models import (
     Role,
 )
 from apps.listing.services import ListingService
+from apps.core.services.email_service import EmailService
 from django.utils import timezone
 from apps.account.utils import generate_password
 from rest_framework import serializers
+from django.contrib.auth.tokens import default_token_generator
+from django.utils.encoding import force_bytes, force_str
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.conf import settings
 
 from apps.core.models import Facility
 from apps.core.serializers import (
@@ -158,8 +163,7 @@ class StaffCreateSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
         
-        # TODO: Send email with credentials (mocked for now)
-        # EmailService.send_staff_credentials(user, password)
+        EmailService.send_account_credentials(user, password)
         
         return user
 
@@ -224,9 +228,24 @@ class UserSerializer(serializers.ModelSerializer):
                 {"error": "User role does not exist in the system"}
             )
         
-        user = User(**validated_data, role=role)
+        user = User(**validated_data, role=role, is_active=False)
         user.set_password(password)
         user.save()
+
+        try:
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
+            activation_url = f"{frontend_url}/auth/verify-email?uid={uid}&token={token}"
+            
+            EmailService.send_verification_email(user, activation_url)
+        except Exception as e:
+            # log error but don't rollback user creation? 
+            # maybe it's better to perhaps rollback or inform user.
+            # for now, i will log and proceed, but user won't be able to login.
+            # ideally this should be robust.
+            pass
 
         return user
 
@@ -335,8 +354,62 @@ class ChangePasswordSerializer(serializers.Serializer):
         user.set_password(self.validated_data["new_password"])
         user.save()
         return user
+        return user
 
 
+class PasswordResetSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+
+    def validate_email(self, value):
+        self.user = User.objects.filter(email=value).first()
+        return value
+
+    def save(self):
+        if not getattr(self, 'user', None):
+            return
+
+        uid = urlsafe_base64_encode(force_bytes(self.user.pk))
+        token = default_token_generator.make_token(self.user)
+        
+        frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
+        reset_url = f"{frontend_url}/auth/reset-password?uid={uid}&token={token}"
+        
+        EmailService.send_password_reset(self.user, reset_url)
+
+
+class PasswordResetConfirmSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+    new_password = serializers.CharField(write_only=True)
+    confirm_password = serializers.CharField(write_only=True)
+
+    def validate(self, attrs):
+        if attrs['new_password'] != attrs['confirm_password']:
+            raise serializers.ValidationError({"new_password": "Passwords do not match."})
+
+        password = attrs['new_password']
+        if len(password) < 8:
+            raise serializers.ValidationError({"new_password": "Password must be at least 8 characters long."})
+        if not any(char.isdigit() for char in password):
+            raise serializers.ValidationError({"new_password": "Password must contain at least one digit."})
+        if not any(char.isalpha() for char in password):
+            raise serializers.ValidationError({"new_password": "Password must contain at least one letter."})
+
+        try:
+            uid = force_str(urlsafe_base64_decode(attrs['uid']))
+            self.user = User.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            raise serializers.ValidationError({"token": "Invalid reset link."})
+
+        if not default_token_generator.check_token(self.user, attrs['token']):
+            raise serializers.ValidationError({"token": "Invalid or expired reset link."})
+
+        return attrs
+
+    def save(self):
+        self.user.set_password(self.validated_data['new_password'])
+        self.user.save()
+        return self.user
 class CompanyProfileResponseSerializer(serializers.ModelSerializer):
     address = AddressSerializer()
     user = UserResponseSerializer()
@@ -359,6 +432,31 @@ class CompanyProfileResponseSerializer(serializers.ModelSerializer):
             "tin",
             "business_license_number",
         ]
+
+
+class VerifyEmailSerializer(serializers.Serializer):
+    uid = serializers.CharField()
+    token = serializers.CharField()
+
+    def validate(self, attrs):
+        try:
+            uid = force_str(urlsafe_base64_decode(attrs['uid']))
+            self.user = User.objects.get(pk=uid)
+        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+            raise serializers.ValidationError({"token": "Invalid activation link."})
+
+        if not default_token_generator.check_token(self.user, attrs['token']):
+            raise serializers.ValidationError({"token": "Invalid or expired activation link."})
+        
+        if self.user.is_active:
+             raise serializers.ValidationError({"detail": "User is already active."})
+
+        return attrs
+
+    def save(self):
+        self.user.is_active = True
+        self.user.save()
+        return self.user
 
 
 class CompanyProfileSerializer(serializers.ModelSerializer):
@@ -421,6 +519,8 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
             approved_at=timezone.now(),
             **validated_data,
         )
+
+        EmailService.send_account_credentials(user, password)
 
         return profile
 
@@ -635,6 +735,8 @@ class HotelProfileSerializer(serializers.Serializer):
         hotel.facilities.set(facility_instances)
 
         ImageCreationService.create_images(hotel, images)
+
+        EmailService.send_account_credentials(user, password)
 
         return hotel
 

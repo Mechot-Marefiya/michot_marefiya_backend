@@ -6,7 +6,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class BookingEmailService:    
+
+class EmailService:    
     @staticmethod
     def send_booking_confirmation(booking):
         
@@ -80,7 +81,102 @@ Support: support@michotmarefia.com
             # don't crash the booking flow if email fails
             # the booking is still valid even if email doesn't send
             return False
-    
+
+    @staticmethod
+    def send_account_credentials(user, password):
+        try:
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
+            login_url = f"{frontend_url}/login"
+            
+            context = {
+                'first_name': user.first_name or "User",
+                'email': user.email,
+                'password': password,
+                'login_url': login_url
+            }
+            
+            subject = "Welcome to Michot Marefiya - Your Account Credentials"
+            
+            html_body = render_to_string('emails/account_credentials.html', context)
+            plain_body = render_to_string('emails/account_credentials.txt', context)
+            
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=plain_body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[user.email]
+            )
+            email.attach_alternative(html_body, "text/html")
+            
+            email.send(fail_silently=False)
+            
+            logger.info(f"Credentials email sent successfully to {user.email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send credentials email to {user.email}: {str(e)}", exc_info=True)
+            return False
+
+    @staticmethod
+    def send_password_reset(user, reset_url):
+        try:
+            context = {
+                'first_name': user.first_name or "User",
+                'reset_url': reset_url
+            }
+            
+            subject = "Reset Your Password - Michot Marefiya"
+            
+            html_body = render_to_string('emails/password_reset.html', context)
+            plain_body = render_to_string('emails/password_reset.txt', context)
+            
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=plain_body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[user.email]
+            )
+            email.attach_alternative(html_body, "text/html")
+            
+            email.send(fail_silently=False)
+            
+            logger.info(f"Password reset email sent successfully to {user.email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send password reset email to {user.email}: {str(e)}", exc_info=True)
+            return False
+
+    @staticmethod
+    def send_verification_email(user, activation_url):
+        try:
+            context = {
+                'first_name': user.first_name or "User",
+                'activation_url': activation_url
+            }
+            
+            subject = "Activate Your Account - Michot Marefiya"
+            
+            html_body = render_to_string('emails/activation_email.html', context)
+            plain_body = render_to_string('emails/activation_email.txt', context)
+            
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=plain_body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[user.email]
+            )
+            email.attach_alternative(html_body, "text/html")
+            
+            email.send(fail_silently=False)
+            
+            logger.info(f"Verification email sent successfully to {user.email}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to send verification email to {user.email}: {str(e)}", exc_info=True)
+            return False
+
     @staticmethod
     def send_payment_receipt(booking, payment_transaction):
         # send payment receipt email (future implementation)
@@ -95,3 +191,6 @@ Support: support@michotmarefia.com
         # todo: implement check-in reminder
         # this would be called by a Celery scheduled task
         pass
+
+
+BookingEmailService = EmailService
