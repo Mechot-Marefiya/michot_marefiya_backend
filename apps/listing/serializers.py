@@ -347,6 +347,13 @@ class RoomListingSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         return ListingService.create_room_listing(validated_data)
 
+    @transaction.atomic()
+    def update(self, instance, validated_data):
+        kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
+        if kept_image_ids is None and "kept_image_ids" in self.initial_data:
+             kept_image_ids = self.initial_data["kept_image_ids"]
+        return ListingService.update_room_listing(instance, validated_data, kept_image_ids)
+
     def to_representation(self, instance):
         return RoomListingResponseSerializer(instance, context=self.context).to_representation(
             instance
@@ -471,6 +478,13 @@ class GuestHouseRoomSerializer(serializers.ModelSerializer):
             
          return instance
 
+    @transaction.atomic()
+    def update(self, instance, validated_data):
+        kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
+        if kept_image_ids is None and "kept_image_ids" in self.initial_data:
+             kept_image_ids = self.initial_data["kept_image_ids"]
+        return ListingService.update_guest_house_room(instance, validated_data, kept_image_ids)
+
 class GuestHouseProfileSerializer(serializers.ModelSerializer):
     address = FlexibleAddressField()
     images = serializers.ListField(child=serializers.ImageField())
@@ -556,6 +570,13 @@ class GuestHouseProfileSerializer(serializers.ModelSerializer):
             ImageCreationService.create_images(instance, images)
 
         return instance
+
+    @transaction.atomic()
+    def update(self, instance, validated_data):
+        kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
+        if kept_image_ids is None and "kept_image_ids" in self.initial_data:
+             kept_image_ids = self.initial_data["kept_image_ids"]
+        return ListingService.update_guest_house_profile(instance, validated_data, kept_image_ids)
 
     def to_representation(self, instance):
         return GuestHouseProfileResponseSerializer(
@@ -1384,6 +1405,13 @@ class PropertyListingSerializer(serializers.ModelSerializer):
 
         return ListingService.create_property_listing(validated_data)
 
+    @transaction.atomic()
+    def update(self, instance, validated_data):
+        kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
+        if kept_image_ids is None and "kept_image_ids" in self.initial_data:
+             kept_image_ids = self.initial_data["kept_image_ids"]
+        return ListingService.update_property_listing(instance, validated_data, kept_image_ids)
+
     def to_representation(self, instance):
         return PropertyListingResponseSerializer(
             instance, context=self.context
@@ -1921,6 +1949,13 @@ class EventSpaceListingSerializer(serializers.ModelSerializer):
         to the service layer.
         """
         return ListingService.create_event_space_listing(validated_data)
+
+    @transaction.atomic()
+    def update(self, instance, validated_data):
+        kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
+        if kept_image_ids is None and "kept_image_ids" in self.initial_data:
+             kept_image_ids = self.initial_data["kept_image_ids"]
+        return ListingService.update_event_space_listing(instance, validated_data, kept_image_ids)
 
     def to_representation(self, instance):
         """

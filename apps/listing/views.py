@@ -1207,24 +1207,27 @@ class PropertyListingViewSet(AbstractModelViewSet):
             return [IsListingOwner()]
 
     def get_queryset(self):
-        """Filter queryset - show all active to public, all to companies/admin."""
+        """Filter queryset - show all active to public, managed only to owners/admin."""
         queryset = super().get_queryset()
         
-        if not self.request.user or not self.request.user.is_authenticated:
-            return queryset.filter(is_active=True)
-        
-        if self.request.user.is_superuser or (
-            hasattr(self.request.user, 'role') and
-            self.request.user.role and
-            self.request.user.role.code == RoleCode.ADMIN.value
-        ):
+        user = self.request.user
+        managed_only = self.request.query_params.get('managed') == 'true'
+
+        if user and (user.is_superuser or (hasattr(user, 'role') and user.role and user.role.code == RoleCode.ADMIN.value)):
             return queryset
         
-        if hasattr(self.request.user, 'role') and self.request.user.role:
-            if self.request.user.role.code == RoleCode.COMPANY.value:
-                return queryset
+        if managed_only and user and user.is_authenticated:
+            company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+            individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+            
+            q = Q()
+            if company:
+                q |= Q(company=company)
+            if individual_owner:
+                q |= Q(individual_owner=individual_owner)
+            return queryset.filter(q).order_by("-created_at")
         
-        return queryset.filter(is_active=True)
+        return queryset.filter(is_active=True).order_by("-created_at")
 
 
 class AmenityViewSet(AbstractModelViewSet):
@@ -1749,9 +1752,14 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
 
         if managed_only and user and user.is_authenticated:
             company = getattr(user, 'company', None) or getattr(user, 'profile', None)
-            from apps.account.models import HotelProfile
-            owned_hotels = HotelProfile.objects.filter(company=company)
-            return queryset.filter(hotel__in=owned_hotels).order_by("-created_at")
+            individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+            
+            q = Q()
+            if company:
+                q |= Q(hotel__company=company)
+            if individual_owner:
+                 q |= Q(hotel__individual_owner=individual_owner) # Adjusting based on RoomListing pattern
+            return queryset.filter(q).order_by("-created_at")
 
         return queryset.filter(is_active=True).order_by("-created_at")
 

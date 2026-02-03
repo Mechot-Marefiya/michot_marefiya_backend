@@ -12,10 +12,11 @@ class RoomFilter(filters.FilterSet):
 
 class EventSpaceFilter(filters.FilterSet):
     hotel = filters.UUIDFilter("hotel")
+    company = filters.UUIDFilter("hotel__company")
 
     class Meta:
         model = EventSpaceListing
-        fields = ["hotel"]
+        fields = ["hotel", "company"]
 # class CarFilter(filters.FilterSet):
 #     class Meta:
 #         model = CarListing
@@ -23,9 +24,12 @@ class EventSpaceFilter(filters.FilterSet):
 
 
 class PropertyFilter(filters.FilterSet):
+    company = filters.UUIDFilter("company")
+    individual_owner = filters.UUIDFilter("individual_owner")
+
     class Meta:
         model = PropertyListing
-        fields = ["property_type"]
+        fields = ["property_type", "company", "individual_owner"]
 
 
 class BookingFilter(filters.FilterSet):

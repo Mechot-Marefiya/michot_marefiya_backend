@@ -237,7 +237,7 @@ class UserSerializer(serializers.ModelSerializer):
             token = default_token_generator.make_token(user)
             
             frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
-            activation_url = f"{frontend_url}/auth/verify-email?uid={uid}&token={token}"
+            activation_url = f"{frontend_url}auth/verify-email?uid={uid}&token={token}"
             
             EmailService.send_verification_email(user, activation_url)
         except Exception as e:
@@ -319,7 +319,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
             # Link format: /verify-email-change?uid=...&token=...&email=...
             # We'll use a custom View to verify the signer and then update.
-            verification_url = f"{frontend_url}/auth/verify-email-change?uid={uid}&email={signed_email}"
+            verification_url = f"{frontend_url}auth/verify-email-change?uid={uid}&email={signed_email}"
             
             # 1. Send verification to NEW email
             EmailService.send_email_change_verification(instance, new_email, verification_url)
@@ -409,7 +409,7 @@ class PasswordResetSerializer(serializers.Serializer):
         token = default_token_generator.make_token(self.user)
         
         frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
-        reset_url = f"{frontend_url}/auth/reset-password?uid={uid}&token={token}"
+        reset_url = f"{frontend_url}auth/reset-password?uid={uid}&token={token}"
         
         EmailService.send_password_reset(self.user, reset_url)
 
@@ -808,6 +808,15 @@ class HotelProfileSerializer(serializers.Serializer):
         EmailService.send_account_credentials(user, password)
 
         return hotel
+
+    @transaction.atomic()
+    def update(self, instance, validated_data):
+        kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
+        
+        if kept_image_ids is None and "kept_image_ids" in self.initial_data:
+             kept_image_ids = self.initial_data["kept_image_ids"]
+             
+        return ListingService.update_hotel_profile(instance, validated_data, kept_image_ids)
 
     def to_representation(self, instance):
         return HotelProfileResponseSerializer(instance, context=self.context).to_representation(
