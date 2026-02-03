@@ -424,16 +424,12 @@ class HotelProfileViewSet(AbstractModelViewSet):
             pass
         elif managed_only and user and user.is_authenticated:
             company = getattr(user, 'company', None) or getattr(user, 'profile', None)
-            individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
             
             q = Q()
             if company:
                 q |= Q(company=company)
-            if individual_owner:
-                pass
+            
             queryset = queryset.filter(q)
-        else:
-            pass
 
         if self.action in ['list', 'retrieve', 'get_featured_hotels']:
             queryset = queryset.select_related(

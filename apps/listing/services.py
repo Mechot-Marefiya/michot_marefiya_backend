@@ -241,6 +241,147 @@ class ListingService:
         """
         return ListingService.get_or_create_address(address_data)
 
+    @staticmethod
+    def _update_address(instance, address_data):
+        if not address_data:
+            return
+
+        address = instance.address
+        
+        new_address = ListingService.get_or_create_address(address_data)
+        if instance.address != new_address:
+            instance.address = new_address
+            instance.save(update_fields=['address'])
+
+    @staticmethod
+    def _update_images(instance, new_images, kept_image_ids):
+        from apps.account.models import ListingImage
+        from django.contrib.contenttypes.models import ContentType
+        
+        ct = ContentType.objects.get_for_model(instance)
+        
+        if kept_image_ids is not None:
+            ListingImage.objects.filter(
+                content_type=ct, 
+                object_id=instance.id
+            ).exclude(
+                id__in=kept_image_ids
+            ).delete()
+            
+        if new_images:
+            ImageCreationService.create_images(instance, new_images)
+
+    @staticmethod
+    @transaction.atomic()
+    def update_room_listing(instance: RoomListing, validated_data: dict, kept_image_ids: list = None):
+        images = validated_data.pop("images", [])
+        address_data = validated_data.pop("address", None)
+        amenity_ids = validated_data.pop("amenities", None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        if address_data:
+            ListingService._update_address(instance, address_data)
+            
+        if amenity_ids is not None:
+            amenities = Amenity.objects.filter(id__in=amenity_ids)
+            instance.amenities.set(amenities)
+            
+        ListingService._update_images(instance, images, kept_image_ids)
+        
+        return instance
+
+    @staticmethod
+    @transaction.atomic()
+    def update_guest_house_profile(instance: GuestHouseProfile, validated_data: dict, kept_image_ids: list = None):
+        images = validated_data.pop("images", [])
+        address_data = validated_data.pop("address", None)
+        amenity_ids = validated_data.pop("amenities", None)
+        facility_ids = validated_data.pop("facilities", None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        if address_data:
+            ListingService._update_address(instance, address_data)
+        
+        if amenity_ids is not None:
+            instance.amenities.set(Amenity.objects.filter(id__in=amenity_ids))
+            
+        if facility_ids is not None:
+             instance.facilities.set(Facility.objects.filter(id__in=facility_ids))
+             
+        ListingService._update_images(instance, images, kept_image_ids)
+        return instance
+
+    @staticmethod
+    @transaction.atomic()
+    def update_event_space_listing(instance: EventSpaceListing, validated_data: dict, kept_image_ids: list = None):
+        images = validated_data.pop("images", [])
+        address_data = validated_data.pop("address", None)
+        amenity_ids = validated_data.pop("amenities", None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        if address_data:
+            ListingService._update_address(instance, address_data)
+            
+        if amenity_ids is not None:
+            instance.amenities.set(Amenity.objects.filter(id__in=amenity_ids))
+            
+        ListingService._update_images(instance, images, kept_image_ids)
+        return instance
+
+    @staticmethod
+    @transaction.atomic()
+    def update_property_listing(instance: PropertyListing, validated_data: dict, kept_image_ids: list = None):
+        images = validated_data.pop("images", [])
+        address_data = validated_data.pop("address", None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        if address_data:
+            ListingService._update_address(instance, address_data)
+            
+        ListingService._update_images(instance, images, kept_image_ids)
+        return instance
+    
+    @staticmethod
+    @transaction.atomic()
+    def update_hotel_profile(instance: HotelProfile, validated_data: dict, kept_image_ids: list = None):        
+        company_data = validated_data.pop("company", {})
+        images = validated_data.pop("images", [])
+        facility_ids = validated_data.pop("facilities", None)
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        if company_data:
+            company = instance.company
+            address_data = company_data.pop("address", None)
+            
+            for attr, value in company_data.items():
+                setattr(company, attr, value)
+            company.save()
+            
+            if address_data:
+                 ListingService._update_address(company, address_data)
+
+        if facility_ids is not None:
+             instance.facilities.set(Facility.objects.filter(id__in=facility_ids))
+             
+        ListingService._update_images(instance, images, kept_image_ids)
+        
+        return instance
+
 
 class TermsService:
     
@@ -412,6 +553,18 @@ class StayAvailabilityService:
                 else:
                     obj.update(available_rooms=F(
                         "available_rooms") - quantity)
+    
+    @staticmethod
+    @transaction.atomic()
+    def update_guest_house_room(instance: GuestHouseRoom, validated_data: dict, kept_image_ids: list = None):
+        images = validated_data.pop("images", [])
+        
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        
+        ListingService._update_images(instance, images, kept_image_ids)
+        return instance
 
     @staticmethod
     def search_stays(city, check_in_date, check_out_date, number_of_guests):
