@@ -143,6 +143,10 @@ class OwnerPaymentTransactionSerializer(serializers.ModelSerializer):
             "listing_title",
             "customer_name",
             "booking_dates",
+            "commission_rate",
+            "commission_amount",
+            "vendor_payout_amount",
+            "payout_status",
         ]
 
     def get_booking_reference(self, obj):

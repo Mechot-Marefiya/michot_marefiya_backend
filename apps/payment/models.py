@@ -59,6 +59,58 @@ class PaymentTransaction(AbstractBaseModel):
     payment_method = models.CharField(max_length=100, null=True, blank=True)
     metadata = models.JSONField(default=dict, blank=True)
     
+    commission_rate = models.DecimalField(
+        max_digits=5, 
+        decimal_places=4, 
+        null=True, 
+        blank=True,
+        help_text="The rate used for this transaction (e.g. 0.05)"
+    )
+    commission_amount = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Amount taken as platform fee"
+    )
+    vendor_payout_amount = models.DecimalField(
+        max_digits=12, 
+        decimal_places=2, 
+        null=True, 
+        blank=True,
+        help_text="Amount sent to the vendor subaccount"
+    )
+    
+    class PayoutStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PAID = "paid", "Paid (Split Success)"
+        FAILED = "failed", "Failed (Split Error)"
+        NOT_APPLICABLE = "na", "Not Applicable"
+
+    payout_status = models.CharField(
+        max_length=20,
+        choices=PayoutStatus.choices,
+        default=PayoutStatus.PENDING,
+        help_text="Status of the vendor payout split"
+    )
+
+    vendor_company = models.ForeignKey(
+        'account.CompanyProfile',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='payment_transactions',
+        help_text="Direct link to vendor company for ledger queries"
+    )
+    vendor_individual = models.ForeignKey(
+        'account.IndividualOwnerProfile',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='payment_transactions',
+        help_text="Direct link to individual owner for ledger queries"
+    )
+    
     class Meta:
         verbose_name = "Payment Transaction"
         verbose_name_plural = "Payment Transactions"
