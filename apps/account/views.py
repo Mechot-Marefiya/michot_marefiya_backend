@@ -320,7 +320,20 @@ class CompanyProfileViewSet(AbstractModelViewSet):
             return [IsCompanyOwner()]
 
     def get_queryset(self):
-        return super().get_queryset()
+        queryset = super().get_queryset()
+        
+        managed_only = self.request.query_params.get('managed') == 'true'
+        user = self.request.user
+
+        if managed_only and user and user.is_authenticated:
+            if hasattr(user, 'profile'):
+                queryset = queryset.filter(user=user)
+            elif hasattr(user, 'company') and user.company:
+                queryset = queryset.filter(id=user.company.id)
+            else:
+                queryset = queryset.none()
+                
+        return queryset
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

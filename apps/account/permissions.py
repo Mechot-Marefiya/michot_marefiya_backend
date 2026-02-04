@@ -42,6 +42,27 @@ class IsCompany(permissions.BasePermission):
         return self.has_permission(request, view)
 
 
+class IsCompanyOrIndividualOwner(permissions.BasePermission):
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+            
+        if request.user.is_superuser:
+            return True
+            
+        if hasattr(request.user, 'role') and request.user.role:
+            if request.user.role.code in [RoleCode.ADMIN.value, RoleCode.COMPANY.value]:
+                return True
+
+        if hasattr(request.user, 'profile') or (hasattr(request.user, 'company') and request.user.company):
+            return True
+            
+        if hasattr(request.user, 'individual_owner') and request.user.individual_owner:
+            return True
+            
+        return False
+
+
 class IsUser(permissions.BasePermission):
     
     def has_permission(self, request, view):

@@ -215,6 +215,131 @@ def compute_company_overview(company_id, start_date: date, end_date: date) -> Di
     }
 
 
+def compute_individual_owner_overview(owner_id, start_date: date, end_date: date) -> Dict:
+    
+    guesthouse_booking_qs = GuestHouseBooking.objects.filter(
+        status=GuestHouseBooking.RentStatus.CONFIRMED,
+        created_at__date__gte=start_date,
+        created_at__date__lte=end_date,
+        items__room__guest_house__individual_owner__id=owner_id,
+    ).distinct()
+
+    guesthouse_agg = guesthouse_booking_qs.aggregate(
+        total_revenue=Sum("total_price"),
+        total_bookings=Count("id"),
+    )
+
+    eventspace_booking_qs = EventSpaceBooking.objects.filter(
+        status=EventSpaceBooking.BookingStatus.CONFIRMED,
+        created_at__date__gte=start_date,
+        created_at__date__lte=end_date,
+        items__event_space__individual_owner__id=owner_id,
+    ).distinct()
+
+    eventspace_agg = eventspace_booking_qs.aggregate(
+        total_revenue=Sum("total_price"),
+        total_bookings=Count("id"),
+    )
+
+    total_revenue = (
+        _sum_decimal(guesthouse_agg.get("total_revenue")) +
+        _sum_decimal(eventspace_agg.get("total_revenue"))
+    )
+    total_bookings = (
+        (guesthouse_agg.get("total_bookings") or 0) +
+        (eventspace_agg.get("total_bookings") or 0)
+    )
+
+    confirmed_count = (
+        GuestHouseBooking.objects.filter(
+            status=GuestHouseBooking.RentStatus.CONFIRMED,
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+            items__room__guest_house__individual_owner__id=owner_id,
+        ).distinct().count() +
+        EventSpaceBooking.objects.filter(
+            status=EventSpaceBooking.BookingStatus.CONFIRMED,
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+            items__event_space__individual_owner__id=owner_id,
+        ).distinct().count()
+    )
+
+    cancelled_count = (
+        GuestHouseBooking.objects.filter(
+            status=GuestHouseBooking.RentStatus.CANCELLED,
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+            items__room__guest_house__individual_owner__id=owner_id,
+        ).distinct().count() +
+        EventSpaceBooking.objects.filter(
+            status=EventSpaceBooking.BookingStatus.CANCELLED,
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+            items__event_space__individual_owner__id=owner_id,
+        ).distinct().count()
+    )
+
+    avg_booking_value = Decimal(0)
+    if total_bookings:
+        avg_booking_value = (total_revenue / Decimal(total_bookings)).quantize(Decimal('.01'))
+
+    top_guesthouse_rooms = (
+        GuestHouseBooking.objects.filter(
+            status=GuestHouseBooking.RentStatus.CONFIRMED,
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+            items__room__guest_house__individual_owner__id=owner_id,
+        )
+        .values("items__room__id", "items__room__title")
+        .annotate(revenue=Sum("items__price_per_unit"), bookings_count=Count("id", distinct=True))
+        .order_by("-revenue")
+    )
+
+    top_event_spaces = (
+        EventSpaceBooking.objects.filter(
+            status=EventSpaceBooking.BookingStatus.CONFIRMED,
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+            items__event_space__individual_owner__id=owner_id,
+        )
+        .values("items__event_space__id", "items__event_space__title")
+        .annotate(revenue=Sum("items__price_per_unit"), bookings_count=Count("id", distinct=True))
+        .order_by("-revenue")
+    )
+
+    all_top_listings = []
+
+    for r in top_guesthouse_rooms:
+        all_top_listings.append({
+            "listing_id": str(r["items__room__id"]), 
+            "title": r["items__room__title"], 
+            "revenue": float(r["revenue"] or 0), 
+            "bookings_count": r["bookings_count"],
+            "type": "guesthouse_room"
+        })
+
+    for r in top_event_spaces:
+        all_top_listings.append({
+            "listing_id": str(r["items__event_space__id"]), 
+            "title": r["items__event_space__title"], 
+            "revenue": float(r["revenue"] or 0), 
+            "bookings_count": r["bookings_count"],
+            "type": "event_space"
+        })
+
+    top_listings = sorted(all_top_listings, key=lambda x: x["revenue"], reverse=True)[:10]
+
+    return {
+        "total_revenue": float(total_revenue),
+        "total_bookings": int(total_bookings),
+        "confirmed_bookings": int(confirmed_count),
+        "cancellations": int(cancelled_count),
+        "avg_booking_value": float(avg_booking_value),
+        "top_listings": top_listings,
+    }
+
+
 def revenue_timeseries(company_id, start_date: date, end_date: date, granularity: str = "day") -> List[Dict]:
     """
     Return list of {period, revenue} between start_date and end_date with given granularity.
@@ -304,3 +429,179 @@ def revenue_timeseries(company_id, start_date: date, end_date: date, granularity
         items.append({"period": k.isoformat() if hasattr(k, "isoformat") else str(k), "revenue": data[k]})
 
     return items
+
+
+def revenue_timeseries_individual(owner_id, start_date: date, end_date: date, granularity: str = "day") -> List[Dict]:
+
+    if granularity == "month":
+        trunc = TruncMonth
+    elif granularity == "week":
+        trunc = TruncWeek
+    else:
+        trunc = TruncDate
+
+    guesthouse_qs = (
+        GuestHouseBooking.objects.filter(
+            status=GuestHouseBooking.RentStatus.CONFIRMED,
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+            items__room__guest_house__individual_owner__id=owner_id,
+        )
+        .annotate(period=trunc("created_at"))
+        .values("period")
+        .annotate(revenue=Sum("total_price"))
+        .order_by("period")
+    )
+
+    eventspace_qs = (
+        EventSpaceBooking.objects.filter(
+            status=EventSpaceBooking.BookingStatus.CONFIRMED,
+            created_at__date__gte=start_date,
+            created_at__date__lte=end_date,
+            items__event_space__individual_owner__id=owner_id,
+        )
+        .annotate(period=trunc("created_at"))
+        .values("period")
+        .annotate(revenue=Sum("total_price"))
+        .order_by("period")
+    )
+
+    data = {}
+    for r in guesthouse_qs:
+        key = r["period"].date() if hasattr(r["period"], "date") else r["period"]
+        data[key] = data.get(key, 0) + float(r.get("revenue") or 0)
+
+    for r in eventspace_qs:
+        key = r["period"].date() if hasattr(r["period"], "date") else r["period"]
+        data[key] = data.get(key, 0) + float(r.get("revenue") or 0)
+
+    items = []
+    for k in sorted(data.keys()):
+        items.append({"period": k.isoformat() if hasattr(k, "isoformat") else str(k), "revenue": data[k]})
+
+    return items
+
+
+def get_recent_activity(company_id: str, limit: int = 15) -> List[Dict]:
+    """
+    Fetches the most recent booking activities for a company.
+    Orders by created_at descending.
+    """
+    activities = []
+
+    # 1. Hotel Bookings
+    hotel_qs = Booking.objects.filter(
+        items__room__hotel__company__id=company_id
+    ).select_related("user").distinct().order_by("-created_at")[:limit]
+
+    for b in hotel_qs:
+        user_name = f"{b.user.first_name} {b.user.last_name}" if b.user else (b.guest_email or "Guest")
+        activities.append({
+            "id": f"hotel-{b.id}",
+            "type": "booking_created",
+            "property_type": "hotel",
+            "title": f"Booking #{b.booking_reference}",
+            "amount": float(b.total_price or 0),
+            "user_name": user_name,
+            "timestamp": b.created_at,
+            "status": b.status
+        })
+
+    # 2. Guesthouse Bookings
+    guesthouse_qs = GuestHouseBooking.objects.filter(
+        items__room__guest_house__company__id=company_id
+    ).select_related("renter").distinct().order_by("-created_at")[:limit]
+
+    for b in guesthouse_qs:
+        user_name = f"{b.renter.first_name} {b.renter.last_name}" if b.renter else (b.guest_email or "Guest")
+        activities.append({
+            "id": f"guesthouse-{b.id}",
+            "type": "booking_created",
+            "property_type": "guesthouse",
+            "title": f"Booking #{b.booking_reference}",
+            "amount": float(b.total_price or 0),
+            "user_name": user_name,
+            "timestamp": b.created_at,
+            "status": b.status
+        })
+
+    # 3. Event Space Bookings
+    eventspace_qs = EventSpaceBooking.objects.filter(
+        items__event_space__hotel__company__id=company_id
+    ).select_related("user").distinct().order_by("-created_at")[:limit]
+
+    for b in eventspace_qs:
+        user_name = f"{b.user.first_name} {b.user.last_name}" if b.user else (b.guest_email or "Guest")
+        activities.append({
+            "id": f"eventspace-{b.id}",
+            "type": "booking_created",
+            "property_type": "eventspace",
+            "title": f"Booking #{b.booking_reference}",
+            "amount": float(b.total_price or 0),
+            "user_name": user_name,
+            "timestamp": b.created_at,
+            "timestamp": b.created_at,
+            "status": b.status
+        })
+
+    car_qs = CarRental.objects.filter(
+        rental_items__car_listing__company__id=company_id
+    ).select_related("user").distinct().order_by("-created_at")[:limit]
+
+    for b in car_qs:
+        user_name = f"{b.user.first_name} {b.user.last_name}" if b.user else (b.guest_email or "Guest")
+        activities.append({
+            "id": f"car-{b.id}",
+            "type": "booking_created",
+            "property_type": "car",
+            "title": f"Rental #{b.booking_reference}",
+            "amount": float(b.total_price or 0),
+            "user_name": user_name,
+            "timestamp": b.created_at,
+            "status": b.status
+        })
+
+    activities.sort(key=lambda x: x["timestamp"], reverse=True)
+    return activities[:limit]
+
+
+def get_recent_activity_individual(owner_id: str, limit: int = 15) -> List[Dict]:
+    
+    activities = []
+    guesthouse_qs = GuestHouseBooking.objects.filter(
+        items__room__guest_house__individual_owner__id=owner_id
+    ).select_related("renter").distinct().order_by("-created_at")[:limit]
+
+    for b in guesthouse_qs:
+        user_name = f"{b.renter.first_name} {b.renter.last_name}" if b.renter else (b.guest_email or "Guest")
+        activities.append({
+            "id": f"guesthouse-{b.id}",
+            "type": "booking_created",
+            "property_type": "guesthouse",
+            "title": f"Booking #{b.booking_reference}",
+            "amount": float(b.total_price or 0),
+            "user_name": user_name,
+            "timestamp": b.created_at,
+            "status": b.status
+        })
+
+    eventspace_qs = EventSpaceBooking.objects.filter(
+        items__event_space__individual_owner__id=owner_id
+    ).select_related("user").distinct().order_by("-created_at")[:limit]
+
+    for b in eventspace_qs:
+        user_name = f"{b.user.first_name} {b.user.last_name}" if b.user else (b.guest_email or "Guest")
+        activities.append({
+            "id": f"eventspace-{b.id}",
+            "type": "booking_created",
+            "property_type": "eventspace",
+            "title": f"Booking #{b.booking_reference}",
+            "amount": float(b.total_price or 0),
+            "user_name": user_name,
+            "timestamp": b.created_at,
+            "status": b.status
+        })
+
+    # Sort combined activities by timestamp desc and take top N
+    activities.sort(key=lambda x: x["timestamp"], reverse=True)
+    return activities[:limit]
