@@ -73,7 +73,16 @@ class ChapaPaymentService:
             }
         }
 
-        # SPLIT PAYMENT LOGIC        
+        # SPLIT PAYMENT LOGIC & LEDGER PREP
+        commission_rate = None
+        commission_amount = None
+        vendor_payout_amount = None
+        payout_status = PaymentTransaction.PayoutStatus.NOT_APPLICABLE
+        
+        vendor_obj = None
+        vendor_company = None
+        vendor_individual = None
+        
         try:
             subaccount_id = None
             if hasattr(booking, 'items') and booking.items.exists():
@@ -81,23 +90,32 @@ class ChapaPaymentService:
                 
                 # 1. Hotel Room / Event Space (via Hotel)
                 if hasattr(first_item, 'room') and first_item.room and hasattr(first_item.room, 'hotel') and first_item.room.hotel:
-                    vendor = first_item.room.hotel.company
+                    vendor_obj = first_item.room.hotel.company
                 elif hasattr(first_item, 'event_space') and first_item.event_space and hasattr(first_item.event_space, 'hotel') and first_item.event_space.hotel:
-                    vendor = first_item.event_space.hotel.company
+                    vendor_obj = first_item.event_space.hotel.company
                 
-                # 2. Guest House (direct Company link)
-                elif hasattr(first_item, 'room') and first_item.room and hasattr(first_item.room, 'guest_house') and first_item.room.guest_house:
-                    # Note: GuestHouseListing uses 'room' field name in GuestHouseBookingItem
-                    vendor = first_item.room.guest_house.company
+                # 2. Guest House (direct Company link or Individual)
+                elif hasattr(first_item, 'room') and first_item.room:
+                     if hasattr(first_item.room, 'guest_house') and first_item.room.guest_house:
+                        gh = first_item.room.guest_house
+                        if gh.company:
+                            vendor_obj = gh.company
+                        elif gh.individual_owner:
+                            vendor_obj = gh.individual_owner
                 
                 # 3. Car Rental
                 elif hasattr(first_item, 'car_listing') and first_item.car_listing:
-                    vendor = first_item.car_listing.company
-                else:
-                    vendor = None
-
-                if vendor and hasattr(vendor, 'chapa_subaccount_id'):
-                    subaccount_id = vendor.chapa_subaccount_id
+                    vendor_obj = first_item.car_listing.company
+            
+            if vendor_obj:
+                if hasattr(vendor_obj, 'chapa_subaccount_id'):
+                    subaccount_id = vendor_obj.chapa_subaccount_id
+                
+                from apps.account.models import CompanyProfile, IndividualOwnerProfile
+                if isinstance(vendor_obj, CompanyProfile):
+                    vendor_company = vendor_obj
+                elif isinstance(vendor_obj, IndividualOwnerProfile):
+                    vendor_individual = vendor_obj
 
             if subaccount_id:
                 total_dec = Decimal(str(amount))
@@ -118,18 +136,27 @@ class ChapaPaymentService:
                 
                 payload["subaccount_id"] = subaccount_id
                 payload["split_type"] = "flat"
-                payload["split_value"] = float(platform_share_fixed)
+                payload["split_value"] = float(vendor_share_fixed)
+                
+                commission_rate = fee_rate
+                commission_amount = platform_share_fixed
+                vendor_payout_amount = vendor_share_fixed
+                payout_status = PaymentTransaction.PayoutStatus.PENDING
 
                 logger.info(
-                    f"Split configured for {tx_ref}: Platform markup {platform_share_fixed}, "
-                    f"Vendor receives {vendor_share_fixed} (Subaccount {subaccount_id}, Rate {fee_rate})"
+                    f"Split configured for {tx_ref}: Vendor receives {vendor_share_fixed} (Subaccount {subaccount_id}), "
+                    f"Platform keeps {platform_share_fixed} (Rate {fee_rate})"
                 )
-
+            else:
+                 # No subaccount found, so money stays in main account
+                 if vendor_obj:
+                     logger.warning(f"Vendor {vendor_obj} has no chapa_subaccount_id. Split failed.")
+                     payout_status = PaymentTransaction.PayoutStatus.FAILED
                 
         except Exception as e:
             logger.error(f"Failed to configure split payment for {tx_ref}: {e}")
+            payout_status = PaymentTransaction.PayoutStatus.FAILED
             # Proceed without split (all money to main account) as fallback
-
 
         with db_transaction.atomic():
             # Using GenericForeignKey for multi-booking-type support
@@ -144,8 +171,95 @@ class ChapaPaymentService:
                 amount=amount,
                 currency=currency,
                 status=PaymentTransaction.PaymentStatus.PENDING,
-                metadata=metadata or {}
+                metadata=metadata or {},
+                
+                commission_rate=commission_rate,
+                commission_amount=commission_amount,
+                vendor_payout_amount=vendor_payout_amount,
+                payout_status=payout_status,
+                vendor_company=vendor_company,
+                vendor_individual=vendor_individual
             )
+
+
+            try:
+                logger.debug("Chapa initialize payload: %s", payload)
+                res = requests.post(
+                    ChapaPaymentService.BASE_URL + "transaction/initialize",
+                    headers=ChapaPaymentService._get_headers(),
+                    data=json.dumps(payload),
+                    timeout=15
+                )
+                response_data = res.json()
+                logger.debug("Chapa initialize response: %s", response_data)
+
+                msg = response_data.get("message") or {}
+                email_errors = None
+                try:
+                    if isinstance(msg, dict):
+                        email_errors = msg.get("email")
+                except Exception:
+                    email_errors = None
+
+                if email_errors and any("validation.email" in str(e) for e in email_errors):
+                    fallback = getattr(settings, "CHAPA_FALLBACK_EMAIL", None) or f"no-reply+{tx_ref[:8]}@gmail.com"
+                    logger.warning("Chapa rejected email %s, retrying initialize with fallback %s", user_email, fallback)
+                    payload["email"] = fallback
+                    try:
+                        res2 = requests.post(
+                            ChapaPaymentService.BASE_URL + "transaction/initialize",
+                            headers=ChapaPaymentService._get_headers(),
+                            data=json.dumps(payload),
+                            timeout=15,
+                        )
+                        response_data = res2.json()
+                        logger.debug("Chapa initialize response (retry): %s", response_data)
+                    except Exception as e2:
+                        payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
+                        if isinstance(payment_tx.metadata, dict):
+                            payment_tx.metadata["error"] = str(e2)
+                        else:
+                            payment_tx.metadata = {"error": str(e2)}
+                        payment_tx.save()
+                        return {"success": False, "error": str(e2), "tx_ref": tx_ref}
+            except Exception as e:
+                payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
+                if isinstance(payment_tx.metadata, dict):
+                    payment_tx.metadata["error"] = str(e)
+                else:
+                    payment_tx.metadata = {"error": str(e)}
+                payment_tx.save()
+                return {"success": False, "error": str(e), "tx_ref": tx_ref}
+
+            if response_data.get("status") == "success":
+                return {
+                    "success": True,
+                    "checkout_url": response_data["data"]["checkout_url"],
+                    "tx_ref": tx_ref,
+                }
+
+            payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
+            if isinstance(payment_tx.metadata, dict):
+                payment_tx.metadata["chapa_response"] = response_data
+            else:
+                payment_tx.metadata = response_data
+            payment_tx.save()
+            return {"success": False, "error": response_data, "tx_ref": tx_ref}
+
+    @staticmethod
+    def cancel_transaction(tx_ref):
+        try:
+            tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
+            if tx.status == PaymentTransaction.PaymentStatus.PENDING:
+                tx.status = PaymentTransaction.PaymentStatus.CANCELLED
+                tx.save()
+                return {"success": True, "message": "Transaction cancelled successfully"}
+            else:
+                return {"success": False, "error": f"Cannot cancel transaction in status {tx.status}"}
+        except PaymentTransaction.DoesNotExist:
+            return {"success": False, "error": "Transaction not found"}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 
             try:
