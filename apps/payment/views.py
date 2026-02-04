@@ -635,16 +635,17 @@ class OwnerPaymentViewSet(viewsets.ReadOnlyModelViewSet):
         if not user.is_authenticated:
             return PaymentTransaction.objects.none()
 
+        if hasattr(user, 'role') and user.role.code == RoleCode.ADMIN.value:
+            return PaymentTransaction.objects.all()
+
         if hasattr(user, 'company') and user.company:
             return PaymentTransaction.objects.filter(vendor_company=user.company)
-            
+        
         elif hasattr(user, 'individual_owner') and user.individual_owner:
             return PaymentTransaction.objects.filter(vendor_individual=user.individual_owner)
-            
-        elif hasattr(user, 'role') and user.role.code == RoleCode.ADMIN.value:
-            return PaymentTransaction.objects.all()
-            
+        
         return PaymentTransaction.objects.none()
+
 
     @extend_schema(summary="Get financial summary (Total Revenue)")
     def list(self, request, *args, **kwargs):
