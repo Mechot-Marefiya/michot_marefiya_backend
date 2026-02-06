@@ -698,7 +698,9 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = HotelProfile
-        fields = ["id", "company", "images", "stars", "featured","facilities", "is_favorite"]
+    class Meta:
+        model = HotelProfile
+        fields = ["id", "company", "images", "logo", "stars", "featured","facilities", "is_favorite"]
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
@@ -894,6 +896,7 @@ class HotelProfileSerializer(serializers.ModelSerializer):
     images = serializers.ListField(child=serializers.ImageField(), required=False) 
     address = FlexibleAddressField()
     license = serializers.FileField(required=False)
+    logo = serializers.ImageField(required=False)
 
     class Meta:
         model = HotelProfile
@@ -904,6 +907,7 @@ class HotelProfileSerializer(serializers.ModelSerializer):
             "website",
             "address", 
             "license",
+            "logo",
             "stars",
             "featured",
             "facilities",

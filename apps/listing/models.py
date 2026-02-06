@@ -61,6 +61,8 @@ class BaseListing(AbstractBaseModel):
         decimal_places=2,
         verbose_name=_("Price"),
         help_text=_("Price of the service/product (if applicable)."),
+        null=True,
+        blank=True,
     )
     currency = models.CharField(
         max_length=3,
@@ -605,6 +607,36 @@ class GuestHouseProfile(BaseListing):
         related_name="guesthouse_profile",
         verbose_name=_("Address"),
         help_text=_("Guesthouse location address")
+    )
+
+    phone = models.CharField(
+        max_length=20, 
+        verbose_name=_("Phone Number"), 
+        blank=True, 
+        null=True,
+        help_text=_("Contact phone number for the guest house.")
+    )
+    
+    website = models.URLField(
+        verbose_name=_("Website"), 
+        blank=True, 
+        null=True,
+        help_text=_("Official website URL.")
+    )
+
+    logo = models.ImageField(
+        verbose_name=_("Logo"), 
+        upload_to="guesthouse/logos/", 
+        blank=True, 
+        null=True
+    )
+    
+    license = models.FileField(
+        verbose_name=_("Business License"), 
+        upload_to="guesthouse/licenses/", 
+        blank=True, 
+        null=True,
+        help_text=_("Upload a valid business license (PDF/Image).")
     )
 
 
