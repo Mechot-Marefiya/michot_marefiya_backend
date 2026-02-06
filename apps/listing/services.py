@@ -88,6 +88,7 @@ class ListingService:
         return room_listing_instance
 
     @staticmethod
+    @staticmethod
     @transaction.atomic()
     def create_guest_house_listing(validated_data: dict):
         images = validated_data.pop("images", [])
@@ -123,25 +124,12 @@ class ListingService:
         for id in facility_ids:
             instance = get_object_or_404(Facility, id=id)
             facilities.append(instance)
-        guest_house_profile.facilities.set(facilities)
+        guest_house_profile.facility.set(facilities)
         
         ImageCreationService.create_images(guest_house_profile, images)
-            
-        default_room = GuestHouseRoom.objects.create(
-            guest_house=guest_house_profile,
-            title="Standard Room",
-            description="Standard room for this guest house.",
-            base_price=guest_house_profile.base_price,
-            total_units=1,
-            number_of_guests=2,
-        )
-        
-        
-        GuestHouseAvailabilityService.create_availability(
-            default_room, default_room.total_units
-        )
 
         return guest_house_profile
+
 
     @staticmethod
     @transaction.atomic()

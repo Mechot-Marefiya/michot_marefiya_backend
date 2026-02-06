@@ -22,7 +22,7 @@ from apps.core.serializers import (
 )
 from apps.listing.exceptions import BookingConflict
 from apps.account.enums import RoleCode
-from apps.core.models import Address
+from apps.core.models import Address, Facility
 from apps.listing.services import BookingService, ListingService, EventSpaceAvailabilityService, GuestHouseAvailabilityService
 
 from apps.listing.models import (
@@ -408,8 +408,14 @@ class GuestHouseProfileResponseSerializer(serializers.ModelSerializer):
             "address",
             "rating",
             "facility",
+            "rating",
+            "facility",
             "is_favorite",
             "rooms",
+            "phone",
+            "website",
+            "license",
+            "logo",
         ]
 
     def get_is_favorite(self, obj):
@@ -489,7 +495,13 @@ class GuestHouseProfileSerializer(serializers.ModelSerializer):
     address = FlexibleAddressField()
     images = serializers.ListField(child=serializers.ImageField())
     amenities = JsonSerializerField()
-    facility=FacilitySerializer()
+    facility = serializers.PrimaryKeyRelatedField(
+        many=True, 
+        queryset=Facility.objects.all(),
+        required=False
+    )
+    logo = serializers.ImageField(required=False)
+
     class Meta:
         model = GuestHouseProfile
         fields = [
@@ -501,7 +513,11 @@ class GuestHouseProfileSerializer(serializers.ModelSerializer):
             "description",
             "amenities",
             "address",
-            "facility"
+            "facility",
+            "phone",
+            "website",
+            "license",
+            "logo",
         ]
 
     def validate_address(self, attr):
@@ -537,6 +553,8 @@ class GuestHouseProfileSerializer(serializers.ModelSerializer):
         
         return data
 
+
+
     @transaction.atomic
     def create(self, validated_data):
         user = self.context['request'].user
@@ -549,27 +567,12 @@ class GuestHouseProfileSerializer(serializers.ModelSerializer):
                 validated_data['company'] = company
             elif individual_owner:
                 validated_data['individual_owner'] = individual_owner
-
-        images = validated_data.pop("images", [])
-        amenities = validated_data.pop("amenities", [])
-        facilities = validated_data.pop("facility", [])
-        address_data = validated_data.pop("address")
-
-        address = Address.objects.create(**address_data)
-        validated_data["address"] = address
-
-        instance = GuestHouseProfile.objects.create(**validated_data)
-
-        if isinstance(amenities, list):
-            instance.amenities.set(amenities)
-
-        if isinstance(facilities, list):
-            instance.facility.set(facilities)
-
-        if images:
-            ImageCreationService.create_images(instance, images)
-
-        return instance
+        
+        if 'facility' in validated_data:
+            validated_data['facilities'] = validated_data.pop('facility')
+            
+            
+        return ListingService.create_guest_house_listing(validated_data)
 
     @transaction.atomic()
     def update(self, instance, validated_data):

@@ -52,6 +52,8 @@ from apps.account.serializers import (
     PasswordResetConfirmSerializer,
     VerifyEmailSerializer,
     VerifyEmailChangeSerializer,
+    CompanyRegistrationSerializer,
+    IndividualOwnerRegistrationSerializer,
 )
 from apps.listing.serializers import AddonOfferingListSerializer
 from apps.account.enums import RoleCode
@@ -319,6 +321,11 @@ class CompanyProfileViewSet(AbstractModelViewSet):
         else:
             return [IsCompanyOwner()]
 
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return CompanyRegistrationSerializer
+        return CompanyProfileSerializer
+
     def get_queryset(self):
         queryset = super().get_queryset()
         
@@ -401,11 +408,16 @@ class IndividualOwnerProfileViewSet(AbstractModelViewSet):
 
     def get_permissions(self):
         if self.action == 'create':
-            return [IsAdmin()]
+            return [AllowAny()]
         elif self.action in ['list', 'retrieve']:
             return [AllowAny()]
         else:
             return [IsAdmin()]
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return IndividualOwnerRegistrationSerializer
+        return IndividualOwnerProfileSerializer
 
     def get_queryset(self):
         return super().get_queryset()
@@ -420,9 +432,7 @@ class HotelProfileViewSet(AbstractModelViewSet):
     filterset_class = HotelFilter
 
     def get_permissions(self):
-        if self.action == 'create':
-            return [AllowAny()]
-        elif self.action in ['list', 'retrieve', 'check_availability', 'get_featured_hotels']:
+        if self.action in ['list', 'retrieve', 'check_availability', 'get_featured_hotels']:
             return [AllowAny()]
         else:
             return [IsCompanyOwner()]

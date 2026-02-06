@@ -279,8 +279,26 @@ class HotelProfile(AbstractBaseModel):
     #     HOTEL = "hotel", _("Hotel")
     #     PENSION = "pension", _("Pension")
 
-    company = models.OneToOneField(
-        CompanyProfile, on_delete=models.CASCADE, related_name="hotel"
+    company = models.ForeignKey(
+        CompanyProfile, on_delete=models.CASCADE, related_name="hotels"
+    )
+    
+    name = models.CharField(max_length=255, verbose_name=_("Hotel Name"), default="Hotel Name")
+    description = models.TextField(verbose_name=_("Description"), blank=True)
+    phone = models.CharField(max_length=20, verbose_name=_("Phone Number"), blank=True, null=True)
+    website = models.URLField(verbose_name=_("Website"), blank=True, null=True)
+    
+    logo = models.ImageField(verbose_name=_("Logo"), upload_to="hotel/logos/", blank=True, null=True)
+    
+    license = models.FileField(verbose_name=_("Business License"), upload_to="hotel/licenses/", blank=True, null=True)
+    
+    address = models.OneToOneField(
+        Address,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="hotel_profile",
+        verbose_name=_("Address"),
     )
 
     images = GenericRelation(ListingImage, related_query_name="listings")

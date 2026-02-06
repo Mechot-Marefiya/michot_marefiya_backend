@@ -698,7 +698,9 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = HotelProfile
-        fields = ["id", "company", "images", "stars", "featured","facilities", "is_favorite"]
+    class Meta:
+        model = HotelProfile
+        fields = ["id", "company", "images", "logo", "stars", "featured","facilities", "is_favorite"]
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
@@ -721,91 +723,231 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
             return False
 
 
-class HotelProfileSerializer(serializers.Serializer):
-    company = JsonSerializerField()
-    logo = serializers.ImageField()
-    license = serializers.FileField()
-    facilities = JsonSerializerField()
-    stars = serializers.IntegerField(required=False, allow_null=True)
-    featured=serializers.BooleanField(allow_null=True)
-    images = serializers.ListField(child=serializers.ImageField())
 
-    def validate_company(self, value):
-        if not isinstance(value, dict):
-            raise serializers.ValidationError("Company must be a valid object.")
-        if "email" not in value:
-            raise serializers.ValidationError("Company email is required.")
+
+
+class CompanyRegistrationSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(write_only=True)
+    first_name = serializers.CharField(write_only=True)
+    last_name = serializers.CharField(write_only=True)
+    password = serializers.CharField(write_only=True, style={'input_type': 'password'})
+    confirm_password = serializers.CharField(write_only=True, style={'input_type': 'password'})
+    
+    address = FlexibleAddressField()
+
+    class Meta:
+        model = CompanyProfile
+        fields = [
+            "email", "first_name", "last_name", "password", "confirm_password",
+            "name", "license", "logo", "category", "description", 
+            "phone", "tin", "business_license_number", "address"
+        ]
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
         return value
 
-    def validate_stars(self, value):
-        if value is not None and (value < 1 or value > 5):
-            raise serializers.ValidationError("Stars must be between 1 and 5.")
-        return value
+    def validate_address(self, attr):
+        serializer = AddressSerializer(data=attr)
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
 
     def validate(self, attrs):
-        company_data = attrs.pop("company")
-        
-        # Enforce Hotel-Category Consistency
-        # HotelProfile should only be created for HOTEL or PENSION categories.
-        category = company_data.get("category")
-        allowed_categories = [CompanyProfile.CategoryChoice.HOTEL, CompanyProfile.CategoryChoice.PENSION]
-        
-        if category not in allowed_categories:
-            raise serializers.ValidationError(
-                {"company": {"category": "HotelProfile creation is restricted to 'hotel' or 'pension' categories."}}
-            )
-
-        email = company_data.get("email")
-        
-        if User.objects.filter(email=email).exists():
-            raise serializers.ValidationError(
-                {"company": {"email": "A user with this email already exists."}}
-            )
-        
-        address_data = company_data.pop("address")
-        serializer = AddressSerializer(data=address_data)
-        serializer.is_valid(raise_exception=True)
-        attrs["address"] = serializer.validated_data
-        attrs["company"] = company_data
+        if attrs.get("password") != attrs.get("confirm_password"):
+             raise serializers.ValidationError({"password": "Passwords do not match."})
         return attrs
 
     @transaction.atomic()
     def create(self, validated_data):
-        company_info = validated_data.pop("company")
-        email = company_info.pop("email")
-        address_info = validated_data.pop("address")
-        license = validated_data.pop("license")
-        logo = validated_data.pop("logo")
-        facilities = validated_data.pop("facilities")
-        images = validated_data.pop("images")
+        email = validated_data.pop("email")
+        first_name = validated_data.pop("first_name")
+        last_name = validated_data.pop("last_name")
+        password = validated_data.pop("password")
+        validated_data.pop("confirm_password")
+        
+        address_data = validated_data.pop("address")
         
         try:
             role = Role.objects.get(code=RoleCode.COMPANY.value)
         except Role.DoesNotExist:
-            raise serializers.ValidationError(
-                {"error": "Company role does not exist in the system"}
-            )
-            
-        password = generate_password(email)
-        user = User(email=email, role=role)
+             raise serializers.ValidationError({"error": "Role configuration error."})
+
+        user = User.objects.create(
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            role=role,
+            is_active=False
+        )
         user.set_password(password)
         user.save()
-        address = ListingService.get_or_create_address(address_info)
-        company = CompanyProfile.objects.create(
-            user=user, logo=logo, license=license, **company_info, address=address
+        
+        address = ListingService.get_or_create_address(address_data)
+        
+        profile = CompanyProfile.objects.create(
+            user=user,
+            address=address,
+            status=CompanyProfile.StatusChoice.PENDING,
+            **validated_data
+        )
+        
+        self._send_verification(user)
+        
+        return profile
+
+    def _send_verification(self, user):
+        try:
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
+            activation_url = f"{frontend_url}auth/verify-email?uid={uid}&token={token}"
+            EmailService.send_verification_email(user, activation_url)
+        except Exception:
+            pass
+
+    def to_representation(self, instance):
+        return CompanyProfileResponseSerializer(instance, context=self.context).to_representation(instance)
+
+
+class IndividualOwnerRegistrationSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(write_only=True)
+    password = serializers.CharField(write_only=True, style={'input_type': 'password'})
+    confirm_password = serializers.CharField(write_only=True, style={'input_type': 'password'})
+    
+    address = FlexibleAddressField()
+
+    class Meta:
+        model = IndividualOwnerProfile
+        fields = [
+            "email", "password", "confirm_password",
+            "first_name", "last_name", "phone", "national_id_number", "address"
+        ]
+
+    def validate_email(self, value):
+        if User.objects.filter(email=value).exists():
+             raise serializers.ValidationError("A user with this email already exists.")
+        return value
+
+    def validate_address(self, attr):
+        serializer = AddressSerializer(data=attr)
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
+        
+    def validate(self, attrs):
+        if attrs.get("password") != attrs.get("confirm_password"):
+             raise serializers.ValidationError({"password": "Passwords do not match."})
+        return attrs
+
+    @transaction.atomic()
+    def create(self, validated_data):
+        email = validated_data.pop("email")
+        password = validated_data.pop("password")
+        validated_data.pop("confirm_password")
+        
+        first_name = validated_data.get("first_name")
+        last_name = validated_data.get("last_name")
+        address_data = validated_data.pop("address")
+        
+        try:
+            role = Role.objects.get(code=RoleCode.COMPANY.value) 
+        except Role.DoesNotExist:
+             raise serializers.ValidationError({"error": "Role configuration error."})
+
+        user = User.objects.create(
+            email=email,
+            first_name=first_name,
+            last_name=last_name,
+            role=role,
+            is_active=False
+        )
+        user.set_password(password)
+        
+        address = ListingService.get_or_create_address(address_data)
+        
+        profile = IndividualOwnerProfile.objects.create(
+            address=address,
+            **validated_data
+        )
+        
+        user.individual_owner = profile
+        user.save()
+        
+        self._send_verification(user)
+        
+        return profile
+
+    def _send_verification(self, user):
+        try:
+            uid = urlsafe_base64_encode(force_bytes(user.pk))
+            token = default_token_generator.make_token(user)
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
+            activation_url = f"{frontend_url}auth/verify-email?uid={uid}&token={token}"
+            EmailService.send_verification_email(user, activation_url)
+        except Exception:
+            pass
+
+    def to_representation(self, instance):
+        return IndividualOwnerProfileResponseSerializer(instance, context=self.context).to_representation(instance)
+
+
+class HotelProfileSerializer(serializers.ModelSerializer):
+    facilities = JsonSerializerField()
+    images = serializers.ListField(child=serializers.ImageField(), required=False) 
+    address = FlexibleAddressField()
+    license = serializers.FileField(required=False)
+    logo = serializers.ImageField(required=False)
+
+    class Meta:
+        model = HotelProfile
+        fields = [
+            "name",
+            "description",
+            "phone",
+            "website",
+            "address", 
+            "license",
+            "logo",
+            "stars",
+            "featured",
+            "facilities",
+            "images", 
+        ]
+
+    def validate_address(self, attr):
+        serializer = AddressSerializer(data=attr)
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
+
+    @transaction.atomic()
+    def create(self, validated_data):
+        request = self.context.get("request")
+        user = request.user
+        
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+        if not company:
+            raise serializers.ValidationError({"detail": "User does not have an active company profile."})
+
+        if company.status != CompanyProfile.StatusChoice.APPROVED:
+             raise serializers.ValidationError({"detail": "Your company profile is not approved yet."})
+
+        address_data = validated_data.pop("address")
+        facilities = validated_data.pop("facilities", [])
+        images = validated_data.pop("images", [])
+        
+        address = ListingService.get_or_create_address(address_data)
+        
+        hotel = HotelProfile.objects.create(
+            company=company,
+            address=address,
+            **validated_data
         )
 
-        hotel = HotelProfile.objects.create(company=company, **validated_data)
-        facility_instances = []
-        for id in facilities:
-            ins = get_object_or_404(Facility, id=id)
-            facility_instances.append(ins)
+        if facilities:
+            hotel.facilities.set(facilities)
 
-        hotel.facilities.set(facility_instances)
-
-        ImageCreationService.create_images(hotel, images)
-
-        EmailService.send_account_credentials(user, password)
+        if images:
+            ImageCreationService.create_images(hotel, images)
 
         return hotel
 
