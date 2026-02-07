@@ -20,6 +20,7 @@ from apps.listing.models import (
     Booking,
     BookingItem,
     GuestHouseBooking,
+    GuestHouseBookingItem,
     PropertyListing,
     RoomListing,
     StayAvailability,EventSpaceListing,
@@ -394,10 +395,17 @@ class TermsService:
     def validate_and_snapshot_terms(
         content_object,
         terms_version: str,
-        terms_accepted: bool
+        terms_accepted: bool,
+        allow_missing: bool = False
     ) -> dict:
         
         if not terms_accepted:
+            if allow_missing:
+                return {
+                    'version': terms_version or "WALK-IN",
+                    'content_snapshot': "Terms accepted in person (Walk-in)",
+                    'accepted_at': timezone.now()
+                }
             raise DjangoValidationError("Terms and conditions must be accepted.")
         
         ct = ContentType.objects.get_for_model(content_object)
@@ -1081,12 +1089,18 @@ class BookingService:
                 hotel, rooms_info, check_in_date, check_out_date
             )
             
+            from apps.account.enums import RoleCode
+            is_front_desk = False
+            if user and user.is_authenticated and hasattr(user, 'role') and user.role and user.role.code == RoleCode.FRONT_DESK.value:
+                is_front_desk = True
+
             # Validate and snapshot T&C
             try:
                 tc_data = TermsService.validate_and_snapshot_terms(
                     content_object=hotel,
                     terms_version=terms_version,
-                    terms_accepted=terms_accepted
+                    terms_accepted=terms_accepted,
+                    allow_missing=is_front_desk
                 )
                 
                 # Add T&C data to booking
@@ -2333,13 +2347,19 @@ class GuestHouseBookingService:
                 first_room = items_data[0]['room']
                 hotel = first_room.guest_house 
 
-                if not terms_accepted:
+                from apps.account.enums import RoleCode
+                is_front_desk = False
+                if user and user.is_authenticated and hasattr(user, 'role') and user.role and user.role.code == RoleCode.FRONT_DESK.value:
+                    is_front_desk = True
+
+                if not terms_accepted and not is_front_desk:
                      raise ValidationError({"terms_accepted": "You must accept the terms and conditions."})
 
                 snapshot_data = TermsService.validate_and_snapshot_terms(
                     content_object=hotel,
                     terms_version=terms_version,
-                    terms_accepted=terms_accepted
+                    terms_accepted=terms_accepted,
+                    allow_missing=is_front_desk
                 )
             except Exception as e:
                 logger.error(f"T&C validation failed: {e}")
@@ -2774,3 +2794,97 @@ class InventoryGridService:
                 })
 
         return results
+
+class WorkspaceStatusService:
+    @staticmethod
+    def get_workspace_stats(workspace_id: str, workspace_type: str) -> dict:
+        today = timezone.localtime(timezone.now()).date()
+        
+        stats = {
+            "arrivals_today": 0,
+            "departures_today": 0,
+            "in_house": 0,
+            "availability_percentage": 0
+        }
+
+        if workspace_type == 'hotel':
+            arrivals_qs = Booking.objects.filter(
+                items__room__hotel__id=workspace_id,
+                check_in_date=today,
+                status__in=[Booking.BookingStatus.CONFIRMED, "checked_in"] # "checked_in" might be a string literal if not in choices
+            ).distinct()
+            stats["arrivals_today"] = arrivals_qs.count()
+
+            departures_qs = Booking.objects.filter(
+                items__room__hotel__id=workspace_id,
+                check_out_date=today,
+                status=Booking.BookingStatus.CONFIRMED
+            ).distinct()
+            stats["departures_today"] = departures_qs.count()
+
+            in_house_qs = Booking.objects.filter(
+                items__room__hotel__id=workspace_id,
+                check_in_date__lte=today,
+                check_out_date__gt=today,
+                status=Booking.BookingStatus.CONFIRMED
+            ).exclude(check_in_date=today).distinct() 
+            stats["in_house"] = in_house_qs.count() + stats["arrivals_today"] # Everyone occupying rooms tonight.
+
+            total_rooms = RoomListing.objects.filter(hotel__id=workspace_id, is_active=True).aggregate(
+                total=sum('total_rooms')
+            )['total'] or 0
+            
+            occupied_rooms = BookingItem.objects.filter(
+                booking__items__room__hotel__id=workspace_id,
+                booking__check_in_date__lte=today,
+                booking__check_out_date__gt=today,
+                booking__status=Booking.BookingStatus.CONFIRMED
+            ).aggregate(total=sum('units_booked'))['total'] or 0
+
+            if total_rooms > 0:
+                available = max(0, total_rooms - occupied_rooms)
+                stats["availability_percentage"] = int((available / total_rooms) * 100)
+            else:
+                stats["availability_percentage"] = 0
+
+        elif workspace_type == 'guesthouse':
+            arrivals_qs = GuestHouseBooking.objects.filter(
+                items__room__guest_house__id=workspace_id,
+                start_date=today,
+                status=GuestHouseBooking.RentStatus.CONFIRMED
+            ).distinct()
+            stats["arrivals_today"] = arrivals_qs.count()
+
+            departures_qs = GuestHouseBooking.objects.filter(
+                items__room__guest_house__id=workspace_id,
+                end_date=today,
+                status=GuestHouseBooking.RentStatus.CONFIRMED
+            ).distinct()
+            stats["departures_today"] = departures_qs.count()
+
+            in_house_qs = GuestHouseBooking.objects.filter(
+                items__room__guest_house__id=workspace_id,
+                start_date__lte=today,
+                end_date__gt=today,
+                status=GuestHouseBooking.RentStatus.CONFIRMED
+            ).distinct()
+            stats["in_house"] = in_house_qs.count()
+
+            total_rooms = GuestHouseRoom.objects.filter(guest_house__id=workspace_id).aggregate(
+                total=sum('total_units')
+            )['total'] or 0
+            
+            occupied_rooms = GuestHouseBookingItem.objects.filter(
+                booking__items__room__guest_house__id=workspace_id,
+                booking__start_date__lte=today,
+                booking__end_date__gt=today,
+                booking__status=GuestHouseBooking.RentStatus.CONFIRMED
+            ).aggregate(total=sum('units_booked'))['total'] or 0
+
+            if total_rooms > 0:
+                available = max(0, total_rooms - occupied_rooms)
+                stats["availability_percentage"] = int((available / total_rooms) * 100)
+            else:
+                stats["availability_percentage"] = 0
+
+        return stats

@@ -612,8 +612,8 @@ class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
 class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, serializers.ModelSerializer):
     items = GuestHouseBookingItemSerializer(many=True, write_only=True)
     
-    terms_accepted = serializers.BooleanField(required=True, write_only=True)
-    terms_version = serializers.CharField(required=True, write_only=True)
+    terms_accepted = serializers.BooleanField(required=False, write_only=True)
+    terms_version = serializers.CharField(required=False, write_only=True)
     
     guest_first_name = serializers.CharField(max_length=100, required=False, help_text="First name of the guest (Required if not logged in)")
     guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the guest (Required if not logged in)")
@@ -686,7 +686,10 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
     is_legacy = serializers.BooleanField(read_only=True, help_text="Indicates if this booking was created before the T&C/Guest details update")
         
     def validate_terms_accepted(self, value):
-        if not value:
+        user = self.context['request'].user
+        is_front_desk = user and user.is_authenticated and hasattr(user, 'role') and user.role and user.role.code == RoleCode.FRONT_DESK.value
+        
+        if not value and not is_front_desk:
             raise serializers.ValidationError(
                 "You must accept the terms and conditions to proceed with booking."
             )
@@ -722,7 +725,18 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
             room_infos, start, end
         )
         
+        # Enforce terms for non-front-desk users
+        is_front_desk = user and user.is_authenticated and hasattr(user, 'role') and user.role and user.role.code == RoleCode.FRONT_DESK.value
+        
         terms_version = data.get("terms_version")
+        terms_accepted = data.get("terms_accepted")
+        
+        if not is_front_desk:
+            if not terms_accepted:
+                 raise serializers.ValidationError({"terms_accepted": "This field is required."})
+            if not terms_version:
+                 raise serializers.ValidationError({"terms_version": "This field is required."})
+
         if terms_version and items:
             from django.contrib.contenttypes.models import ContentType
             first_room = items[0]["room"]
@@ -1712,12 +1726,12 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
     
     # T&C fields (write_only, required for booking creation)
     terms_accepted = serializers.BooleanField(
-        required=True, 
+        required=False, 
         write_only=True,
         help_text="Must be set to true to indicate agreement with the Terms and Conditions."
     )
     terms_version = serializers.CharField(
-        required=True, 
+        required=False, 
         write_only=True,
         help_text="The version of the T&C document that was accepted (e.g., '1.0')."
     )
@@ -1744,7 +1758,10 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
         read_only_fields = ["status", "currency"]
         
     def validate_terms_accepted(self, value):
-        if not value:
+        user = self.context['request'].user
+        is_front_desk = user and user.is_authenticated and hasattr(user, 'role') and user.role and user.role.code == RoleCode.FRONT_DESK.value
+        
+        if not value and not is_front_desk:
             raise serializers.ValidationError(
                 "You must accept the terms and conditions to proceed with booking."
             )
@@ -1771,7 +1788,18 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
         if (not user or not user.is_authenticated) and not guest_email:
              raise serializers.ValidationError("Either log in or provide guest email.")
         
+        # Enforce terms for non-front-desk users
+        is_front_desk = user and user.is_authenticated and hasattr(user, 'role') and user.role and user.role.code == RoleCode.FRONT_DESK.value
+        
         terms_version = data.get("terms_version")
+        terms_accepted = data.get("terms_accepted")
+        
+        if not is_front_desk:
+            if not terms_accepted:
+                 raise serializers.ValidationError({"terms_accepted": "This field is required."})
+            if not terms_version:
+                 raise serializers.ValidationError({"terms_version": "This field is required."})
+
         if terms_version and items:
             from django.contrib.contenttypes.models import ContentType
             first_room = items[0]["room"]
