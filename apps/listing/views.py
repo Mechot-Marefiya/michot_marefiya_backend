@@ -612,6 +612,26 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         
         response_serializer = GuestHouseBookingSerializer(booking, context=self.get_serializer_context())
         return Response(response_serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='workspace-bookings')
+    def workspace_bookings(self, request):
+        user = request.user
+        
+        if not user.workspace:
+             return Response(
+                {"detail": "No workspace assigned to this user."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        workspace = user.workspace
+        queryset = self.get_queryset()
+        
+        if hasattr(workspace, 'is_guesthouse') or workspace.__class__.__name__ == 'GuestHouseProfile':
+            queryset = queryset.filter(items__room__guest_house=workspace).distinct()
+        else:
+             return Response([])
+
+        return Response(GuestHouseBookingPreviewSerializer(queryset, many=True, context=self.get_serializer_context()).data)
     
     @extend_schema(
         summary="Create a new guesthouse booking (supports guest checkout)",
@@ -1321,6 +1341,8 @@ class BookingViewSet(AbstractModelViewSet):
                     except HotelProfile.DoesNotExist:
                         pass
         
+        return user_bookings
+    
     def perform_create(self, serializer):
         user = self.request.user if self.request.user.is_authenticated else None
         serializer.save(user=user)
@@ -1496,23 +1518,29 @@ class BookingViewSet(AbstractModelViewSet):
             status=status.HTTP_200_OK
         )
 
-
-    @action(detail=True, methods=["post"], url_path="rate",serializer_class=BookingRatingSerializer)
-    def rate_booking(self, request, pk=None):
-        booking = self.get_object()
-
-        serializer = BookingRatingSerializer(
-            data=request.data,
-            context={"booking": booking}
-        )
-        serializer.is_valid(raise_exception=True)
-
-        rating = serializer.save(booking=booking)
-
+    @action(detail=False, methods=['get'], url_path='workspace-bookings')
+    def workspace_bookings(self, request):
+        user = request.user
+        
+        if not user.workspace:
+             return Response(
+                {"detail": "No workspace assigned to this user."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        workspace = user.workspace
+        queryset = self.get_queryset()
+        
+        if hasattr(workspace, 'is_hotel') or workspace.__class__.__name__ == 'HotelProfile':
+            queryset = queryset.filter(items__room__hotel=workspace).distinct()
+            
+        elif hasattr(workspace, 'is_guesthouse') or workspace.__class__.__name__ == 'GuestHouseProfile':
+             return Response([])
+             
         return Response(
-            BookingRatingSerializer(rating).data,
-            status=status.HTTP_201_CREATED
+            BookingResponseSerializer(queryset, many=True).data
         )
+
 
 @search_schema
 class StaySearchView(APIView):
