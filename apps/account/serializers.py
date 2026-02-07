@@ -1,6 +1,8 @@
 from django.db import transaction
+from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
+import logging
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from apps.account.services import ImageCreationService
 from apps.account.enums import RoleCode
@@ -53,11 +55,37 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                         "id": self.user.profile.id,
                         "name": self.user.profile.name,
                     }
-                elif hasattr(self.user, "individual_owner") and self.user.individual_owner:
-                     data["individual_owner"] = {
-                        "id": self.user.individual_owner.id,
-                        "name": f"{self.user.individual_owner.first_name} {self.user.individual_owner.last_name}",
+            elif self.user.role.code in [RoleCode.FRONT_DESK.value, "front_desk"]:
+                if self.user.workspace:
+                    workspace_type = "unknown"
+                    if hasattr(self.user.workspace, 'is_hotel'):
+                        workspace_type = "hotel"
+                        if self.user.workspace.__class__.__name__ == 'HotelProfile': workspace_type = "hotel"
+                    elif hasattr(self.user.workspace, 'is_guesthouse'):
+                        workspace_type = "guesthouse"
+                        if self.user.workspace.__class__.__name__ == 'GuestHouseProfile': workspace_type = "guesthouse"
+                    elif self.user.workspace.__class__.__name__ == 'CarListing':
+                        workspace_type = "car_rental"
+                    
+                    # Fallback
+                    if workspace_type == "unknown":
+                        model_name = self.user.workspace.__class__.__name__.lower()
+                        if 'hotel' in model_name: workspace_type = 'hotel'
+                        elif 'guesthouse' in model_name: workspace_type = 'guesthouse'
+
+                    data["workspace"] = {
+                        "id": str(self.user.workspace.id),
+                        "name": getattr(self.user.workspace, 'title', getattr(self.user.workspace, 'name', 'Unnamed Property')),
+                        "workspace_type": workspace_type
                     }
+            
+            if hasattr(self.user, "individual_owner") and self.user.individual_owner and (
+                self.user.role.code == RoleCode.INDIVIDUAL_OWNER.value or self.user.role.code == "individual_owner"
+            ):
+                 data["individual_owner"] = {
+                    "id": self.user.individual_owner.id,
+                    "name": f"{self.user.individual_owner.first_name} {self.user.individual_owner.last_name}",
+                }
         else:
             data["role"] = None
 
@@ -73,9 +101,29 @@ class StaffResponseSerializer(serializers.ModelSerializer):
         fields = ["id", "email", "first_name", "last_name", "role", "workspace", "created_at"]
 
     def get_workspace(self, instance):
-        if instance.workspace:
-            return str(instance.workspace)
-        return None
+        if not instance.workspace:
+            return None
+        
+        workspace_type = "unknown"
+        if hasattr(instance.workspace, 'is_hotel'):
+             workspace_type = "hotel"
+             if instance.workspace.__class__.__name__ == 'HotelProfile': workspace_type = "hotel"
+        elif hasattr(instance.workspace, 'is_guesthouse'):
+             workspace_type = "guesthouse"
+             if instance.workspace.__class__.__name__ == 'GuestHouseProfile': workspace_type = "guesthouse"
+        elif instance.workspace.__class__.__name__ == 'CarListing':
+             workspace_type = "car_rental"
+        
+        if workspace_type == "unknown":
+            model_name = instance.workspace.__class__.__name__.lower()
+            if 'hotel' in model_name: workspace_type = 'hotel'
+            elif 'guesthouse' in model_name: workspace_type = 'guesthouse'
+            
+        return {
+            "id": instance.workspace.id,
+            "name": getattr(instance.workspace, 'title', getattr(instance.workspace, 'name', 'Unnamed Property')),
+            "workspace_type": workspace_type
+        }
 
 
 class StaffCreateSerializer(serializers.ModelSerializer):
@@ -160,10 +208,18 @@ class StaffCreateSerializer(serializers.ModelSerializer):
             workspace=workspace,
             **validated_data
         )
+        
+        from django.contrib.contenttypes.models import ContentType
+        user.workspace_content_type = ContentType.objects.get_for_model(workspace)
+        user.workspace_object_id = workspace.id
         user.set_password(password)
         user.save()
         
-        EmailService.send_account_credentials(user, password)
+        try:
+            EmailService.send_account_credentials(user, password)
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to send credentials to {user.email}: {str(e)}")
         
         return user
 
@@ -236,8 +292,8 @@ class UserSerializer(serializers.ModelSerializer):
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
             
-            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
-            activation_url = f"{frontend_url}auth/verify-email?uid={uid}&token={token}"
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com').rstrip('/')
+            activation_url = f"{frontend_url}/auth/verify-email?uid={uid}&token={token}"
             
             EmailService.send_verification_email(user, activation_url)
         except Exception as e:
@@ -255,12 +311,41 @@ class UserSerializer(serializers.ModelSerializer):
         )
 
 
+
 class UserResponseSerializer(serializers.ModelSerializer):
+    role = RoleSerializer(read_only=True)
+    workspace = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ["id", "email", "first_name", "last_name", "is_active", "role"]
+        fields = ["id", "email", "first_name", "last_name", "is_active", "role", "workspace"]
 
-    role = RoleSerializer(read_only=True)
+    def get_workspace(self, obj):
+        if not obj.workspace:
+            return None
+        
+        workspace_type = "unknown"
+        if hasattr(obj.workspace, 'is_hotel'): # Duck typing or check model name
+             workspace_type = "hotel"
+             if obj.workspace.__class__.__name__ == 'HotelProfile':
+                 workspace_type = "hotel"
+        elif hasattr(obj.workspace, 'is_guesthouse'):
+             workspace_type = "guesthouse"
+             if obj.workspace.__class__.__name__ == 'GuestHouseProfile':
+                 workspace_type = "guesthouse"
+        elif obj.workspace.__class__.__name__ == 'CarListing':
+             workspace_type = "car_rental"
+        
+        if workspace_type == "unknown":
+            model_name = obj.workspace.__class__.__name__.lower()
+            if 'hotel' in model_name: workspace_type = 'hotel'
+            elif 'guesthouse' in model_name: workspace_type = 'guesthouse'
+        
+        return {
+            "id": obj.workspace.id,
+            "name": getattr(obj.workspace, 'title', getattr(obj.workspace, 'name', 'Unnamed Property')),
+            "workspace_type": workspace_type
+        }
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):
@@ -316,10 +401,10 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             signer = TimestampSigner()
             signed_email = signer.sign(new_email)
             
-            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com').rstrip('/')
             # Link format: /verify-email-change?uid=...&token=...&email=...
             # We'll use a custom View to verify the signer and then update.
-            verification_url = f"{frontend_url}auth/verify-email-change?uid={uid}&email={signed_email}"
+            verification_url = f"{frontend_url}/auth/verify-email-change?uid={uid}&email={signed_email}"
             
             # 1. Send verification to NEW email
             EmailService.send_email_change_verification(instance, new_email, verification_url)
@@ -408,8 +493,8 @@ class PasswordResetSerializer(serializers.Serializer):
         uid = urlsafe_base64_encode(force_bytes(self.user.pk))
         token = default_token_generator.make_token(self.user)
         
-        frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
-        reset_url = f"{frontend_url}auth/reset-password?uid={uid}&token={token}"
+        frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com').rstrip('/')
+        reset_url = f"{frontend_url}/auth/reset-password?uid={uid}&token={token}"
         
         EmailService.send_password_reset(self.user, reset_url)
 
@@ -800,8 +885,8 @@ class CompanyRegistrationSerializer(serializers.ModelSerializer):
         try:
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
-            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
-            activation_url = f"{frontend_url}auth/verify-email?uid={uid}&token={token}"
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com').rstrip('/')
+            activation_url = f"{frontend_url}/auth/verify-email?uid={uid}&token={token}"
             EmailService.send_verification_email(user, activation_url)
         except Exception:
             pass
@@ -881,8 +966,8 @@ class IndividualOwnerRegistrationSerializer(serializers.ModelSerializer):
         try:
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
-            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
-            activation_url = f"{frontend_url}auth/verify-email?uid={uid}&token={token}"
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com').rstrip('/')
+            activation_url = f"{frontend_url}/auth/verify-email?uid={uid}&token={token}"
             EmailService.send_verification_email(user, activation_url)
         except Exception:
             pass

@@ -85,7 +85,7 @@ Support: support@michotmarefia.com
     @staticmethod
     def send_account_credentials(user, password):
         try:
-            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com').rstrip('/')
             login_url = f"{frontend_url}/login"
             
             context = {
@@ -211,7 +211,7 @@ Support: support@michotmarefia.com
     @staticmethod
     def send_email_change_notice(user, old_email, new_email):
         try:
-            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com')
+            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com').rstrip('/')
             context = {
                 'first_name': user.first_name or "User",
                 'old_email': old_email,

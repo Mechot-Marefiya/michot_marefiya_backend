@@ -131,7 +131,9 @@ class StaffViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         user = self.request.user
-        qs = User.objects.filter(role__code=RoleCode.FRONT_DESK.value)
+        qs = User.objects.filter(role__code=RoleCode.FRONT_DESK.value).select_related(
+            'role', 'company', 'individual_owner', 'workspace_content_type'
+        )
         
         if user.company:
             return qs.filter(company=user.company)
@@ -149,28 +151,53 @@ class StaffViewSet(viewsets.ModelViewSet):
         # Automated owner assignment happens in StaffCreateSerializer.create
         serializer.save()
     
-    def post(self, request, *args, **kwargs):
-        refresh_token = request.data.get("refresh")
-        if not refresh_token:
-            return Response(
-                {"detail": "Refresh token is required."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+    @action(detail=False, methods=['get'], url_path='available-workspaces')
+    def available_workspaces(self, request):
+        user = request.user
+        workspaces = []
+        
+        if user.company:
+            hotels = HotelProfile.objects.filter(company=user.company)
+            for hotel in hotels:
+                workspaces.append({
+                    'id': str(hotel.id),
+                    'type': 'hotel',
+                    'name': hotel.name,
+                    'category': 'Hotel'
+                })
+            
+            from apps.listing.models import GuestHouseProfile, CarListing
+            guesthouses = GuestHouseProfile.objects.filter(company=user.company)
+            for gh in guesthouses:
+                workspaces.append({
+                    'id': str(gh.id),
+                    'type': 'guesthouse',
+                    'name': gh.title,
+                    'category': 'Guest House'
+                })
+        
+        elif user.individual_owner:
+            from apps.listing.models import GuestHouseProfile, CarListing
+            guesthouses = GuestHouseProfile.objects.filter(individual_owner=user.individual_owner)
+            for gh in guesthouses:
+                workspaces.append({
+                    'id': str(gh.id),
+                    'type': 'guesthouse',
+                    'name': gh.title,
+                    'category': 'Guest House'
+                })
+            
+            cars = CarListing.objects.filter(individual_owner=user.individual_owner)
+            for car in cars:
+                workspaces.append({
+                    'id': str(car.id),
+                    'type': 'car_rental',
+                    'name': f"{car.make} {car.model}",
+                    'category': 'Car Rental'
+                })
+        
+        return Response(workspaces)
 
-        try:
-            token = RefreshToken(refresh_token)
-            token.blacklist()
-        except TokenError:
-            return Response({"detail": "Invalid token."}, status=status.HTTP_400_BAD_REQUEST)
-        except AttributeError:
-            return Response(
-                {"detail": "Token blacklisting not enabled on server."},
-                status=status.HTTP_501_NOT_IMPLEMENTED,
-            )
-        except Exception:
-            return Response({"detail": "Failed to blacklist token."}, status=status.HTTP_400_BAD_REQUEST)
-
-        return Response(status=status.HTTP_205_RESET_CONTENT)
 
 
 @extend_schema(tags=["Identity & Auth"])
