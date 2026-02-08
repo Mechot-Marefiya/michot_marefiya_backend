@@ -211,6 +211,8 @@ REST_FRAMEWORK = {
         "payment_verify": "5/min",
         "payment_callback": "10/min",
         "payment_webhook": "10/min",
+        "currency_rates": "30/min",
+        "currency_convert": "60/min",
     }
 }
 
