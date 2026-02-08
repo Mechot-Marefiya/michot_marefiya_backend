@@ -208,6 +208,9 @@ REST_FRAMEWORK = {
         "booking_create": "10/min",
         "token_refresh": "20/hour",
         "token_blacklist": "10/min",
+        "payment_verify": "5/min",
+        "payment_callback": "10/min",
+        "payment_webhook": "10/min",
     }
 }
 
