@@ -16,7 +16,7 @@ from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes,
 from .models import PaymentTransaction
 from .services import ChapaPaymentService
 from rest_framework import viewsets
-from django.db.models import Q
+from django.db.models import Q, Sum
 from apps.account.permissions import IsCompanyOwner
 from .serializers import (
     PaymentInitializeSerializer, 
@@ -651,26 +651,46 @@ class OwnerPaymentViewSet(viewsets.ReadOnlyModelViewSet):
     def list(self, request, *args, **kwargs):
         queryset = self.get_queryset()
         
+        # Calculate aggregates
         success_qs = queryset.filter(status=PaymentTransaction.PaymentStatus.SUCCESS)
+        pending_payout_qs = queryset.filter(payout_status=PaymentTransaction.PayoutStatus.PENDING)
         
-        total_revenue = sum(tx.amount for tx in success_qs) # simple sum for now, maybe group by currency
+        # Using aggregate for performance instead of python sum
+        revenue_metrics = success_qs.aggregate(
+            total_revenue=Sum('amount'),
+            total_payout=Sum('vendor_payout_amount'),
+            total_commission=Sum('commission_amount')
+        )
+        
+        pending_metrics = pending_payout_qs.aggregate(
+            total_pending=Sum('vendor_payout_amount')
+        )
+
+        # Default to 0 if None (no records)
+        total_revenue = revenue_metrics['total_revenue'] or Decimal('0.00')
+        total_payout = revenue_metrics['total_payout'] or Decimal('0.00')
+        total_commission = revenue_metrics['total_commission'] or Decimal('0.00')
+        total_pending = pending_metrics['total_pending'] or Decimal('0.00')
+        
         count = success_qs.count()
 
         page = self.paginate_queryset(queryset)
+        summary_data = {
+            "total_successful_transactions": count,
+            "total_revenue_etb": total_revenue,
+            "total_payout_etb": total_payout,
+            "total_commission_etb": total_commission,
+            "pending_payout_etb": total_pending
+        }
+
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = self.get_paginated_response(serializer.data)
-            response.data['summary'] = {
-                "total_successful_transactions": count,
-                "total_revenue_etb": total_revenue # taking ETB is primary for now
-            }
+            response.data['summary'] = summary_data
             return response
 
         serializer = self.get_serializer(queryset, many=True)
         return Response({
             "results": serializer.data,
-            "summary": {
-                "total_successful_transactions": count,
-                "total_revenue_etb": total_revenue
-            }
+            "summary": summary_data
         })

@@ -531,10 +531,24 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
     """
     serializer_class = GuestHouseBookingSerializer
     queryset = GuestHouseBooking.objects.all()
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['status']
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter]
+    filterset_fields = {
+        'status': ['exact'],
+        'start_date': ['gte', 'lte'],
+        'end_date': ['gte', 'lte']
+    }
     ordering_fields = ['start_date', 'end_date', 'total_price', 'created_at']
     ordering = ['-created_at']
+    search_fields = [
+        'booking_reference',
+        'renter__email',
+        'renter__first_name',
+        'renter__last_name',
+        'guest_email',
+        'guest_first_name',
+        'guest_last_name',
+        'guest_phone'
+    ]
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -1261,8 +1275,18 @@ class BookingViewSet(AbstractModelViewSet):
     http_method_names = ["get", "post"]
     serializer_class = BookingSerializer
     queryset = Booking.objects.all()
-    filter_backends = [DjangoFilterBackend]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = BookingFilter
+    search_fields = [
+        'booking_reference',
+        'user__email',
+        'user__first_name',
+        'user__last_name',
+        'guest_email',
+        'guest_first_name',
+        'guest_last_name',
+        'guest_phone'
+    ]
 
     @extend_schema(
         summary="Create a new room booking (supports guest checkout)",
@@ -2001,7 +2025,7 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
                     
                     hotel_bookings = queryset.filter(
                         items__event_space__hotel=hotel
-                    ).distinct()
+                    )
                     
                     return (user_bookings | hotel_bookings).distinct()
                 except HotelProfile.DoesNotExist:
