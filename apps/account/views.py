@@ -13,6 +13,7 @@ import traceback
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, OpenApiTypes
 from apps.listing.models import Booking, RoomListing, AddonOffering
@@ -104,9 +105,19 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
 
 @extend_schema(tags=["Identity & Auth"])
+class CustomTokenRefreshView(TokenRefreshView):
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'token_refresh'
+
+
+
+@extend_schema(tags=["Identity & Auth"])
 class LogoutView(APIView):
 
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'token_blacklist'
 
     @extend_schema(
         summary="Logout (Blacklist token)",
@@ -129,6 +140,7 @@ class StaffViewSet(viewsets.ModelViewSet):
     permission_classes = [IsCompanyOwner] # Uses the custom permission that checks company OR individual owner
     serializer_class = StaffResponseSerializer
     http_method_names = ['get', 'post', 'delete']
+    throttle_scope = 'token_blacklist'
 
     def get_queryset(self):
         user = self.request.user
