@@ -1,11 +1,12 @@
 from rest_framework.viewsets import ModelViewSet, ViewSet
-from rest_framework.decorators import action
+from rest_framework.decorators import action, throttle_classes
 from rest_framework.response import Response
 from django.core.exceptions import ObjectDoesNotExist
 from decimal import Decimal
 from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
+from rest_framework.throttling import ScopedRateThrottle
 from drf_spectacular.utils import extend_schema
 from apps.core.models import Facility
 from apps.core.serializers import FacilityResponseSerializer,ConversionInputSerializer, CurrencyRateSerializer
@@ -36,11 +37,10 @@ class CurrencyViewSet(ViewSet):
         return Response(data=res, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"])
+    @throttle_classes([ScopedRateThrottle])
     def rates(self, request):
-        """
-        Returns the latest exchange rates for all currencies against USD.
-        Format: {"USD": 1.0, "ETB": 152.9, ...}
-        """
+        """Returns the latest exchange rates for all currencies against USD."""
+        rates.throttle_scope = 'currency_rates'
         from django.db.models import Max
         latest_date = CurrencyRate.objects.aggregate(Max('date'))['date__max']
         
@@ -57,10 +57,10 @@ class CurrencyViewSet(ViewSet):
         return Response(rate_dict, status=status.HTTP_200_OK)
 @extend_schema(tags=["Debug & Utils"])
 class CurrencyConvertAPIView(APIView):
-    """
-    API endpoint for performing currency conversion based on stored rates.
-    """
-    permission_classes = [] # Adjust permissions as needed
+    """API endpoint for performing currency conversion based on stored rates."""
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'currency_convert'
 
     def post(self, request, *args, **kwargs):
         serializer = ConversionInputSerializer(data=request.data)

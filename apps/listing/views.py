@@ -16,6 +16,7 @@ from rest_framework import serializers
 from rest_framework.response import Response
 from django.db import transaction
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.throttling import ScopedRateThrottle
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 from apps.account.serializers import HotelProfileResponseSerializer, ListingImageSerializer
 from apps.core.serializers import FacilityResponseSerializer
@@ -377,6 +378,7 @@ class GuestHouseRoomViewSet(AbstractModelViewSet):
 class GuestHouseProfileViewSet(AbstractModelViewSet):
     serializer_class = GuestHouseProfileSerializer
     queryset = GuestHouseProfile.objects.all()
+    throttle_scope = None
 
     def get_permissions(self):
         """
@@ -472,7 +474,13 @@ class GuestHouseProfileViewSet(AbstractModelViewSet):
             ],
             responses=GuestHouseProfileResponseSerializer(many=True)
         )
-    @action(detail=False, methods=["get"], url_path="check-availability")
+    @action(
+        detail=False, 
+        methods=["get"], 
+        url_path="check-availability",
+        throttle_classes=[ScopedRateThrottle],
+        throttle_scope='availability_check'
+    )
     def check_availability(self, request):
             """
             Check availability across all guesthouses or a specific one.
@@ -531,6 +539,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
     """
     serializer_class = GuestHouseBookingSerializer
     queryset = GuestHouseBooking.objects.all()
+    throttle_scope = None
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['status']
     ordering_fields = ['start_date', 'end_date', 'total_price', 'created_at']
@@ -556,6 +565,12 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
             # For update/delete/cancel, require ownership
             from apps.account.permissions import IsGuestHouseBookingOwner
             return [IsGuestHouseBookingOwner()]
+
+    def get_throttles(self):
+        if self.action == 'create':
+            self.throttle_scope = 'booking_create'
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
     
     def get_queryset(self):
         """
@@ -723,7 +738,13 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
             400: OpenApiTypes.OBJECT
         }
     )
-    @action(detail=False, methods=['post'], url_path='price-preview')
+    @action(
+        detail=False, 
+        methods=['post'], 
+        url_path='price-preview',
+        throttle_classes=[ScopedRateThrottle],
+        throttle_scope='availability_check'
+    )
     def price_preview(self, request):
         serializer = GuestHouseBookingPreviewSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
@@ -783,6 +804,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
 class CarListingViewSet(AbstractModelViewSet):
     serializer_class = CarListingSerializer
     queryset = CarListing.objects.all()
+    throttle_scope = None
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
     filterset_fields = ['brand', 'car_class', 'fuel_type', 'transmission', 'condition', 'listing_type', 'is_active']
     search_fields = ['title', 'description', 'brand', 'model']
@@ -884,7 +906,13 @@ class CarListingViewSet(AbstractModelViewSet):
 
     # --- Availability Actions ---
     @extend_schema(request=AvailabilityCheckSerializer)
-    @action(detail=True, methods=['post'], serializer_class=AvailabilityCheckSerializer)
+    @action(
+        detail=True, 
+        methods=['post'], 
+        serializer_class=AvailabilityCheckSerializer,
+        throttle_classes=[ScopedRateThrottle],
+        throttle_scope='availability_check'
+    )
     def check_availability(self, request, pk=None):
         car_listing = self.get_object()
         serializer = AvailabilityCheckSerializer(data=request.data)
@@ -905,7 +933,13 @@ class CarListingViewSet(AbstractModelViewSet):
         OpenApiParameter('car_class', OpenApiTypes.STR),
         OpenApiParameter('max_daily_price', OpenApiTypes.FLOAT),
     ])
-    @action(detail=False, methods=['get'], serializer_class=CarSearchSerializer)
+    @action(
+        detail=False, 
+        methods=['get'], 
+        serializer_class=CarSearchSerializer,
+        throttle_classes=[ScopedRateThrottle],
+        throttle_scope='availability_check'
+    )
     def available_for_rent(self, request):
         serializer = CarSearchSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
@@ -973,6 +1007,12 @@ class CarRentalViewSet(AbstractModelViewSet):
             return [IsAuthenticated()]
         else:
             return [IsCarRentalOwner()]
+
+    def get_throttles(self):
+        if self.action == 'create':
+            self.throttle_scope = 'booking_create'
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
 
     def get_queryset(self):
         user = self.request.user
@@ -1135,6 +1175,8 @@ class CarRentalViewSet(AbstractModelViewSet):
 # Availability APIViews
 class CarAvailabilitySearchView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'availability_check'
 
     @extend_schema(responses=CarAvailabilitySerializer)
     def get(self, request):
@@ -1155,6 +1197,8 @@ class CarAvailabilitySearchView(APIView):
 
 class CarAvailabilityByDateRangeView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'availability_check'
 
     @extend_schema(summary="Search all available cars in a date range")
     def get(self, request):
@@ -1183,6 +1227,8 @@ class CarAvailabilityByDateRangeView(APIView):
 
 class CarAvailabilityByCarAndDateView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'availability_check'
 
     @extend_schema(summary="Get availability for a specific car listing within a date range")
     def get(self, request):
@@ -1261,6 +1307,7 @@ class BookingViewSet(AbstractModelViewSet):
     http_method_names = ["get", "post"]
     serializer_class = BookingSerializer
     queryset = Booking.objects.all()
+    throttle_scope = None
     filter_backends = [DjangoFilterBackend]
     filterset_class = BookingFilter
 
@@ -1299,6 +1346,12 @@ class BookingViewSet(AbstractModelViewSet):
             return [IsBookingOwner()]
         else:
             return [IsAuthenticated()]
+
+    def get_throttles(self):
+        if self.action == 'create':
+            self.throttle_scope = 'booking_create'
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
 
     def get_queryset(self):
         """
@@ -1390,7 +1443,13 @@ class BookingViewSet(AbstractModelViewSet):
             400: OpenApiTypes.OBJECT
         }
     )
-    @action(detail=False, methods=['post'], url_path='price-preview')
+    @action(
+        detail=False, 
+        methods=['post'], 
+        url_path='price-preview',
+        throttle_classes=[ScopedRateThrottle],
+        throttle_scope='availability_check'
+    )
     def price_preview(self, request):
         serializer = BookingPreviewSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
@@ -1545,6 +1604,8 @@ class BookingViewSet(AbstractModelViewSet):
 @search_schema
 class StaySearchView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'availability_check'
 
     def get(self, request):
         city = request.query_params.get("city")
@@ -1944,6 +2005,7 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
     # Only allow GET (list/retrieve) and POST (create)
     http_method_names = ["get", "post"] 
     serializer_class = EventSpaceBookingSerializer
+    throttle_scope = None
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -1973,6 +2035,12 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         # Removed: partial_cancel and rate_booking actions
         else:
             return [IsAuthenticated()]
+
+    def get_throttles(self):
+        if self.action == 'create':
+            self.throttle_scope = 'booking_create'
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
 
     # --- Queryset Filtering ---
     def get_queryset(self):
