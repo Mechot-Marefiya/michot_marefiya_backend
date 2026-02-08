@@ -4,6 +4,7 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import status, serializers, viewsets
+from rest_framework.throttling import ScopedRateThrottle
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.conf import settings
 from django.utils import timezone
@@ -69,6 +70,8 @@ from apps.account.permissions import (
 @extend_schema(tags=["Identity & Auth"])
 class CustomTokenObtainPairView(TokenObtainPairView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth_login'
     serializer_class = CustomTokenObtainPairSerializer
 
     @extend_schema(
@@ -310,6 +313,8 @@ class UserViewSet(AbstractModelViewSet):
 class CompanyProfileViewSet(AbstractModelViewSet):
     serializer_class = CompanyProfileSerializer
     queryset = CompanyProfile.objects.all()
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth_register'
 
     def get_permissions(self):
         if self.action == 'create':
@@ -398,6 +403,8 @@ class CompanyProfileViewSet(AbstractModelViewSet):
 class IndividualOwnerProfileViewSet(AbstractModelViewSet):
     serializer_class = IndividualOwnerProfileSerializer
     queryset = IndividualOwnerProfile.objects.all()
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth_register'
 
     def get_permissions(self):
         if self.action == 'create':
@@ -418,6 +425,7 @@ class HotelProfileViewSet(AbstractModelViewSet):
     queryset = HotelProfile.objects.all()
     filter_backends = [DjangoFilterBackend]
     filterset_class = HotelFilter
+    throttle_scope = None
 
     def get_permissions(self):
         if self.action == 'create':
@@ -472,7 +480,11 @@ class HotelProfileViewSet(AbstractModelViewSet):
 
     @check__room_availability_schema
     @action(
-        detail=True, methods=["get"], serializer_class=HotelRoomAvailabilitySerializer
+        detail=True, 
+        methods=["get"], 
+        serializer_class=HotelRoomAvailabilitySerializer,
+        throttle_classes=[ScopedRateThrottle],
+        throttle_scope='availability_check'
     )
     def check_availability(self, request, pk=None):
         """
@@ -557,6 +569,8 @@ class HotelProfileViewSet(AbstractModelViewSet):
 @extend_schema(tags=["Identity & Auth"])
 class PasswordResetView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'password_reset'
     serializer_class = PasswordResetSerializer
 
     @extend_schema(
@@ -575,6 +589,8 @@ class PasswordResetView(APIView):
 @extend_schema(tags=["Identity & Auth"])
 class PasswordResetConfirmView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth_login'
     serializer_class = PasswordResetConfirmSerializer
 
     @extend_schema(
@@ -593,6 +609,8 @@ class PasswordResetConfirmView(APIView):
 @extend_schema(tags=["Identity & Auth"])
 class VerifyEmailView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'verify_email'
     serializer_class = VerifyEmailSerializer
 
     @extend_schema(
@@ -611,6 +629,8 @@ class VerifyEmailView(APIView):
 @extend_schema(tags=["Identity & Auth"])
 class VerifyEmailChangeView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'verify_email'
     serializer_class = VerifyEmailChangeSerializer
 
     @extend_schema(

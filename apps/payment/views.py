@@ -15,8 +15,10 @@ from apps.account.enums import RoleCode
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample
 from .models import PaymentTransaction
 from .services import ChapaPaymentService
-from rest_framework import viewsets
-from django.db.models import Q
+from rest_framework import viewsets, filters
+from rest_framework.throttling import ScopedRateThrottle
+from django_filters.rest_framework import DjangoFilterBackend
+from django.db.models import Q, Sum
 from apps.account.permissions import IsCompanyOwner
 from .serializers import (
     PaymentInitializeSerializer, 
@@ -33,6 +35,8 @@ from .services import ChapaPaymentService
 @extend_schema(tags=["Payments"])
 class InitiatePaymentView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'payment_init'
     
     @extend_schema(
         summary="Initiate payment for a booking",
