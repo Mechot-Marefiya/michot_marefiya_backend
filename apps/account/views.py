@@ -191,6 +191,8 @@ class MeView(APIView):
 @extend_schema(tags=["Identity & Auth"])
 class UserViewSet(AbstractModelViewSet):
     queryset = User.objects.all()
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'auth_register'
 
     def get_serializer_class(self):
         if self.action == 'create':
