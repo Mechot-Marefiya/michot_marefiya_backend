@@ -377,6 +377,8 @@ class GuestHouseRoomViewSet(AbstractModelViewSet):
 class GuestHouseProfileViewSet(AbstractModelViewSet):
     serializer_class = GuestHouseProfileSerializer
     queryset = GuestHouseProfile.objects.all()
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    search_fields = ['title', 'description', 'address__city', 'address__sub_city']
 
     def get_permissions(self):
         """
@@ -1219,8 +1221,9 @@ class CarAvailabilityByCarAndDateView(APIView):
 class PropertyListingViewSet(AbstractModelViewSet):
     serializer_class = PropertyListingSerializer
     queryset = PropertyListing.objects.all()
-    filter_backends = [DjangoFilterBackend]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = PropertyFilter
+    search_fields = ['title', 'name', 'description', 'address']
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -1773,8 +1776,9 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
     ).prefetch_related(
         "images", "amenities", "availability" 
     )
-    filter_backends = [DjangoFilterBackend]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = EventSpaceFilter # Use the dedicated filter class
+    search_fields = ['title', 'description', 'address__city', 'address__sub_city']
 
     # --- Permission Logic ---
     def get_permissions(self):

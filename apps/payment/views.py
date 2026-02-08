@@ -15,7 +15,8 @@ from apps.account.enums import RoleCode
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample
 from .models import PaymentTransaction
 from .services import ChapaPaymentService
-from rest_framework import viewsets
+from rest_framework import viewsets, filters
+from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Sum
 from apps.account.permissions import IsCompanyOwner
 from .serializers import (
@@ -626,9 +627,17 @@ def test_email_format(request):
 class OwnerPaymentViewSet(viewsets.ReadOnlyModelViewSet):
     """
     API for Owners to view their financial ledger.
+    Supports search by tx_ref, booking_reference, customer_name.
+    Supports filtering by status and payout_status.
     """
     serializer_class = OwnerPaymentTransactionSerializer
     permission_classes = [IsCompanyOwner]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = {
+        'status': ['exact'],
+        'payout_status': ['exact'],
+    }
+    search_fields = ['tx_ref', 'booking_reference', 'customer_name']
 
     def get_queryset(self):
         user = self.request.user
@@ -649,11 +658,10 @@ class OwnerPaymentViewSet(viewsets.ReadOnlyModelViewSet):
 
     @extend_schema(summary="Get financial summary (Total Revenue)")
     def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
+        filtered_queryset = self.filter_queryset(self.get_queryset())
         
-        # Calculate aggregates
-        success_qs = queryset.filter(status=PaymentTransaction.PaymentStatus.SUCCESS)
-        pending_payout_qs = queryset.filter(payout_status=PaymentTransaction.PayoutStatus.PENDING)
+        success_qs = filtered_queryset.filter(status=PaymentTransaction.PaymentStatus.SUCCESS)
+        pending_payout_qs = filtered_queryset.filter(payout_status=PaymentTransaction.PayoutStatus.PENDING)
         
         # Using aggregate for performance instead of python sum
         revenue_metrics = success_qs.aggregate(
@@ -674,7 +682,7 @@ class OwnerPaymentViewSet(viewsets.ReadOnlyModelViewSet):
         
         count = success_qs.count()
 
-        page = self.paginate_queryset(queryset)
+        page = self.paginate_queryset(filtered_queryset)
         summary_data = {
             "total_successful_transactions": count,
             "total_revenue_etb": total_revenue,
@@ -689,7 +697,7 @@ class OwnerPaymentViewSet(viewsets.ReadOnlyModelViewSet):
             response.data['summary'] = summary_data
             return response
 
-        serializer = self.get_serializer(queryset, many=True)
+        serializer = self.get_serializer(filtered_queryset, many=True)
         return Response({
             "results": serializer.data,
             "summary": summary_data
