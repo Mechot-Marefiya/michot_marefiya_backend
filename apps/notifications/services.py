@@ -63,8 +63,10 @@ class NotificationService:
                     notification.email_sent_at = timezone.now()
                     notification.save(update_fields=['delivered_email', 'email_sent_at'])
 
-            except Exception:
-                pass
+            except Exception as e:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"Failed to send email for notification {notification.id} to user {user.email}: {str(e)}", exc_info=True)
         
         return notification
 
