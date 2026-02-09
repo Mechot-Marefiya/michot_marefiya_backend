@@ -10,6 +10,8 @@ from django.db import transaction as db_transaction
 
 from apps.payment.models import PaymentTransaction
 from apps.listing.services import BookingService
+from apps.notifications.services import NotificationService
+from apps.notifications.models import Notification
 
 logger = logging.getLogger(__name__)
 
@@ -382,8 +384,8 @@ class ChapaPaymentService:
                 if payment_tx.status == PaymentTransaction.PaymentStatus.SUCCESS:
                     if hasattr(booking, 'status'):
                         if booking_model_name == 'booking':
-                            from apps.listing.models import Booking as BookingClass
-                            if booking.status == BookingClass.BookingStatus.PENDING:
+                            from apps.listing.models import Booking
+                            if booking.status == Booking.BookingStatus.PENDING:
                                 logger.info(f"Transaction {tx_ref} is SUCCESS but Booking {booking.id} is PENDING. Recovering...")
                                 service.confirm_booking(booking)
                                 return {"success": True, "message": "Booking confirmed via recovery path"}
@@ -409,6 +411,19 @@ class ChapaPaymentService:
                     else:
                         payment_tx.metadata = verification
                     payment_tx.save()
+                    
+                    NotificationService.create_notification(
+                        user=booking.user,
+                        notification_type=Notification.NotificationType.PAYMENT_FAILED,
+                        title="Payment Failed",
+                        message=f"Payment for booking {getattr(booking, 'booking_reference', booking.id)} failed verification.",
+                        metadata={
+                            'booking_reference': getattr(booking, 'booking_reference', str(booking.id)),
+                            'transaction_reference': tx_ref,
+                            'reason': 'Verification failed'
+                        },
+                        priority=Notification.Priority.HIGH
+                    )
                     
                     # Phase 4: Immediate release on definitive failure
                     try:
@@ -436,6 +451,19 @@ class ChapaPaymentService:
                         payment_tx.metadata = error_info
                     payment_tx.save()
                     
+                    NotificationService.create_notification(
+                        user=booking.user,
+                        notification_type=Notification.NotificationType.PAYMENT_FAILED,
+                        title="Payment Failed",
+                        message=f"Payment for booking {getattr(booking, 'booking_reference', booking.id)} failed due to amount mismatch.",
+                        metadata={
+                            'booking_reference': getattr(booking, 'booking_reference', str(booking.id)),
+                            'transaction_reference': tx_ref,
+                            'reason': 'Amount/Currency mismatch'
+                        },
+                        priority=Notification.Priority.HIGH
+                    )
+                    
                     try:
                         if hasattr(service, 'cancel_booking'):
                             service.cancel_booking(booking)
@@ -460,6 +488,20 @@ class ChapaPaymentService:
 
                 # Confirm Booking (Now inside the same transaction)
                 service.confirm_booking(booking)
+
+                NotificationService.create_notification(
+                    user=booking.user,
+                    notification_type=Notification.NotificationType.PAYMENT_SUCCESS,
+                    title="Payment Successful",
+                    message=f"Payment for booking {getattr(booking, 'booking_reference', booking.id)} was successful.",
+                    metadata={
+                        'booking_reference': getattr(booking, 'booking_reference', str(booking.id)),
+                        'amount': str(payment_tx.amount),
+                        'currency': payment_tx.currency,
+                        'transaction_reference': tx_ref
+                    },
+                    priority=Notification.Priority.HIGH
+                )
 
 
             return {"success": True, "message": "Payment verified and booking confirmed"}

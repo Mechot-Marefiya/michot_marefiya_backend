@@ -39,6 +39,8 @@ from apps.listing.models import TermsAndConditions
 from apps.listing.models import RoomListing, RoomInventory
 from apps.core.utils import convert_currency
 from apps.core.services.email_service import BookingEmailService
+from apps.notifications.services import NotificationService
+from apps.notifications.models import Notification
 
 
 
@@ -1325,6 +1327,20 @@ class BookingService:
             )
         booking.status = booking.BookingStatus.CANCELLED
         booking.save()
+
+        NotificationService.create_notification(
+            user=booking.user,
+            notification_type=Notification.NotificationType.BOOKING_CANCELLED,
+            title="Booking Cancelled",
+            message=f"Your booking {booking.booking_reference} at {booking.items.first().room.hotel.company.name} has been cancelled.",
+            metadata={
+                'booking_reference': booking.booking_reference,
+                'booking_id': str(booking.id),
+                'hotel_name': booking.items.first().room.hotel.company.name
+            },
+            priority=Notification.Priority.HIGH
+        )
+
         return booking
     #partial cancel
     @staticmethod
@@ -1406,6 +1422,37 @@ class BookingService:
         logger.info(f"Booking {booking.id} status updated to CONFIRMED.")
         
         BookingEmailService.send_booking_confirmation(booking)
+        
+        NotificationService.create_notification(
+            user=booking.user,
+            notification_type=Notification.NotificationType.BOOKING_CONFIRMED,
+            title="Booking Confirmed",
+            message=f"Your booking {booking.booking_reference} at {booking.items.first().room.hotel.company.name} is confirmed.",
+            metadata={
+                'booking_reference': booking.booking_reference,
+                'booking_id': str(booking.id),
+                'hotel_name': booking.items.first().room.hotel.company.name
+            },
+            priority=Notification.Priority.HIGH
+        )
+
+        # Notify Vendor (Company Owner)
+        try:
+            vendor_user = booking.items.first().room.hotel.company.user
+            if vendor_user:
+                NotificationService.create_notification(
+                    user=vendor_user,
+                    notification_type=Notification.NotificationType.NEW_BOOKING_RECEIVED,
+                    title="New Booking Received",
+                    message=f"New booking ({booking.booking_reference}) received for {booking.items.first().room.hotel.company.name}.",
+                    metadata={
+                        'booking_reference': booking.booking_reference,
+                        'booking_id': str(booking.id),
+                    },
+                    priority=Notification.Priority.HIGH
+                )
+        except Exception:
+            logger.warning(f"Could not send vendor notification for Booking {booking.id}")
         
         return booking
     
@@ -1602,6 +1649,20 @@ class EventSpaceBookingService:
         
         booking.status = booking.BookingStatus.CANCELLED
         booking.save()
+
+        NotificationService.create_notification(
+            user=booking.user,
+            notification_type=Notification.NotificationType.BOOKING_CANCELLED,
+            title="Event Space Booking Cancelled",
+            message=f"Your booking {booking.booking_reference} for {booking.items.first().event_space.title} has been cancelled.",
+            metadata={
+                'booking_reference': booking.booking_reference,
+                'booking_id': str(booking.id),
+                'space_title': booking.items.first().event_space.title
+            },
+            priority=Notification.Priority.HIGH
+        )
+
         return booking
 
     @staticmethod
@@ -1672,6 +1733,37 @@ class EventSpaceBookingService:
         booking.save()
 
         BookingEmailService.send_booking_confirmation(booking)
+
+        NotificationService.create_notification(
+            user=booking.user,
+            notification_type=Notification.NotificationType.BOOKING_CONFIRMED,
+            title="Event Space Booking Confirmed",
+            message=f"Your booking {booking.booking_reference} for {booking.items.first().event_space.title} is confirmed.",
+            metadata={
+                'booking_reference': booking.booking_reference,
+                'booking_id': str(booking.id),
+                'space_title': booking.items.first().event_space.title
+            },
+            priority=Notification.Priority.HIGH
+        )
+
+        # Notify Vendor
+        try:
+            vendor_user = booking.items.first().event_space.hotel.company.user
+            if vendor_user:
+                NotificationService.create_notification(
+                    user=vendor_user,
+                    notification_type=Notification.NotificationType.NEW_BOOKING_RECEIVED,
+                    title="New Event Booking Received",
+                    message=f"New booking ({booking.booking_reference}) received for {booking.items.first().event_space.title}.",
+                    metadata={
+                        'booking_reference': booking.booking_reference,
+                        'booking_id': str(booking.id),
+                    },
+                    priority=Notification.Priority.HIGH
+                )
+        except Exception:
+            logger.warning(f"Could not send vendor notification for EventSpaceBooking {booking.id}")
 
         return booking
     
@@ -2482,6 +2574,44 @@ class GuestHouseBookingService:
         
         BookingEmailService.send_booking_confirmation(booking)
         
+        try:
+             renter = getattr(booking, 'renter', None) or getattr(booking, 'user', None)
+             if renter:
+                NotificationService.create_notification(
+                    user=renter,
+                    notification_type=Notification.NotificationType.BOOKING_CONFIRMED,
+                    title="Guest House Booking Confirmed",
+                    message=f"Your booking {booking.booking_reference} is confirmed.",
+                    metadata={'booking_reference': booking.booking_reference, 'booking_id': str(booking.id)},
+                    priority=Notification.Priority.HIGH
+                )
+        except Exception:
+             pass
+
+        # Notify Vendor
+        try:
+            gh_profile = booking.items.first().room.guest_house
+            vendor_user = None
+            if gh_profile.company:
+                vendor_user = gh_profile.company.user
+            elif gh_profile.individual_owner:
+                vendor_user = gh_profile.individual_owner.staff_members.first()
+            
+            if vendor_user:
+                NotificationService.create_notification(
+                    user=vendor_user,
+                    notification_type=Notification.NotificationType.NEW_BOOKING_RECEIVED,
+                    title="New Guest House Booking",
+                    message=f"New booking ({booking.booking_reference}) received for {gh_profile.title}.",
+                    metadata={
+                        'booking_reference': booking.booking_reference,
+                        'booking_id': str(booking.id),
+                    },
+                    priority=Notification.Priority.HIGH
+                )
+        except Exception:
+            logger.warning(f"Could not send vendor notification for GuestHouseBooking {booking.id}")
+
         return booking
     
     @staticmethod
@@ -2674,6 +2804,37 @@ class CarRentalService:
         
         BookingEmailService.send_booking_confirmation(rental)
         
+        try:
+             renter = getattr(rental, 'renter', None) or getattr(rental, 'user', None)
+             if renter:
+                NotificationService.create_notification(
+                    user=renter,
+                    notification_type=Notification.NotificationType.BOOKING_CONFIRMED,
+                    title="Car Rental Confirmed",
+                    message=f"Your rental {rental.booking_reference} is confirmed.",
+                    metadata={'booking_reference': rental.booking_reference, 'rental_id': str(rental.id)},
+                    priority=Notification.Priority.HIGH
+                )
+        except Exception:
+             pass
+
+        try:
+            company = rental.rental_items.first().car_listing.company
+            if company and company.user:
+                NotificationService.create_notification(
+                    user=company.user,
+                    notification_type=Notification.NotificationType.NEW_BOOKING_RECEIVED,
+                    title="New Car Rental",
+                    message=f"New rental ({rental.booking_reference}) received.",
+                    metadata={
+                        'booking_reference': rental.booking_reference,
+                        'rental_id': str(rental.id),
+                    },
+                    priority=Notification.Priority.HIGH
+                )
+        except Exception:
+            logger.warning(f"Could not send vendor notification for CarRental {rental.id}")
+
         return rental
 
 
