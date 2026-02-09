@@ -28,6 +28,8 @@ from apps.account.models import (
     IndividualOwnerProfile,
     User,
 )
+from apps.notifications.services import NotificationService
+from apps.notifications.models import Notification
 from django.contrib.contenttypes.models import ContentType
 from apps.favorites.services import get_favorite_object_ids
 from apps.account.models import Role
@@ -406,6 +408,19 @@ class CompanyProfileViewSet(AbstractModelViewSet):
         serializer = CompanyApplicationSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         profile = serializer.save()
+        
+        NotificationService.notify_admins(
+            notification_type=Notification.NotificationType.NEW_COMPANY_REGISTRATION,
+            title="New Company Registration",
+            message=f"New company '{profile.name}' registered by {profile.user.email}.",
+            metadata={
+                'company_name': profile.name,
+                'company_id': str(profile.id),
+                'owner_email': profile.user.email
+            },
+            priority=Notification.Priority.MEDIUM
+        )
+            
         return Response(CompanyProfileResponseSerializer(profile).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="approve", permission_classes=[IsAdmin])
@@ -428,6 +443,18 @@ class CompanyProfileViewSet(AbstractModelViewSet):
         profile.user.role = role
         profile.user.save()
 
+        NotificationService.create_notification(
+            user=profile.user,
+            notification_type=Notification.NotificationType.COMPANY_APPROVED,
+            title="Company Profile Approved",
+            message=f"Your company profile '{profile.name}' has been approved. You can now start adding listings.",
+            metadata={
+                'company_name': profile.name,
+                'approved_at': str(profile.approved_at)
+            },
+            priority=Notification.Priority.HIGH
+        )
+
         return Response(CompanyProfileResponseSerializer(profile).data)
 
     @action(detail=True, methods=["post"], url_path="reject", permission_classes=[IsAdmin])
@@ -442,6 +469,18 @@ class CompanyProfileViewSet(AbstractModelViewSet):
         profile.approved_by = request.user
         profile.approved_at = timezone.now()
         profile.save()
+
+        NotificationService.create_notification(
+            user=profile.user,
+            notification_type=Notification.NotificationType.COMPANY_REJECTED,
+            title="Company Profile Rejected",
+            message=f"Your company profile '{profile.name}' has been rejected. Reason: {reason}",
+            metadata={
+                'company_name': profile.name,
+                'rejection_reason': reason
+            },
+            priority=Notification.Priority.HIGH
+        )
 
         return Response(CompanyProfileResponseSerializer(profile).data)
 

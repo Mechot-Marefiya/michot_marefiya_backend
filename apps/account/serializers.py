@@ -14,6 +14,8 @@ from apps.account.models import (
     ListingImage,
     Role,
 )
+from apps.notifications.services import NotificationService
+from apps.notifications.models import Notification
 from apps.listing.services import ListingService
 from apps.core.services.email_service import EmailService
 from django.utils import timezone
@@ -482,6 +484,18 @@ class ChangePasswordSerializer(serializers.Serializer):
         user = self.context.get("user")
         user.set_password(self.validated_data["new_password"])
         user.save()
+        
+        try:
+            NotificationService.create_notification(
+                user=user,
+                notification_type=Notification.NotificationType.PASSWORD_CHANGED,
+                title="Password Changed",
+                message="Your password has been successfully changed.",
+                priority=Notification.Priority.HIGH
+            )
+        except Exception:
+            pass
+
         return user
         return user
 
@@ -538,6 +552,18 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
     def save(self):
         self.user.set_password(self.validated_data['new_password'])
         self.user.save()
+        
+        try:
+            NotificationService.create_notification(
+                user=self.user,
+                notification_type=Notification.NotificationType.PASSWORD_CHANGED,
+                title="Password Reset Successful",
+                message="Your password has been successfully reset.",
+                priority=Notification.Priority.HIGH
+            )
+        except Exception:
+            pass
+
         return self.user
 class CompanyProfileResponseSerializer(serializers.ModelSerializer):
     address = AddressSerializer()
@@ -585,6 +611,18 @@ class VerifyEmailSerializer(serializers.Serializer):
     def save(self):
         self.user.is_active = True
         self.user.save()
+        
+        try:
+            NotificationService.create_notification(
+                user=self.user,
+                notification_type=Notification.NotificationType.EMAIL_VERIFIED,
+                title="Email Verified",
+                message="Your email address has been successfully verified.",
+                priority=Notification.Priority.MEDIUM
+            )
+        except Exception:
+            pass
+            
         return self.user
 
 
@@ -617,6 +655,18 @@ class VerifyEmailChangeSerializer(serializers.Serializer):
     def save(self):
         self.user.email = self.new_email
         self.user.save()
+        
+        try:
+            NotificationService.create_notification(
+                user=self.user,
+                notification_type=Notification.NotificationType.EMAIL_VERIFIED,
+                title="Email Address Changed",
+                message=f"Your email address has been updated to {self.new_email}.",
+                priority=Notification.Priority.MEDIUM
+            )
+        except Exception:
+            pass
+
         return self.user
 
 

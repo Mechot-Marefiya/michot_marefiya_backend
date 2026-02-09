@@ -257,4 +257,24 @@ Support: support@michotmarefia.com
         pass
 
 
+
+    @staticmethod
+    def send_notification_email(user, subject, body, html_body=None):
+        try:
+            email = EmailMultiAlternatives(
+                subject=subject,
+                body=body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[user.email]
+            )
+            if html_body:
+                email.attach_alternative(html_body, "text/html")
+            
+            email.send(fail_silently=False)
+            logger.info(f"Notification email sent to {user.email}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send notification email to {user.email}: {str(e)}", exc_info=True)
+            return False
+
 BookingEmailService = EmailService
