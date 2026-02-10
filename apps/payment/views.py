@@ -488,9 +488,17 @@ def cancel_payment(request, tx_ref):
 class OwnerPaymentViewSet(viewsets.ReadOnlyModelViewSet):
     """
     API for Owners to view their financial ledger.
+    Supports search by tx_ref, booking_reference, customer_name.
+    Supports filtering by status and payout_status.
     """
     serializer_class = OwnerPaymentTransactionSerializer
     permission_classes = [IsCompanyOwner]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    filterset_fields = {
+        'status': ['exact'],
+        'payout_status': ['exact'],
+    }
+    search_fields = ['tx_ref', 'booking_reference', 'customer_name']
 
     def get_queryset(self):
         user = self.request.user
@@ -511,28 +519,47 @@ class OwnerPaymentViewSet(viewsets.ReadOnlyModelViewSet):
 
     @extend_schema(summary="Get financial summary (Total Revenue)")
     def list(self, request, *args, **kwargs):
-        queryset = self.get_queryset()
+        filtered_queryset = self.filter_queryset(self.get_queryset())
         
-        success_qs = queryset.filter(status=PaymentTransaction.PaymentStatus.SUCCESS)
+        success_qs = filtered_queryset.filter(status=PaymentTransaction.PaymentStatus.SUCCESS)
+        pending_payout_qs = filtered_queryset.filter(payout_status=PaymentTransaction.PayoutStatus.PENDING)
         
-        total_revenue = sum(tx.amount for tx in success_qs) # simple sum for now, maybe group by currency
+        # Using aggregate for performance instead of python sum
+        revenue_metrics = success_qs.aggregate(
+            total_revenue=Sum('amount'),
+            total_payout=Sum('vendor_payout_amount'),
+            total_commission=Sum('commission_amount')
+        )
+        
+        pending_metrics = pending_payout_qs.aggregate(
+            total_pending=Sum('vendor_payout_amount')
+        )
+
+        # Default to 0 if None (no records)
+        total_revenue = revenue_metrics['total_revenue'] or Decimal('0.00')
+        total_payout = revenue_metrics['total_payout'] or Decimal('0.00')
+        total_commission = revenue_metrics['total_commission'] or Decimal('0.00')
+        total_pending = pending_metrics['total_pending'] or Decimal('0.00')
+        
         count = success_qs.count()
 
-        page = self.paginate_queryset(queryset)
+        page = self.paginate_queryset(filtered_queryset)
+        summary_data = {
+            "total_successful_transactions": count,
+            "total_revenue_etb": total_revenue,
+            "total_payout_etb": total_payout,
+            "total_commission_etb": total_commission,
+            "pending_payout_etb": total_pending
+        }
+
         if page is not None:
             serializer = self.get_serializer(page, many=True)
             response = self.get_paginated_response(serializer.data)
-            response.data['summary'] = {
-                "total_successful_transactions": count,
-                "total_revenue_etb": total_revenue # taking ETB is primary for now
-            }
+            response.data['summary'] = summary_data
             return response
 
-        serializer = self.get_serializer(queryset, many=True)
+        serializer = self.get_serializer(filtered_queryset, many=True)
         return Response({
             "results": serializer.data,
-            "summary": {
-                "total_successful_transactions": count,
-                "total_revenue_etb": total_revenue
-            }
+            "summary": summary_data
         })

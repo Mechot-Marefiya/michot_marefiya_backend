@@ -33,9 +33,11 @@ class PropertyFilter(filters.FilterSet):
 
 
 class BookingFilter(filters.FilterSet):
+    check_in_date = filters.DateFromToRangeFilter()
+    
     class Meta:
         model = Booking
-        fields = ["status"]
+        fields = ["status", "check_in_date"]
 class EventSpaceBookingFilter(filters.FilterSet):
     """
     Dedicated FilterSet for EventSpaceBooking objects.

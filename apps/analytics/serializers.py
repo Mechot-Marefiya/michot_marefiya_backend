@@ -13,3 +13,13 @@ class OverviewSerializer(serializers.Serializer):
 class TimeseriesItemSerializer(serializers.Serializer):
     period = serializers.CharField()
     revenue = serializers.FloatField()
+
+
+class FrontDeskStatsSerializer(serializers.Serializer):
+    arrivals_today = serializers.IntegerField()
+    departures_today = serializers.IntegerField()
+    in_house_count = serializers.IntegerField()
+    availability_percent = serializers.IntegerField()
+    total_rooms = serializers.IntegerField()
+    occupied_rooms = serializers.IntegerField()
+

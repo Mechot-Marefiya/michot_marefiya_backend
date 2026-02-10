@@ -612,8 +612,8 @@ class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
 class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, serializers.ModelSerializer):
     items = GuestHouseBookingItemSerializer(many=True, write_only=True)
     
-    terms_accepted = serializers.BooleanField(required=True, write_only=True)
-    terms_version = serializers.CharField(required=True, write_only=True)
+    terms_accepted = serializers.BooleanField(required=False, write_only=True)
+    terms_version = serializers.CharField(required=False, write_only=True)
     
     guest_first_name = serializers.CharField(max_length=100, required=False, help_text="First name of the guest (Required if not logged in)")
     guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the guest (Required if not logged in)")
@@ -685,12 +685,7 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
     terms_content_snapshot = serializers.CharField(read_only=True, help_text="Full text of the T&C at the time of booking")
     is_legacy = serializers.BooleanField(read_only=True, help_text="Indicates if this booking was created before the T&C/Guest details update")
         
-    def validate_terms_accepted(self, value):
-        if not value:
-            raise serializers.ValidationError(
-                "You must accept the terms and conditions to proceed with booking."
-            )
-        return value
+
         
     def validate(self, data):
         start = data["start_date"]
@@ -711,7 +706,6 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
         if (not user or not user.is_authenticated) and not guest_email:
              raise serializers.ValidationError("Either log in or provide guest email.")
 
-        # Build space_infos list expected by availability service
         room_infos = [
             {"guesthouse_room": item["room"], "quantity": item["units_booked"]}
             for item in items
@@ -722,24 +716,40 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
             room_infos, start, end
         )
         
-        terms_version = data.get("terms_version")
-        if terms_version and items:
-            from django.contrib.contenttypes.models import ContentType
-            first_room = items[0]["room"]
-            first_guesthouse_profile = first_room.guest_house
+        is_privileged = False
+        if user and user.is_authenticated:
+            if user.is_superuser:
+                is_privileged = True
+            elif hasattr(user, 'role') and user.role:
+                code = user.role.code
+                if code in ['admin', 'front_desk', 'company']: 
+                    is_privileged = True
+        
+        if not is_privileged:
+            if not data.get("terms_accepted"):
+                raise serializers.ValidationError({"terms_accepted": "You must accept the terms and conditions."})
             
-            ct = ContentType.objects.get_for_model(first_guesthouse_profile)
-            tc_exists = TermsAndConditions.objects.filter(
-                content_type=ct,
-                object_id=first_guesthouse_profile.id,
-                version=terms_version,
-                is_active=True
-            ).exists()
-            
-            if not tc_exists:
-                raise serializers.ValidationError(
-                    {"terms_version": f"Invalid or inactive T&C version: {terms_version}. Please refresh and accept the latest terms."}
-                )
+            terms_version = data.get("terms_version")
+            if not terms_version:
+                 raise serializers.ValidationError({"terms_version": "Terms version is required."})
+
+            if terms_version and items:
+                from django.contrib.contenttypes.models import ContentType
+                first_room = items[0]["room"]
+                first_guesthouse_profile = first_room.guest_house
+                
+                ct = ContentType.objects.get_for_model(first_guesthouse_profile)
+                tc_exists = TermsAndConditions.objects.filter(
+                    content_type=ct,
+                    object_id=first_guesthouse_profile.id,
+                    version=terms_version,
+                    is_active=True
+                ).exists()
+                
+                if not tc_exists:
+                    raise serializers.ValidationError(
+                        {"terms_version": f"Invalid or inactive T&C version: {terms_version}. Please refresh and accept the latest terms."}
+                    )
 
         return data
 
@@ -1712,12 +1722,12 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
     
     # T&C fields (write_only, required for booking creation)
     terms_accepted = serializers.BooleanField(
-        required=True, 
+        required=False, 
         write_only=True,
         help_text="Must be set to true to indicate agreement with the Terms and Conditions."
     )
     terms_version = serializers.CharField(
-        required=True, 
+        required=False, 
         write_only=True,
         help_text="The version of the T&C document that was accepted (e.g., '1.0')."
     )
@@ -1743,12 +1753,7 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
                   "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency"]
         read_only_fields = ["status", "currency"]
         
-    def validate_terms_accepted(self, value):
-        if not value:
-            raise serializers.ValidationError(
-                "You must accept the terms and conditions to proceed with booking."
-            )
-        return value
+
         
     def validate(self, data):
         check_in = data.get("check_in_date")
@@ -1771,25 +1776,42 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
         if (not user or not user.is_authenticated) and not guest_email:
              raise serializers.ValidationError("Either log in or provide guest email.")
         
-        terms_version = data.get("terms_version")
-        if terms_version and items:
-            from django.contrib.contenttypes.models import ContentType
-            first_room = items[0]["room"]
-            hotel = first_room.hotel
+        is_privileged = False
+        if user and user.is_authenticated:
+            if user.is_superuser:
+                is_privileged = True
+            elif hasattr(user, 'role') and user.role:
+                code = user.role.code
+                if code in ['admin', 'front_desk', 'company']: 
+                    is_privileged = True
+
+        if not is_privileged:
+            terms_accepted = data.get("terms_accepted")
+            if not terms_accepted:
+                 raise serializers.ValidationError({"terms_accepted": "You must accept the terms and conditions."})
             
-            if hotel:
-                ct = ContentType.objects.get_for_model(hotel)
-                tc_exists = TermsAndConditions.objects.filter(
-                    content_type=ct,
-                    object_id=hotel.id,
-                    version=terms_version,
-                    is_active=True
-                ).exists()
+            terms_version = data.get("terms_version")
+            if not terms_version:
+                 raise serializers.ValidationError({"terms_version": "Terms version is required."})
+
+            if terms_version and items:
+                from django.contrib.contenttypes.models import ContentType
+                first_room = items[0]["room"]
+                hotel = first_room.hotel
                 
-                if not tc_exists:
-                    raise serializers.ValidationError(
-                        {"terms_version": f"Invalid or inactive T&C version: {terms_version}. Please refresh and accept the latest terms."}
-                    )
+                if hotel:
+                    ct = ContentType.objects.get_for_model(hotel)
+                    tc_exists = TermsAndConditions.objects.filter(
+                        content_type=ct,
+                        object_id=hotel.id,
+                        version=terms_version,
+                        is_active=True
+                    ).exists()
+                    
+                    if not tc_exists:
+                        raise serializers.ValidationError(
+                            {"terms_version": f"Invalid or inactive T&C version: {terms_version}. Please refresh and accept the latest terms."}
+                        )
         
         return data
 

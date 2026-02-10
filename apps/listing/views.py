@@ -316,6 +316,72 @@ class RoomListingViewSet(AbstractModelViewSet):
             return self.get_paginated_response(serialized)
         return Response(serialized)
 
+    @action(detail=False, methods=['get'], url_path='availability-matrix')
+    def availability_matrix(self, request):
+        workspace_id = request.query_params.get("workspace")
+        start_date_str = request.query_params.get("start_date")
+        end_date_str = request.query_params.get("end_date")
+
+        if not workspace_id or not start_date_str or not end_date_str:
+             return Response({"detail": "workspace, start_date, end_date required"}, status=400)
+             
+        try:
+             start_date = date.fromisoformat(start_date_str)
+             end_date = date.fromisoformat(end_date_str)
+        except:
+             return Response({"detail": "Invalid date format"}, status=400)
+             
+        room_qs = RoomListing.objects.filter(
+            Q(hotel__id=workspace_id) | Q(hotel__company__id=workspace_id)
+        ).select_related('hotel')
+        
+        if not room_qs.exists():
+             return Response([])
+
+        hotel_ids = room_qs.values_list('hotel_id', flat=True).distinct()
+        
+        full_matrix = {}
+        for h_id in hotel_ids:
+             matrix = StayAvailabilityService.get_availability_matrix(h_id, start_date, end_date)
+             full_matrix.update(matrix)
+             
+        date_cursor = start_date
+        dates = []
+        while date_cursor <= end_date:
+            dates.append(date_cursor)
+            date_cursor += timedelta(days=1)
+
+        results = []
+        for room in room_qs:
+            r_id = str(room.id)
+            avail_map = full_matrix.get(r_id, {})
+            
+            availability_list = []
+            for d in dates:
+                d_str = d.isoformat()
+                available_count = avail_map.get(d_str, room.total_units) 
+                
+                status_val = 'available'
+                if available_count == 0:
+                    status_val = 'full'
+                elif available_count < room.total_units:
+                    status_val = 'partial'
+                
+                availability_list.append({
+                    "date": d_str,
+                    "available": available_count,
+                    "status": status_val
+                })
+            
+            results.append({
+                "room_id": r_id,
+                "room_name": room.title,
+                "total_units": room.total_units,
+                "availability": availability_list
+            })
+            
+        return Response(results)
+
 
 
 @extend_schema(tags=["Guest House Rooms"])
@@ -373,11 +439,80 @@ class GuestHouseRoomViewSet(AbstractModelViewSet):
         serializer = GuestHouseRoomResponseSerializer(instance, context=self.get_serializer_context())
         return Response(serializer.data)
 
+    @action(detail=False, methods=['get'], url_path='availability-matrix')
+    def availability_matrix(self, request):
+        workspace_id = request.query_params.get("workspace")
+        start_date_str = request.query_params.get("start_date")
+        end_date_str = request.query_params.get("end_date")
+
+        if not workspace_id or not start_date_str or not end_date_str:
+             return Response({"detail": "workspace, start_date, end_date required"}, status=400)
+             
+        try:
+             start_date = date.fromisoformat(start_date_str)
+             end_date = date.fromisoformat(end_date_str)
+        except:
+             return Response({"detail": "Invalid date format"}, status=400)
+             
+        room_qs = GuestHouseRoom.objects.filter(
+            Q(guest_house__id=workspace_id) | 
+            Q(guest_house__company__id=workspace_id) | 
+            Q(guest_house__individual_owner__id=workspace_id)
+        )
+        
+        if not room_qs.exists():
+             return Response([])
+             
+        gh_ids = room_qs.values_list('guest_house_id', flat=True).distinct()
+        
+        full_matrix = {}
+        for gh_id in gh_ids:
+             matrix = GuestHouseAvailabilityService.get_availability_matrix(gh_id, start_date, end_date)
+             full_matrix.update(matrix)
+             
+        date_cursor = start_date
+        dates = []
+        while date_cursor <= end_date:
+            dates.append(date_cursor)
+            date_cursor += timedelta(days=1)
+
+        results = []
+        for room in room_qs:
+            r_id = str(room.id)
+            avail_map = full_matrix.get(r_id, {})
+            
+            availability_list = []
+            for d in dates:
+                d_str = d.isoformat()
+                available_count = avail_map.get(d_str, room.total_units)
+                
+                status_val = 'available'
+                if available_count == 0:
+                     status_val = 'full'
+                elif available_count < room.total_units:
+                     status_val = 'partial'
+                     
+                availability_list.append({
+                    "date": d_str,
+                    "available": available_count,
+                    "status": status_val
+                })
+            results.append({
+                "room_id": r_id,
+                "room_name": room.title,
+                "total_units": room.total_units,
+                "availability": availability_list
+            })
+            
+        return Response(results)
+
 
 @extend_schema(tags=["Accommodations"])
 class GuestHouseProfileViewSet(AbstractModelViewSet):
     serializer_class = GuestHouseProfileSerializer
     queryset = GuestHouseProfile.objects.all()
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
+    search_fields = ['title', 'description', 'address__city', 'address__sub_city']
     throttle_scope = None
 
     def get_permissions(self):
@@ -540,10 +675,24 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
     serializer_class = GuestHouseBookingSerializer
     queryset = GuestHouseBooking.objects.all()
     throttle_scope = None
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['status']
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter]
+    filterset_fields = {
+        'status': ['exact'],
+        'start_date': ['gte', 'lte'],
+        'end_date': ['gte', 'lte']
+    }
     ordering_fields = ['start_date', 'end_date', 'total_price', 'created_at']
     ordering = ['-created_at']
+    search_fields = [
+        'booking_reference',
+        'renter__email',
+        'renter__first_name',
+        'renter__last_name',
+        'guest_email',
+        'guest_first_name',
+        'guest_last_name',
+        'guest_phone'
+    ]
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -1251,8 +1400,9 @@ class CarAvailabilityByCarAndDateView(APIView):
 class PropertyListingViewSet(AbstractModelViewSet):
     serializer_class = PropertyListingSerializer
     queryset = PropertyListing.objects.all()
-    filter_backends = [DjangoFilterBackend]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = PropertyFilter
+    search_fields = ['title', 'name', 'description', 'address']
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -1308,8 +1458,18 @@ class BookingViewSet(AbstractModelViewSet):
     serializer_class = BookingSerializer
     queryset = Booking.objects.all()
     throttle_scope = None
-    filter_backends = [DjangoFilterBackend]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = BookingFilter
+    search_fields = [
+        'booking_reference',
+        'user__email',
+        'user__first_name',
+        'user__last_name',
+        'guest_email',
+        'guest_first_name',
+        'guest_last_name',
+        'guest_phone'
+    ]
 
     @extend_schema(
         summary="Create a new room booking (supports guest checkout)",
@@ -1810,8 +1970,9 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
     ).prefetch_related(
         "images", "amenities", "availability" 
     )
-    filter_backends = [DjangoFilterBackend]
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = EventSpaceFilter # Use the dedicated filter class
+    search_fields = ['title', 'description', 'address__city', 'address__sub_city']
 
     # --- Permission Logic ---
     def get_permissions(self):
@@ -2069,7 +2230,7 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
                     
                     hotel_bookings = queryset.filter(
                         items__event_space__hotel=hotel
-                    ).distinct()
+                    )
                     
                     return (user_bookings | hotel_bookings).distinct()
                 except HotelProfile.DoesNotExist:

@@ -13,6 +13,8 @@ from apps.listing.models import (
     CarRentalItem,
     GuestHouseBooking,
     EventSpaceBooking,
+    RoomListing,
+    GuestHouseRoom,
 )
 from apps.analytics.models import CompanyDailyMetrics, ListingDailyMetrics
 
@@ -605,3 +607,72 @@ def get_recent_activity_individual(owner_id: str, limit: int = 15) -> List[Dict]
     # Sort combined activities by timestamp desc and take top N
     activities.sort(key=lambda x: x["timestamp"], reverse=True)
     return activities[:limit]
+
+
+def compute_front_desk_stats(workspace_id: str, workspace_type: str) -> Dict:
+    today = date.today()
+    
+    booking_filter = Q()
+    total_units_filter = Q()
+    
+    is_hotel = False
+    
+    ws_type = str(workspace_type).lower()
+
+    if ws_type == 'company':
+        booking_filter = Q(items__room__hotel__company__id=workspace_id)
+        total_units_filter = Q(hotel__company__id=workspace_id)
+        is_hotel = True
+        
+    elif ws_type == 'hotel':
+         booking_filter = Q(items__room__hotel__id=workspace_id)
+         total_units_filter = Q(hotel__id=workspace_id)
+         is_hotel = True
+
+    elif ws_type == 'individual':
+        booking_filter = Q(items__room__guest_house__individual_owner__id=workspace_id)
+        total_units_filter = Q(guest_house__individual_owner__id=workspace_id)
+        is_hotel = False
+        
+    elif ws_type == 'guesthouse':
+        booking_filter = Q(items__room__guest_house__id=workspace_id)
+        total_units_filter = Q(guest_house__id=workspace_id)
+        is_hotel = False
+        
+    elif ws_type == 'front_desk': 
+        pass
+
+    if is_hotel:
+        qs = Booking.objects.filter(booking_filter, status__in=[
+            Booking.BookingStatus.CONFIRMED, 
+            Booking.BookingStatus.WALK_IN
+        ]).distinct()
+        total_rooms = RoomListing.objects.filter(total_units_filter).aggregate(total=Sum('total_units'))['total'] or 0
+    else:
+        qs = GuestHouseBooking.objects.filter(booking_filter, status__in=[
+            GuestHouseBooking.RentStatus.CONFIRMED,
+            GuestHouseBooking.RentStatus.WALK_IN
+        ]).distinct()
+        total_rooms = GuestHouseRoom.objects.filter(total_units_filter).aggregate(total=Sum('total_units'))['total'] or 0
+        
+    if is_hotel:
+        arrivals_today = qs.filter(check_in_date=today).count()
+        departures_today = qs.filter(check_out_date=today).count()
+        in_house_today = qs.filter(check_in_date__lte=today, check_out_date__gt=today).count()
+    else:
+        arrivals_today = qs.filter(start_date=today).count()
+        departures_today = qs.filter(end_date=today).count()
+        in_house_today = qs.filter(start_date__lte=today, end_date__gt=today).count()
+        
+    occupancy_rate = 0
+    if total_rooms > 0:
+        occupancy_rate = (in_house_today / total_rooms) * 100
+        
+    return {
+        "arrivals_today": arrivals_today,
+        "departures_today": departures_today,
+        "in_house_today": in_house_today,
+        "total_rooms": total_rooms,
+        "occupancy_rate": round(occupancy_rate, 1),
+        "available_units": max(0, total_rooms - in_house_today)
+    }
