@@ -1,6 +1,11 @@
 from django.db import transaction
 from django.utils import timezone
+from django.core.cache import cache
 from .models import Notification, NotificationPreference, NotificationTemplate
+
+def get_unread_count_cache_key(user_id):
+    return f"notifications:unread_count:{user_id}"
+
 
 class NotificationService:
     @staticmethod
@@ -40,6 +45,9 @@ class NotificationService:
             delivered_in_app=False
         )
         
+        cache.delete(get_unread_count_cache_key(user.id))
+
+        
         if template:
             try:
                 prefs, _ = NotificationPreference.objects.get_or_create(user=user)
@@ -78,20 +86,35 @@ class NotificationService:
                 notification.is_read = True
                 notification.read_at = timezone.now()
                 notification.save(update_fields=['is_read', 'read_at'])
+                
+                cache.delete(get_unread_count_cache_key(user.id))
             return True
         except Notification.DoesNotExist:
             return False
 
+
     @staticmethod
     def mark_all_as_read(user):
-        return Notification.objects.filter(user=user, is_read=False).update(
+        updated = Notification.objects.filter(user=user, is_read=False).update(
             is_read=True, 
             read_at=timezone.now()
         )
+        if updated > 0:
+            cache.delete(get_unread_count_cache_key(user.id))
+        return updated
+
 
     @staticmethod
     def get_unread_count(user):
-        return Notification.objects.filter(user=user, is_read=False).count()
+        cache_key = get_unread_count_cache_key(user.id)
+        count = cache.get(cache_key)
+        
+        if count is None:
+            count = Notification.objects.filter(user=user, is_read=False).count()
+            cache.set(cache_key, count, timeout=3600)
+            
+        return count
+
 
     @staticmethod
     def get_user_notifications(user, limit=50):
@@ -117,3 +140,35 @@ class NotificationService:
                 )
             except Exception:
                 pass
+        
+    @staticmethod
+    @transaction.atomic
+    def bulk_delete(user, notification_ids):
+        deleted_count, _ = Notification.objects.filter(
+            user=user, 
+            id__in=notification_ids
+        ).delete()
+        
+        if deleted_count > 0:
+            cache.delete(get_unread_count_cache_key(user.id))
+            
+        return deleted_count
+
+    @staticmethod
+    @transaction.atomic
+    def mark_read_batch(user, notification_ids):
+        updated_count = Notification.objects.filter(
+            user=user,
+            id__in=notification_ids,
+            is_read=False
+        ).update(
+            is_read=True,
+            read_at=timezone.now()
+        )
+        
+        if updated_count > 0:
+            cache.delete(get_unread_count_cache_key(user.id))
+            
+        return updated_count
+
+
