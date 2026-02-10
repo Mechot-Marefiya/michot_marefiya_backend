@@ -191,6 +191,29 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.StandardResultsSetPagination",
     "PAGE_SIZE": 10,
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+        "rest_framework.throttling.ScopedRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "60/min",          # Base limit for unauthenticated users
+        "user": "5000/hour",       # Base limit for authenticated users
+        "auth_login": "5/min",     # Strict limit for login attempts (Brute-force protection)
+        "auth_register": "10/hour",# Prevent mass account creation
+        "password_reset": "3/hour",# Prevent email spam/cost abuse
+        "verify_email": "5/hour",  # Prevent verification token guessing
+        "availability_check": "60/min", # Prevent database exhaustion (1 req/sec)
+        "payment_init": "10/min",  # Prevent payment spam
+        "booking_create": "10/min",
+        "token_refresh": "20/hour",
+        "token_blacklist": "10/min",
+        "payment_verify": "5/min",
+        "payment_callback": "10/min",
+        "payment_webhook": "10/min",
+        "currency_rates": "30/min",
+        "currency_convert": "60/min",
+    }
 }
 
 SIMPLE_JWT = {

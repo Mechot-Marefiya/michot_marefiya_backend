@@ -6,10 +6,6 @@ from .views import (
     verify_payment, 
     verify_payment_public,
     cancel_payment,
-    test_chapa_key,
-    test_chapa_direct,
-    debug_config,
-    test_email_format,
     OwnerPaymentViewSet
 )
 from rest_framework.routers import DefaultRouter
@@ -24,10 +20,6 @@ urlpatterns = [
     path('verify/<str:tx_ref>/', verify_payment, name='verify-payment'),
     path('verify-public/<str:tx_ref>/', verify_payment_public, name='verify-payment-public'),
     path('cancel/<str:tx_ref>/', cancel_payment, name='cancel-payment'),
-    path('test-key/', test_chapa_key, name='test-chapa-key'),
-    path('test-direct/', test_chapa_direct, name='test-chapa-direct'),
-    path('test-email/', test_email_format, name='test-email-format'),
-    path('debug-config/', debug_config, name='debug-config'),
 ]
 
 urlpatterns += router.urls
