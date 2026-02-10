@@ -796,6 +796,27 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
              return Response([])
 
         return Response(GuestHouseBookingPreviewSerializer(queryset, many=True, context=self.get_serializer_context()).data)
+
+    @extend_schema(request=GuestHouseBookingSerializer, responses=GuestHouseBookingSerializer)
+    @action(detail=False, methods=['post'], url_path='walk-in', permission_classes=[IsAuthenticated])
+    def walk_in(self, request, *args, **kwargs):
+        """
+        Create a walk-in booking. 
+        Passes is_walk_in=True via context to trigger staff privileges check.
+        Requires authentication.
+        """
+        # Default currency to ETB for walk-ins if not specified
+        data = request.data.copy()
+        if 'payment_currency' not in data:
+            data['payment_currency'] = 'ETB'
+        
+        # Pass is_walk_in via context, not data
+        context = {**self.get_serializer_context(), 'is_walk_in': True}
+        serializer = self.get_serializer(data=data, context=context)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
     
     @extend_schema(
         summary="Create a new guesthouse booking (supports guest checkout)",
@@ -1460,6 +1481,28 @@ class BookingViewSet(AbstractModelViewSet):
     throttle_scope = None
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = BookingFilter
+    
+    @extend_schema(request=BookingSerializer, responses=BookingSerializer)
+    @action(detail=False, methods=['post'], url_path='walk-in', permission_classes=[IsAuthenticated])
+    def walk_in(self, request, *args, **kwargs):
+        """
+        Create a walk-in booking. 
+        Passes is_walk_in=True via context to trigger staff privileges check.
+        Requires authentication.
+        """
+        # Default currency to ETB for walk-ins if not specified
+        data = request.data.copy()
+        if 'payment_currency' not in data:
+            data['payment_currency'] = 'ETB'
+        
+        # Pass is_walk_in via context, not data
+        context = {**self.get_serializer_context(), 'is_walk_in': True}
+        serializer = self.get_serializer(data=data, context=context)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
+
     search_fields = [
         'booking_reference',
         'user__email',
@@ -2243,6 +2286,27 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         """Passes the request user to the serializer's create method."""
         user = self.request.user if self.request.user.is_authenticated else None
         serializer.save(user=user)
+
+    @extend_schema(request=EventSpaceBookingSerializer, responses=EventSpaceBookingSerializer)
+    @action(detail=False, methods=['post'], url_path='walk-in', permission_classes=[IsAuthenticated])
+    def walk_in(self, request, *args, **kwargs):
+        """
+        Create a walk-in booking. 
+        Passes is_walk_in=True via context to trigger staff privileges check.
+        Requires authentication.
+        """
+        # Default currency to ETB for walk-ins if not specified
+        data = request.data.copy()
+        if 'payment_currency' not in data:
+            data['payment_currency'] = 'ETB'
+        
+        # Pass is_walk_in via context, not data
+        context = {**self.get_serializer_context(), 'is_walk_in': True}
+        serializer = self.get_serializer(data=data, context=context)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+        headers = self.get_success_headers(serializer.data)
+        return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
     @extend_schema(
         summary="Lookup event space booking status (Guest)",
