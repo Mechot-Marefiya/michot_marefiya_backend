@@ -656,6 +656,47 @@ class StayAvailabilityService:
             created += len(batch)
         return created
 
+    @staticmethod
+    def get_availability_matrix(hotel_id, start_date, end_date):
+        room_ids = RoomListing.objects.filter(hotel_id=hotel_id).values_list('id', flat=True)
+        
+        availability_qs = StayAvailability.objects.filter(
+            hotel_id=hotel_id,
+            room_id__in=room_ids,
+            date__gte=start_date,
+            date__lte=end_date
+        ).values('room_id', 'date', 'available_rooms')
+        
+        matrix = {}
+        for row in availability_qs:
+            r_id = str(row['room_id'])
+            d_str = row['date'].isoformat()
+            if r_id not in matrix: matrix[r_id] = {}
+            matrix[r_id][d_str] = row['available_rooms']
+            
+        return matrix
+
+
+class GuestHouseAvailabilityService:
+    @staticmethod
+    def get_availability_matrix(guest_house_id, start_date, end_date):
+        room_ids = GuestHouseRoom.objects.filter(guest_house_id=guest_house_id).values_list('id', flat=True)
+        
+        inventory_qs = GuestHouseInventory.objects.filter(
+            guest_house_room_id__in=room_ids,
+            date__gte=start_date,
+            date__lte=end_date
+        ).values('guest_house_room_id', 'date', 'available_rooms')
+        
+        matrix = {}
+        for row in inventory_qs:
+            r_id = str(row['guest_house_room_id'])
+            d_str = row['date'].isoformat()
+            if r_id not in matrix: matrix[r_id] = {}
+            matrix[r_id][d_str] = row['available_rooms']
+            
+        return matrix
+
 
 class PriceService:
     @staticmethod
@@ -1089,28 +1130,31 @@ class BookingService:
                 hotel, rooms_info, check_in_date, check_out_date
             )
             
-            from apps.account.enums import RoleCode
-            is_front_desk = False
-            if user and user.is_authenticated and hasattr(user, 'role') and user.role and user.role.code == RoleCode.FRONT_DESK.value:
-                is_front_desk = True
+            is_privileged = False
+            if user and user.is_authenticated:
+                if user.is_superuser:
+                     is_privileged = True
+                elif hasattr(user, 'role') and user.role:
+                     code = user.role.code
+                     if code in ['admin', 'front_desk', 'company']:
+                         is_privileged = True
 
-            # Validate and snapshot T&C
-            try:
-                tc_data = TermsService.validate_and_snapshot_terms(
-                    content_object=hotel,
-                    terms_version=terms_version,
-                    terms_accepted=terms_accepted,
-                    allow_missing=is_front_desk
-                )
-                
-                # Add T&C data to booking
-                validated_data['terms_accepted'] = True
-                validated_data['terms_version'] = tc_data['version']
-                validated_data['terms_accepted_at'] = tc_data['accepted_at']
-                validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
-            except Exception as e:
-                logger.error(f"T&C validation failed: {e}")
-                raise
+            if not is_privileged:
+                 try:
+                    tc_data = TermsService.validate_and_snapshot_terms(
+                        content_object=hotel,
+                        terms_version=terms_version,
+                        terms_accepted=terms_accepted
+                    )
+                    
+                    # Add T&C data to booking
+                    validated_data['terms_accepted'] = True
+                    validated_data['terms_version'] = tc_data['version']
+                    validated_data['terms_accepted_at'] = tc_data['accepted_at']
+                    validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
+                 except Exception as e:
+                    logger.error(f"T&C validation failed: {e}")
+                    raise
         
         booking = Booking.objects.create(currency=payment_currency, **validated_data)
 
@@ -1476,6 +1520,18 @@ class EventSpaceBookingService:
         first_space = items_data[0]["event_space"]
         hotel = first_space.hotel
         
+        is_privileged = False
+        if user and user.is_authenticated:
+            if user.is_superuser:
+                    is_privileged = True
+            elif hasattr(user, 'role') and user.role:
+                    code = user.role.code
+                    if code in ['admin', 'front_desk', 'company']:
+                        is_privileged = True
+
+        if is_privileged and not terms_accepted:
+            terms_accepted = True
+
         try:
             snapshot_data = TermsService.validate_and_snapshot_terms(
                  content_object=hotel,
@@ -2347,19 +2403,26 @@ class GuestHouseBookingService:
                 first_room = items_data[0]['room']
                 hotel = first_room.guest_house 
 
-                from apps.account.enums import RoleCode
-                is_front_desk = False
-                if user and user.is_authenticated and hasattr(user, 'role') and user.role and user.role.code == RoleCode.FRONT_DESK.value:
-                    is_front_desk = True
+                is_privileged = False
+                if user and user.is_authenticated:
+                    if user.is_superuser:
+                        is_privileged = True
+                    elif hasattr(user, 'role') and user.role:
+                        code = user.role.code
+                        if code in ['admin', 'front_desk', 'company']:
+                            is_privileged = True
 
-                if not terms_accepted and not is_front_desk:
+                if not terms_accepted and not is_privileged:
                      raise ValidationError({"terms_accepted": "You must accept the terms and conditions."})
+
+                if is_privileged and not terms_accepted:
+                    terms_accepted = True
 
                 snapshot_data = TermsService.validate_and_snapshot_terms(
                     content_object=hotel,
                     terms_version=terms_version,
                     terms_accepted=terms_accepted,
-                    allow_missing=is_front_desk
+                    allow_missing=is_privileged
                 )
             except Exception as e:
                 logger.error(f"T&C validation failed: {e}")

@@ -315,6 +315,72 @@ class RoomListingViewSet(AbstractModelViewSet):
             return self.get_paginated_response(serialized)
         return Response(serialized)
 
+    @action(detail=False, methods=['get'], url_path='availability-matrix')
+    def availability_matrix(self, request):
+        workspace_id = request.query_params.get("workspace")
+        start_date_str = request.query_params.get("start_date")
+        end_date_str = request.query_params.get("end_date")
+
+        if not workspace_id or not start_date_str or not end_date_str:
+             return Response({"detail": "workspace, start_date, end_date required"}, status=400)
+             
+        try:
+             start_date = date.fromisoformat(start_date_str)
+             end_date = date.fromisoformat(end_date_str)
+        except:
+             return Response({"detail": "Invalid date format"}, status=400)
+             
+        room_qs = RoomListing.objects.filter(
+            Q(hotel__id=workspace_id) | Q(hotel__company__id=workspace_id)
+        ).select_related('hotel')
+        
+        if not room_qs.exists():
+             return Response([])
+
+        hotel_ids = room_qs.values_list('hotel_id', flat=True).distinct()
+        
+        full_matrix = {}
+        for h_id in hotel_ids:
+             matrix = StayAvailabilityService.get_availability_matrix(h_id, start_date, end_date)
+             full_matrix.update(matrix)
+             
+        date_cursor = start_date
+        dates = []
+        while date_cursor <= end_date:
+            dates.append(date_cursor)
+            date_cursor += timedelta(days=1)
+
+        results = []
+        for room in room_qs:
+            r_id = str(room.id)
+            avail_map = full_matrix.get(r_id, {})
+            
+            availability_list = []
+            for d in dates:
+                d_str = d.isoformat()
+                available_count = avail_map.get(d_str, room.total_units) 
+                
+                status_val = 'available'
+                if available_count == 0:
+                    status_val = 'full'
+                elif available_count < room.total_units:
+                    status_val = 'partial'
+                
+                availability_list.append({
+                    "date": d_str,
+                    "available": available_count,
+                    "status": status_val
+                })
+            
+            results.append({
+                "room_id": r_id,
+                "room_name": room.title,
+                "total_units": room.total_units,
+                "availability": availability_list
+            })
+            
+        return Response(results)
+
 
 
 @extend_schema(tags=["Guest House Rooms"])
@@ -371,6 +437,73 @@ class GuestHouseRoomViewSet(AbstractModelViewSet):
         instance = self.get_object()
         serializer = GuestHouseRoomResponseSerializer(instance, context=self.get_serializer_context())
         return Response(serializer.data)
+
+    @action(detail=False, methods=['get'], url_path='availability-matrix')
+    def availability_matrix(self, request):
+        workspace_id = request.query_params.get("workspace")
+        start_date_str = request.query_params.get("start_date")
+        end_date_str = request.query_params.get("end_date")
+
+        if not workspace_id or not start_date_str or not end_date_str:
+             return Response({"detail": "workspace, start_date, end_date required"}, status=400)
+             
+        try:
+             start_date = date.fromisoformat(start_date_str)
+             end_date = date.fromisoformat(end_date_str)
+        except:
+             return Response({"detail": "Invalid date format"}, status=400)
+             
+        room_qs = GuestHouseRoom.objects.filter(
+            Q(guest_house__id=workspace_id) | 
+            Q(guest_house__company__id=workspace_id) | 
+            Q(guest_house__individual_owner__id=workspace_id)
+        )
+        
+        if not room_qs.exists():
+             return Response([])
+             
+        gh_ids = room_qs.values_list('guest_house_id', flat=True).distinct()
+        
+        full_matrix = {}
+        for gh_id in gh_ids:
+             matrix = GuestHouseAvailabilityService.get_availability_matrix(gh_id, start_date, end_date)
+             full_matrix.update(matrix)
+             
+        date_cursor = start_date
+        dates = []
+        while date_cursor <= end_date:
+            dates.append(date_cursor)
+            date_cursor += timedelta(days=1)
+
+        results = []
+        for room in room_qs:
+            r_id = str(room.id)
+            avail_map = full_matrix.get(r_id, {})
+            
+            availability_list = []
+            for d in dates:
+                d_str = d.isoformat()
+                available_count = avail_map.get(d_str, room.total_units)
+                
+                status_val = 'available'
+                if available_count == 0:
+                     status_val = 'full'
+                elif available_count < room.total_units:
+                     status_val = 'partial'
+                     
+                availability_list.append({
+                    "date": d_str,
+                    "available": available_count,
+                    "status": status_val
+                })
+            results.append({
+                "room_id": r_id,
+                "room_name": room.title,
+                "total_units": room.total_units,
+                "availability": availability_list
+            })
+            
+        return Response(results)
 
 
 @extend_schema(tags=["Accommodations"])

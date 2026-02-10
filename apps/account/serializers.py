@@ -320,31 +320,38 @@ class UserResponseSerializer(serializers.ModelSerializer):
         model = User
         fields = ["id", "email", "first_name", "last_name", "is_active", "role", "workspace"]
 
-    def get_workspace(self, obj):
-        if not obj.workspace:
+
+    def get_workspace(self, instance):
+        """Return workspace data for front desk users."""
+        if not instance.workspace:
             return None
         
-        workspace_type = "unknown"
-        if hasattr(obj.workspace, 'is_hotel'): # Duck typing or check model name
-             workspace_type = "hotel"
-             if obj.workspace.__class__.__name__ == 'HotelProfile':
-                 workspace_type = "hotel"
-        elif hasattr(obj.workspace, 'is_guesthouse'):
-             workspace_type = "guesthouse"
-             if obj.workspace.__class__.__name__ == 'GuestHouseProfile':
-                 workspace_type = "guesthouse"
-        elif obj.workspace.__class__.__name__ == 'CarListing':
-             workspace_type = "car_rental"
+        # Determine workspace type by checking the model class
+        workspace = instance.workspace
+        workspace_type = None
+        workspace_name = None
         
-        if workspace_type == "unknown":
-            model_name = obj.workspace.__class__.__name__.lower()
-            if 'hotel' in model_name: workspace_type = 'hotel'
-            elif 'guesthouse' in model_name: workspace_type = 'guesthouse'
+        # Check workspace model type
+        model_name = workspace.__class__.__name__
+        if model_name == 'HotelProfile':
+            workspace_type = 'hotel'
+            workspace_name = workspace.company.name if hasattr(workspace, 'company') else str(workspace)
+        elif model_name == 'GuestHouseProfile':
+            workspace_type = 'guesthouse'
+            workspace_name = getattr(workspace, 'title', str(workspace))
+        elif model_name == 'EventSpaceListing':
+            workspace_type = 'event_space'
+            workspace_name = getattr(workspace, 'title', str(workspace))
+        elif model_name == 'CarListing':
+            workspace_type = 'car_rental'
+            workspace_name = f"{getattr(workspace, 'brand', '')} {getattr(workspace, 'model', '')}".strip() or str(workspace)
+        else:
+            workspace_name = str(workspace)
         
         return {
-            "id": obj.workspace.id,
-            "name": getattr(obj.workspace, 'title', getattr(obj.workspace, 'name', 'Unnamed Property')),
-            "workspace_type": workspace_type
+            'id': str(workspace.id),
+            'name': workspace_name,
+            'workspace_type': workspace_type
         }
 
 

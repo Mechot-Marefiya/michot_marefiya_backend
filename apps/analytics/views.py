@@ -5,11 +5,17 @@ from rest_framework.response import Response
 from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 
-from apps.account.permissions import IsCompany, IsCompanyOrIndividualOwner
+from apps.account.permissions import (
+    IsCompany, 
+    IsCompanyOrIndividualOwner, 
+    IsCompanyOrFrontDesk, 
+    ORPermission
+)
 from apps.analytics import services
 from apps.analytics.serializers import OverviewSerializer, TimeseriesItemSerializer, FrontDeskStatsSerializer
 from apps.account.enums import RoleCode
-
+from apps.account.models import HotelProfile
+from apps.listing.models import GuestHouseProfile
 
 @extend_schema(tags=["Analytics"])
 class CompanyOverviewView(APIView):
@@ -166,7 +172,6 @@ class FrontDeskStatsView(APIView):
         user = request.user
         if not user or not user.is_authenticated:
             return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
-        
         workspace_id = request.query_params.get("workspace_id")
         workspace_type = request.query_params.get("workspace_type")
         
@@ -223,4 +228,3 @@ class FrontDeskAvailabilityView(APIView):
             return Response(data)
         except Exception as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-
