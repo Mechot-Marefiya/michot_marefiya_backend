@@ -76,7 +76,7 @@ jobs:
                         COMPOSE_FILE="docker-compose.staging.yml"
                         PROJECT_NAME="michot_staging"
                         API_CONTAINER="michot-api-staging"
-                        HEALTH_URL="https://staging.michotmarefia.com/api/v1"
+                        HEALTH_URL="https://staging.michotmarefia.com/api/v1/"
                       fi
 
                       echo "🚀 Starting Deployment for branch: ${{ github.ref_name }}"
@@ -88,12 +88,12 @@ jobs:
                       docker compose -p $PROJECT_NAME -f $COMPOSE_FILE up -d --build
                       
                       # Run Django tasks
-                      sleep 5
+                      sleep 10
                       docker exec $API_CONTAINER python manage.py migrate --noinput
                       docker exec $API_CONTAINER python manage.py collectstatic --noinput
 
                       # Health Check
                       echo "🔍 Checking health at $HEALTH_URL"
-                      sleep 10
+                      sleep 20
                       curl -f $HEALTH_URL || (echo "❌ Deployment failed health check!" && exit 1)
                       echo "✅ Deployment Successful!"
