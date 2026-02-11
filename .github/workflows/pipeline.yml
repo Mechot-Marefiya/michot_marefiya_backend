@@ -62,6 +62,7 @@ jobs:
                   username: ${{ secrets.VPS_USER }}
                   key: ${{ secrets.VPS_SSH_KEY  }}
                   script: |
+                      set -e
                       if [ "${{ github.ref_name }}" = "main" ]; then
                         # --- PRODUCTION CONFIG ---
                         PROJECT_DIR="/root/michot_marefiya_backend"
