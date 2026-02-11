@@ -24,7 +24,7 @@ jobs:
               run: |
                   python -m pip install --upgrade pip uv
                   uv sync
-                  source .venv/bin/activate
+                  # Note: uv sync creates the venv automatically
             - name: Lint & format
               run: |
                   source .venv/bin/activate
@@ -69,31 +69,31 @@ jobs:
                         COMPOSE_FILE="compose.prod.yaml"
                         PROJECT_NAME="michot_prod"
                         API_CONTAINER="michot_marefiya_backend-api-1"
-                        HEALTH_URL="http://michotmarefia.com/health"
+                        HEALTH_URL="http://michotmarefia.com/admin/login/"
                       else
                         # --- STAGING CONFIG ---
                         PROJECT_DIR="/root/michot_staging_backend"
                         COMPOSE_FILE="docker-compose.staging.yml"
                         PROJECT_NAME="michot_staging"
                         API_CONTAINER="michot-api-staging"
-                        HEALTH_URL="https://staging.michotmarefia.com/api/v1/"
+                        HEALTH_URL="https://staging.michotmarefia.com/admin/login/"
                       fi
 
                       echo "🚀 Starting Deployment for branch: ${{ github.ref_name }}"
                       cd $PROJECT_DIR || exit 1
                       
-                      # Pull code and restart
+                      # Update code and rebuild
                       git pull origin ${{ github.ref_name }}
                       docker compose -p $PROJECT_NAME -f $COMPOSE_FILE down
                       docker compose -p $PROJECT_NAME -f $COMPOSE_FILE up -d --build
                       
                       # Run Django tasks
-                      sleep 10
+                      echo "⏳ Waiting for containers to initialize..."
+                      sleep 15
                       docker exec $API_CONTAINER python manage.py migrate --noinput
                       docker exec $API_CONTAINER python manage.py collectstatic --noinput
 
-                      # Health Check
                       echo "🔍 Checking health at $HEALTH_URL"
-                      sleep 20
-                      curl -f $HEALTH_URL || (echo "❌ Deployment failed health check!" && exit 1)
+                      sleep 10
+                      curl -fL $HEALTH_URL || (echo "❌ Health check failed at $HEALTH_URL" && exit 1)
                       echo "✅ Deployment Successful!"
