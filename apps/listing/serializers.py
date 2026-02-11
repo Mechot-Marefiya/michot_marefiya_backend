@@ -7,7 +7,7 @@ from datetime import timedelta
 from django.utils.timezone import now
 from datetime import datetime
 from datetime import date
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import ValidationError, PermissionDenied
 from drf_spectacular.utils import extend_schema_field, inline_serializer, OpenApiTypes
 from apps.account.services import ImageCreationService
 from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile
@@ -627,6 +627,12 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
         write_only=True,
         help_text="Preferred currency for payment (USD or ETB). Defaults to ETB if not specified."
     )
+    is_walk_in = serializers.BooleanField(
+        required=False, 
+        write_only=True, 
+        default=False, 
+        help_text="Set to true if this is a walk-in booking by staff."
+    )
 
     class Meta:
         model = GuestHouseBooking
@@ -718,12 +724,17 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
         
         is_privileged = False
         if user and user.is_authenticated:
-            if user.is_superuser:
-                is_privileged = True
-            elif hasattr(user, 'role') and user.role:
-                code = user.role.code
-                if code in ['admin', 'front_desk', 'company']: 
-                    is_privileged = True
+            is_walk_in = self.context.get("is_walk_in", False)
+            
+            if items:
+                 from apps.listing.utils import is_user_staff_of_listing
+                 first_room = items[0]["room"]
+                 listing_obj = first_room.guest_house
+                 
+                 if is_walk_in:
+                     if not is_user_staff_of_listing(user, listing_obj):
+                         raise PermissionDenied("You do not have permission to perform a walk-in booking for this listing.")
+                     is_privileged = True
         
         if not is_privileged:
             if not data.get("terms_accepted"):
@@ -759,9 +770,11 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
         if not user.is_authenticated:
             user = None
             
+        is_walk_in = self.context.get("is_walk_in", False)
         return GuestHouseBookingService.create_booking(
             validated_data, 
-            user=user
+            user=user,
+            is_walk_in=is_walk_in
         )
 
     @transaction.atomic
@@ -1746,6 +1759,7 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
         help_text="Preferred currency for payment (USD or ETB). Defaults to ETB if not specified."
     )
 
+
     class Meta:
         model = Booking
         fields = ["items", "check_in_date", "check_out_date", "currency", "status", 
@@ -1778,12 +1792,17 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
         
         is_privileged = False
         if user and user.is_authenticated:
-            if user.is_superuser:
-                is_privileged = True
-            elif hasattr(user, 'role') and user.role:
-                code = user.role.code
-                if code in ['admin', 'front_desk', 'company']: 
-                    is_privileged = True
+            is_walk_in = self.context.get("is_walk_in", False)
+            
+            if items:
+                 from apps.listing.utils import is_user_staff_of_listing
+                 first_room = items[0]["room"]
+                 listing_obj = first_room.hotel
+                 
+                 if is_walk_in:
+                     if not is_user_staff_of_listing(user, listing_obj):
+                         raise PermissionDenied("You do not have permission to perform a walk-in booking for this listing.")
+                     is_privileged = True
 
         if not is_privileged:
             terms_accepted = data.get("terms_accepted")
@@ -1829,7 +1848,9 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
             is_front_desk = True
         if is_front_desk:
             validated_data["status"] = Booking.BookingStatus.WALK_IN
-        return BookingService.create_booking(validated_data, user=user)
+            
+        is_walk_in = self.context.get("is_walk_in", False)
+        return BookingService.create_booking(validated_data, user=user, is_walk_in=is_walk_in)
 
     def to_representation(self, instance):
         return BookingResponseSerializer(instance, context=self.context).to_representation(
@@ -2120,6 +2141,7 @@ class EventSpaceBookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSe
         help_text="Preferred currency for payment (USD or ETB). Defaults to ETB if not specified."
     )
 
+
     class Meta:
         model = EventSpaceBooking # Mapped to the dedicated model
         fields = ["items", "check_in_date", "check_out_date", "currency", "event_type",
@@ -2178,6 +2200,20 @@ class EventSpaceBookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSe
         
         # !To Do: You may want to add validation here to ensure all event spaces
         # belong to the same hotel, if that is a business rule.
+
+        is_privileged = False
+        if user and user.is_authenticated:
+            is_walk_in = self.context.get("is_walk_in", False)
+            
+            if items:
+                 from apps.listing.utils import is_user_staff_of_listing
+                 first_space = items[0]["event_space"]
+                 hotel = first_space.hotel
+                 
+                 if is_walk_in:
+                     if not is_user_staff_of_listing(user, hotel):
+                         raise PermissionDenied("You do not have permission to perform a walk-in booking for this listing.")
+                     is_privileged = True
         
         return data
 
@@ -2197,7 +2233,8 @@ class EventSpaceBookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSe
         if is_front_desk:
             validated_data["status"] = EventSpaceBooking.BookingStatus.WALK_IN 
             
-        return EventSpaceBookingService.create_booking(validated_data, user=user)
+        is_walk_in = self.context.get("is_walk_in", False)
+        return EventSpaceBookingService.create_booking(validated_data, user=user, is_walk_in=is_walk_in)
 
     def to_representation(self, instance):
         return EventSpaceBookingResponseSerializer(instance, context=self.context).to_representation(

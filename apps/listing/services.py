@@ -1101,7 +1101,8 @@ class PriceCalculationService:
 class BookingService:
     @transaction.atomic()
     @staticmethod
-    def create_booking(validated_data, user=None):
+
+    def create_booking(validated_data, user=None, is_walk_in=False):
         guest_email = validated_data.get("guest_email")
         if not user and not guest_email and not validated_data.get("user"):
             raise ValidationError("Either a user account or guest email is required to complete the booking.")
@@ -1133,30 +1134,32 @@ class BookingService:
             )
             
             is_privileged = False
-            if user and user.is_authenticated:
-                if user.is_superuser:
+            
+            if user and user.is_superuser:
+                 is_privileged = True
+            elif user and user.is_authenticated and is_walk_in:
+                 from apps.listing.utils import is_user_staff_of_listing
+                 if is_user_staff_of_listing(user, hotel):
                      is_privileged = True
-                elif hasattr(user, 'role') and user.role:
-                     code = user.role.code
-                     if code in ['admin', 'front_desk', 'company']:
-                         is_privileged = True
+            
+            if is_privileged:
+                 validated_data['status'] = Booking.BookingStatus.WALK_IN
 
-            if not is_privileged:
-                 try:
-                    tc_data = TermsService.validate_and_snapshot_terms(
-                        content_object=hotel,
-                        terms_version=terms_version,
-                        terms_accepted=terms_accepted
-                    )
-                    
-                    # Add T&C data to booking
-                    validated_data['terms_accepted'] = True
-                    validated_data['terms_version'] = tc_data['version']
-                    validated_data['terms_accepted_at'] = tc_data['accepted_at']
-                    validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
-                 except Exception as e:
-                    logger.error(f"T&C validation failed: {e}")
-                    raise
+            try:
+                tc_data = TermsService.validate_and_snapshot_terms(
+                    content_object=hotel,
+                    terms_version=terms_version,
+                    terms_accepted=terms_accepted,
+                    allow_missing=is_privileged
+                )
+                
+                validated_data['terms_accepted'] = True
+                validated_data['terms_version'] = tc_data['version']
+                validated_data['terms_accepted_at'] = tc_data['accepted_at']
+                validated_data['terms_content_snapshot'] = tc_data['content_snapshot']
+            except Exception as e:
+                logger.error(f"T&C validation failed: {e}")
+                raise
         
         booking = Booking.objects.create(currency=payment_currency, **validated_data)
 
@@ -1537,7 +1540,7 @@ class BookingService:
 class EventSpaceBookingService:
     @transaction.atomic()
     @staticmethod
-    def create_booking(validated_data, user=None):
+    def create_booking(validated_data, user=None, is_walk_in=False):
         """
         Creates a new Event Space Booking, validates availability, and decrements inventory, 
         using only the base price for calculation.
@@ -1568,13 +1571,16 @@ class EventSpaceBookingService:
         hotel = first_space.hotel
         
         is_privileged = False
-        if user and user.is_authenticated:
-            if user.is_superuser:
+        
+        if user and user.is_superuser:
+                is_privileged = True
+        elif user and user.is_authenticated and is_walk_in:
+                from apps.listing.utils import is_user_staff_of_listing
+                if is_user_staff_of_listing(user, hotel):
                     is_privileged = True
-            elif hasattr(user, 'role') and user.role:
-                    code = user.role.code
-                    if code in ['admin', 'front_desk', 'company']:
-                        is_privileged = True
+
+        if is_privileged:
+             validated_data['status'] = EventSpaceBooking.BookingStatus.WALK_IN
 
         if is_privileged and not terms_accepted:
             terms_accepted = True
@@ -1583,7 +1589,8 @@ class EventSpaceBookingService:
             snapshot_data = TermsService.validate_and_snapshot_terms(
                  content_object=hotel,
                  terms_version=terms_version,
-                 terms_accepted=terms_accepted
+                 terms_accepted=terms_accepted,
+                 allow_missing=is_privileged
             )
         except Exception as e:
             logger.error(f"T&C validation failed: {e}")
@@ -2467,7 +2474,7 @@ class GuestHouseAvailabilityService:
 class GuestHouseBookingService:
     @transaction.atomic()
     @staticmethod
-    def create_booking(validated_data, user=None):
+    def create_booking(validated_data, user=None, is_walk_in=False):
         """
         Creates a Guest House Booking, validates availability, 
         captures T&C snapshots, and updates inventory.
@@ -2496,13 +2503,16 @@ class GuestHouseBookingService:
                 hotel = first_room.guest_house 
 
                 is_privileged = False
-                if user and user.is_authenticated:
-                    if user.is_superuser:
+
+                if user and user.is_superuser:
+                    is_privileged = True
+                elif user and user.is_authenticated and is_walk_in:
+                    from apps.listing.utils import is_user_staff_of_listing
+                    if is_user_staff_of_listing(user, hotel):
                         is_privileged = True
-                    elif hasattr(user, 'role') and user.role:
-                        code = user.role.code
-                        if code in ['admin', 'front_desk', 'company']:
-                            is_privileged = True
+
+                if is_privileged:
+                     validated_data['status'] = GuestHouseBooking.RentStatus.WALK_IN
 
                 if not terms_accepted and not is_privileged:
                      raise ValidationError({"terms_accepted": "You must accept the terms and conditions."})

@@ -61,7 +61,40 @@ def generate_booking_reference(prefix='H', model_class=None):
         if not model_class.objects.filter(booking_reference=reference).exists():
             return reference
     
-    raise ValueError(
-        f"Failed to generate unique booking reference after {max_attempts} attempts. "
-        "This is extremely rare and may indicate a database issue."
-    )
+
+
+def is_user_staff_of_listing(user, listing) -> bool:
+    if not user or not user.is_authenticated:
+        return False
+        
+    if user.is_superuser:
+        return True
+        
+    pass
+
+    core_object = None
+    
+    if hasattr(listing, 'hotel') and listing.hotel:
+        core_object = listing.hotel
+    elif hasattr(listing, 'guest_house') and listing.guest_house:
+        core_object = listing.guest_house
+    elif hasattr(listing, 'company') or hasattr(listing, 'individual_owner'):
+        core_object = listing
+        
+    if not core_object:
+        return False
+
+    
+    if hasattr(user, 'workspace') and user.workspace:
+        if user.workspace == core_object:
+            return True
+            
+    if hasattr(user, 'company') and user.company:
+        if hasattr(core_object, 'company') and core_object.company == user.company:
+            return True
+
+    if hasattr(user, 'individual_owner') and user.individual_owner:
+        if hasattr(core_object, 'individual_owner') and core_object.individual_owner == user.individual_owner:
+            return True
+            
+    return False
