@@ -29,6 +29,7 @@ class Role(AbstractBaseModel):
 
 class User(AbstractUser, AbstractBaseModel):
     email = models.EmailField(verbose_name=_("Email"), unique=True, null=False)
+    phone = models.CharField(max_length=20, verbose_name=_("Phone Number"), blank=True, null=True)
 
     role = models.ForeignKey(
         Role, on_delete=models.RESTRICT, related_name="+", null=True

@@ -243,7 +243,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["email", "password", "confirm_password", "first_name", "last_name"]
+        fields = ["email", "password", "confirm_password", "first_name", "last_name", "phone"]
         extra_kwargs = {
             "password": {"write_only": True},
         }
@@ -320,7 +320,7 @@ class UserResponseSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["id", "email", "first_name", "last_name", "is_active", "role", "workspace"]
+        fields = ["id", "email", "first_name", "last_name", "phone", "is_active", "role", "workspace"]
 
 
     def get_workspace(self, instance):
@@ -362,11 +362,12 @@ class UserUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ["email", "first_name", "last_name", "current_password"]
+        fields = ["email", "first_name", "last_name", "phone", "current_password"]
         extra_kwargs = {
             "email": {"required": False},
             "first_name": {"required": False},
             "last_name": {"required": False},
+            "phone": {"required": False},
         }
 
     def validate_email(self, value):
