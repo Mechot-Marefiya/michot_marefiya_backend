@@ -69,14 +69,14 @@ jobs:
                         COMPOSE_FILE="compose.prod.yaml"
                         PROJECT_NAME="michot_prod"
                         API_CONTAINER="michot_marefiya_backend-api-1"
-                        HEALTH_URL="http://michotmarefia.com/admin/login/"
+                        HEALTH_URL="http://michotmarefia.com/api/admin/login/"
                       else
                         # --- STAGING CONFIG ---
                         PROJECT_DIR="/root/michot_staging_backend"
                         COMPOSE_FILE="docker-compose.staging.yml"
                         PROJECT_NAME="michot_staging"
                         API_CONTAINER="michot-api-staging"
-                        HEALTH_URL="https://staging.michotmarefia.com/admin/login/"
+                        HEALTH_URL="https://staging.michotmarefia.com/api/admin/login/"
                       fi
 
                       echo "🚀 Starting Deployment for branch: ${{ github.ref_name }}"
