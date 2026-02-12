@@ -1842,13 +1842,6 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
             user = request.user
             if not user.is_authenticated:
                 user = None
-        is_front_desk = False
-        
-        if user and user.is_authenticated and user.role and user.role.code == RoleCode.FRONT_DESK.value:
-            is_front_desk = True
-        if is_front_desk:
-            validated_data["status"] = Booking.BookingStatus.WALK_IN
-            
         is_walk_in = self.context.get("is_walk_in", False)
         return BookingService.create_booking(validated_data, user=user, is_walk_in=is_walk_in)
 
@@ -2225,13 +2218,6 @@ class EventSpaceBookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSe
             user = request.user
             if not user.is_authenticated:
                 user = None
-            
-        is_front_desk = False
-        if user and user.is_authenticated and hasattr(user, 'role') and user.role and user.role.code == RoleCode.FRONT_DESK.value:
-            is_front_desk = True
-        
-        if is_front_desk:
-            validated_data["status"] = EventSpaceBooking.BookingStatus.WALK_IN 
             
         is_walk_in = self.context.get("is_walk_in", False)
         return EventSpaceBookingService.create_booking(validated_data, user=user, is_walk_in=is_walk_in)
