@@ -261,14 +261,22 @@ Support: support@michotmarefia.com
     @staticmethod
     def send_notification_email(user, subject, body, html_body=None):
         try:
+            if html_body:
+                html_content = render_to_string('emails/generic_notification.html', {
+                    'body_content': html_body,
+                    'title': subject
+                })
+            else:
+                html_content = None
+
             email = EmailMultiAlternatives(
                 subject=subject,
                 body=body,
                 from_email=settings.DEFAULT_FROM_EMAIL,
                 to=[user.email]
             )
-            if html_body:
-                email.attach_alternative(html_body, "text/html")
+            if html_content:
+                email.attach_alternative(html_content, "text/html")
             
             email.send(fail_silently=False)
             logger.info(f"Notification email sent to {user.email}")

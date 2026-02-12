@@ -31,7 +31,7 @@ class NotificationSerializer(serializers.ModelSerializer):
 class NotificationPreferenceSerializer(serializers.ModelSerializer):
     class Meta:
         model = NotificationPreference
-        fields = ['email_preferences', 'in_app_preferences', 'email_enabled', 'in_app_enabled']
+        fields = ['email_preferences', 'in_app_preferences', 'email_enabled']
 
     def update(self, instance, validated_data):
         if 'email_preferences' in validated_data:

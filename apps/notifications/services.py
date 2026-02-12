@@ -34,39 +34,65 @@ class NotificationService:
             if not title or not message:
                 pass 
 
-        notification = Notification.objects.create(
-            user=user,
-            notification_type=notification_type,
-            title=title or "Notification",
-            message=message or "",
-            metadata=metadata,
-            action_url=action_url,
-            priority=priority,
-            delivered_in_app=False
-        )
+        in_app_allowed = True
+        email_allowed = True
         
-        cache.delete(get_unread_count_cache_key(user.id))
+        try:
+            prefs = NotificationPreference.objects.get(user=user)
+            in_app_allowed = prefs.in_app_preferences.get(notification_type, True)
+            
+            email_allowed = prefs.email_enabled and prefs.email_preferences.get(notification_type, True)
 
-        
-        if template:
+            MANDATORY_TYPES = [
+                Notification.NotificationType.BOOKING_CONFIRMED,
+                Notification.NotificationType.BOOKING_CANCELLED,
+                Notification.NotificationType.PAYMENT_SUCCESS,
+                Notification.NotificationType.PAYMENT_FAILED,
+                Notification.NotificationType.PASSWORD_CHANGED,
+                Notification.NotificationType.EMAIL_VERIFIED,
+                Notification.NotificationType.COMPANY_APPROVED,
+                Notification.NotificationType.COMPANY_REJECTED,
+                Notification.NotificationType.NEW_COMPANY_REGISTRATION,
+            ]
+            
+            if notification_type in MANDATORY_TYPES:
+                email_allowed = True
+                in_app_allowed = True
+        except NotificationPreference.DoesNotExist:
+            pass
+
+        notification = None
+        if in_app_allowed:
+            notification = Notification.objects.create(
+                user=user,
+                notification_type=notification_type,
+                title=title or "Notification",
+                message=message or "",
+                metadata=metadata,
+                action_url=action_url,
+                priority=priority,
+                delivered_in_app=False
+            )
+            cache.delete(get_unread_count_cache_key(user.id))
+
+        if template and email_allowed:
             try:
-                prefs, _ = NotificationPreference.objects.get_or_create(user=user)
-                if prefs.email_enabled:
-                    email_subject = template.email_subject_template
-                    email_body = template.email_body_template
-                    email_html = template.email_html_template
-                    
-                    for key, value in metadata.items():
-                        placeholder = f"{{{{{key}}}}}"
-                        if value is not None:
-                            email_subject = email_subject.replace(placeholder, str(value))
-                            email_body = email_body.replace(placeholder, str(value))
-                            if email_html:
-                                email_html = email_html.replace(placeholder, str(value))
-                    
-                    from apps.notifications.tasks import send_notification_email_task
-                    send_notification_email_task.delay(user.id, email_subject, email_body, email_html)
-                    
+                email_subject = template.email_subject_template
+                email_body = template.email_body_template
+                email_html = template.email_html_template
+                
+                for key, value in metadata.items():
+                    placeholder = f"{{{{{key}}}}}"
+                    if value is not None:
+                        email_subject = email_subject.replace(placeholder, str(value))
+                        email_body = email_body.replace(placeholder, str(value))
+                        if email_html:
+                            email_html = email_html.replace(placeholder, str(value))
+                
+                from apps.notifications.tasks import send_notification_email_task
+                send_notification_email_task.delay(user.id, email_subject, email_body, email_html)
+                
+                if notification:
                     notification.delivered_email = True  
                     notification.email_sent_at = timezone.now()
                     notification.save(update_fields=['delivered_email', 'email_sent_at'])
@@ -74,7 +100,7 @@ class NotificationService:
             except Exception as e:
                 import logging
                 logger = logging.getLogger(__name__)
-                logger.error(f"Failed to send email for notification {notification.id} to user {user.email}: {str(e)}", exc_info=True)
+                logger.error(f"Failed to send email for notification type {notification_type} to user {user.email}: {str(e)}", exc_info=True)
         
         return notification
 
