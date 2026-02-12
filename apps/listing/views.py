@@ -725,8 +725,8 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         """
         Filter queryset based on user role:
         - Admin: sees all bookings
-        - Company: sees bookings for their guesthouses + own bookings as customer
-        - User: sees only own bookings
+        - Company (mode='host'): sees bookings for their guesthouses
+        - User/Default: sees only own bookings as a guest
         """
         user = self.request.user
         if not user.is_authenticated:
@@ -741,15 +741,40 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
             user.role.code == RoleCode.ADMIN.value
         ):
             return queryset
+
+        # Check for mode parameter
+        mode = self.request.query_params.get('mode')
+
+        # CASE 1: Host Mode (Extranet)
+        if mode == 'host':
+            # Company sees bookings for their guesthouses
+            if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
+                # Filter by company user
+                return queryset.filter(items__room__guest_house__company__user=user).distinct()
+            # Individual owner logic could go here if needed, but for now enforcing company/role check
+             # If individual owner logic is needed:
+            if hasattr(user, 'individual_owner') and user.individual_owner:
+                 return queryset.filter(items__room__guest_house__individual_owner=user.individual_owner).distinct()
+
+            return queryset.none()
         
         
+        # Check for mode parameter (Feature branch logic)
+        mode = self.request.query_params.get('mode')
+        if mode == 'host':
+            if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
+                return queryset.filter(items__room__guest_house__company__user=user).distinct()
+            if hasattr(user, 'individual_owner') and user.individual_owner:
+                 return queryset.filter(items__room__guest_house__individual_owner=user.individual_owner).distinct()
+            return queryset.none()
+
         # Base filter: User sees own bookings as renter
         query = Q(renter=user)
         
         if self.request.query_params.get('as_guest') == 'true':
             return queryset.filter(query).distinct()
         
-        # Company sees bookings for their guesthouses
+        # Company sees bookings for their guesthouses (Development branch logic)
         if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
             query |= Q(items__room__guest_house__company__user=user)
         
@@ -1564,9 +1589,9 @@ class BookingViewSet(AbstractModelViewSet):
     def get_queryset(self):
         """
         Filter bookings based on user role:
-        - Users: See only their own bookings
-        - Companies: See bookings for their listings + own bookings (as customers)
         - Admin: See all bookings
+        - Company (mode='host'): See bookings for their listings
+        - User/Default: See only their own bookings
         """
         if not self.request.user or not self.request.user.is_authenticated:
             return Booking.objects.none()
@@ -1581,13 +1606,30 @@ class BookingViewSet(AbstractModelViewSet):
         ):
             return queryset
         
+        # Check for mode parameter (Feature branch logic)
+        mode = self.request.query_params.get('mode')
+        if mode == 'host':
+            if hasattr(self.request.user, 'role') and self.request.user.role:
+                if self.request.user.role.code == RoleCode.COMPANY.value:
+                    if hasattr(self.request.user, 'profile') and self.request.user.profile:
+                        # Ensure HotelProfile is imported if needed, usually available via models
+                        company = self.request.user.profile
+                        try:
+                            hotel = HotelProfile.objects.get(company=company)
+                            return queryset.filter(
+                                items__room__hotel=hotel
+                            ).distinct()
+                        except HotelProfile.DoesNotExist:
+                            pass
+            return queryset.none()
+
         # Users see only their own bookings
         user_bookings = queryset.filter(user=self.request.user).distinct()
 
         if self.request.query_params.get('as_guest') == 'true':
             return user_bookings
 
-        # Company sees bookings for their hotels
+        # Company sees bookings for their hotels (Development branch logic)
         if hasattr(self.request.user, 'role') and self.request.user.role and self.request.user.role.code == RoleCode.COMPANY.value:
              if hasattr(self.request.user, 'profile') and self.request.user.profile:
                   company = self.request.user.profile
@@ -1597,8 +1639,6 @@ class BookingViewSet(AbstractModelViewSet):
                       return (user_bookings | hotel_bookings).distinct()
                   except HotelProfile.DoesNotExist:
                       pass
-        
-
         
         return user_bookings
     
@@ -2254,6 +2294,9 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
     def get_queryset(self):
         """
         Filter bookings based on user role: User, Company, or Admin.
+        
+        Default: Returns only user's PERSONAL bookings (where they are the guest).
+        Mode='host': Returns bookings for the user's PROPERTIES (where they are the host).
         """
         user = self.request.user
         if not user or not user.is_authenticated:
@@ -2268,11 +2311,29 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
             return queryset
         
         
+        # Check for mode parameter (Feature branch logic)
+        mode = self.request.query_params.get('mode')
+        if mode == 'host':
+            if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
+                if hasattr(user, 'profile') and user.profile:
+                    company = user.profile
+                    try:
+                        hotel = HotelProfile.objects.get(company=company)
+                        
+                        return queryset.filter(
+                            items__event_space__hotel=hotel
+                        ).distinct()
+                    except HotelProfile.DoesNotExist:
+                        return queryset.none()
+            return queryset.none()
+
         # Users see only their own bookings
         user_bookings = queryset.filter(user=user).distinct()
+        
         if self.request.query_params.get('as_guest') == 'true':
             return user_bookings
         
+        # Company sees bookings for their hotels (Development branch logic)
         if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
             if hasattr(user, 'profile') and user.profile:
                 company = user.profile
