@@ -25,7 +25,8 @@ env = Env()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
-env.read_env(os.path.join(BASE_DIR, ".env"))
+ENV_FILE = os.path.join(BASE_DIR, ".env.staging" if os.path.exists(os.path.join(BASE_DIR, ".env.staging")) else ".env")
+env.read_env(ENV_FILE)
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
@@ -39,16 +40,10 @@ DEBUG = env("DEBUG", default=True, cast=bool)
 
 # ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
 
-ALLOWED_HOSTS = [
-    'localhost',
-    '127.0.0.1',
-    '0.0.0.0',
-    '4a74b1285b13.ngrok-free.app',  # Specific ngrok subdomain
-    '.ngrok-free.app',              # Allows all subdomains ending in .ngrok-free.app
-    'michotmarefia.com',
-    'www.michotmarefia.com',
-    '188.245.91.56'
-    ]
+#ALLOWED_HOSTS = [*]
+ALLOWED_HOSTS = env("ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS += ['0.0.0.0', '.ngrok-free.app', '.michotmarefia.com']
+
 
 # CORS_ALLOWED_ORIGINS = [
 #     "http://localhost:5173",

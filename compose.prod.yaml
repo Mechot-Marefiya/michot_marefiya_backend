@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:18.0
+    container_name: michot_db_staging
     env_file:
       - .env
     healthcheck:
@@ -9,21 +10,24 @@ services:
       timeout: 5s
       retries: 5
     volumes:
-      - marefiya_pgdata:/var/lib/postgresql
-  redis:  # <-- NEW REDIS SERVICE
-      image: redis:7-alpine
-      container_name: marefiya_redis
-      command: redis-server --appendonly yes
-      volumes:
-        - marefiya_redis_data:/data # Volume for persistence
+      - marefiya_pgdata_staging:/var/lib/postgresql
+
+  redis:
+    image: redis:7-alpine
+    container_name: marefiya_redis_staging
+    command: redis-server --appendonly yes
+    volumes:
+      - marefiya_redis_data_staging:/data
+
   pgadmin4:
     image: dpage/pgadmin4
+    container_name: michot_pgadmin_staging
     ports:
-      - "127.0.0.1:8001:80"
+      - "127.0.0.1:8002:80"
     env_file:
       - .env
     volumes:
-      - marefiya_pgadmin_data:/var/lib/pgadmin
+      - marefiya_pgadmin_data_staging:/var/lib/pgadmin
     depends_on:
       db:
         condition: service_healthy
@@ -35,44 +39,45 @@ services:
       args:
         USER_ID: ${UID}
         GROUP_ID: ${GID}
-    image: marefiya:dev
+    image: marefiya_staging:dev
+    container_name: michot-api-staging
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:8005:8000"
     volumes:
       - ./:/usr/src/app
       - ./staticfiles:/usr/src/app/staticfiles
       - ./mediafiles:/usr/src/app/mediafiles
     user: "${UID}:${GID}"
     command: gunicorn config.wsgi:application --bind 0.0.0.0:8000
-
     restart: unless-stopped
     env_file:
       - .env
     depends_on:
       db:
         condition: service_healthy
-  celery: # <--  new task executor service
-      build:
-        context: .
-        dockerfile: ./docker/prod/Dockerfile
-        args:
-          USER_ID: ${UID}
-          GROUP_ID: ${GID}
-      image: marefiya:dev
-      # The command runs the Celery worker, pointing to your new app instance
-      command: celery -A config.celery worker -l info
-      volumes:
-        - ./:/usr/src/app
-      user: "${UID}:${GID}"
-      env_file:
-        - .env
-      depends_on:
-        - redis
-        - api # Ensure Django is built before Celery starts looking for tasks
-  celery-beat: #new  task scheduler Sevice
+
+  celery:
     build:
       context: .
       dockerfile: ./docker/prod/Dockerfile
+    image: marefiya_staging:dev
+    container_name: michot_celery_staging
+    command: celery -A config.celery worker -l info
+    volumes:
+      - ./:/usr/src/app
+    user: "${UID}:${GID}"
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - api
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: ./docker/prod/Dockerfile
+    image: marefiya_staging:dev
+    container_name: michot_celery_beat_staging
     command: celery -A config.celery beat -l info
     depends_on:
       - api
@@ -81,7 +86,8 @@ services:
       - .env
     volumes:
       - ./:/usr/src/app
+
 volumes:
-  marefiya_pgdata:
-  marefiya_pgadmin_data:
-  marefiya_redis_data: # <-- NEW VOLUME FOR REDIS PERSISTENCE
+  marefiya_pgdata_staging:
+  marefiya_pgadmin_data_staging:
+  marefiya_redis_data_staging:
