@@ -742,8 +742,12 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         ):
             return queryset
         
+        
         # Base filter: User sees own bookings as renter
         query = Q(renter=user)
+        
+        if self.request.query_params.get('as_guest') == 'true':
+            return queryset.filter(query).distinct()
         
         # Company sees bookings for their guesthouses
         if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
@@ -1579,6 +1583,9 @@ class BookingViewSet(AbstractModelViewSet):
         
         # Users see only their own bookings
         user_bookings = queryset.filter(user=self.request.user).distinct()
+
+        if self.request.query_params.get('as_guest') == 'true':
+            return user_bookings
         
         # Companies see bookings for their listings + own bookings
         if hasattr(self.request.user, 'role') and self.request.user.role:
@@ -2266,6 +2273,9 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
             return queryset
         
         user_bookings = queryset.filter(user=user)
+        
+        if self.request.query_params.get('as_guest') == 'true':
+            return user_bookings
         
         if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
             if hasattr(user, 'profile') and user.profile:
