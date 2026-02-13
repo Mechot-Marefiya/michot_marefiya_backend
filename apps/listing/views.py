@@ -1481,6 +1481,7 @@ class BookingViewSet(AbstractModelViewSet):
     throttle_scope = None
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_class = BookingFilter
+    ordering = ['-created_at']
     
     @extend_schema(request=BookingSerializer, responses=BookingSerializer)
     @action(detail=False, methods=['post'], url_path='walk-in', permission_classes=[IsAuthenticated])
@@ -2210,6 +2211,7 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
     http_method_names = ["get", "post"] 
     serializer_class = EventSpaceBookingSerializer
     throttle_scope = None
+    ordering = ['-created_at']
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

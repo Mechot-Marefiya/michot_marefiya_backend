@@ -655,7 +655,7 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
             "terms_url",
             "is_legacy",
             "stay_total",
-            "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency",
+            "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency", "is_walk_in",
         ]
 
         read_only_fields = ["id", "status", "renter", "total_price", "created_at", "updated_at", "booking_reference", "currency"]
