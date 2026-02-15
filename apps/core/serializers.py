@@ -1,6 +1,18 @@
 from rest_framework import serializers
 from apps.core.models import Address, Facility, CurrencyRate
 from decimal import Decimal
+import json
+
+class StringArrayField(serializers.ListField):
+    def to_internal_value(self, data):
+        print(f"DEBUG: StringArrayField input: type={type(data)}, value={data}")
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except (ValueError, TypeError):
+                raise serializers.ValidationError("Invalid JSON list")
+        return super().to_internal_value(data)
+
 
 class AddressSerializer(serializers.ModelSerializer):
     
