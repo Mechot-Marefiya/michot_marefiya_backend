@@ -42,12 +42,27 @@ class NotificationFilter(filters.FilterSet):
         fields = ['is_read', 'notification_type', 'priority']
 
 
+@extend_schema(tags=['Notifications'])
 class NotificationViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     mixins.DestroyModelMixin,
     viewsets.GenericViewSet
 ):
+    """
+    ViewSet for managing user notifications.
+    
+    Provides endpoints for listing, retrieving, marking as read, and deleting notifications.
+    All endpoints are scoped to the authenticated user - users can only access their own notifications.
+    
+    Features:
+    - Pagination (20 per page, max 100)
+    - Filtering by read status, type, priority, and date range
+    - Ordering by created_at or priority
+    - Batch operations (mark-read-batch, bulk-delete)
+    - Unread count caching for performance
+    - Rate limiting (300 requests/hour per user)
+    """
     serializer_class = NotificationSerializer
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = NotificationPagination
@@ -56,6 +71,77 @@ class NotificationViewSet(
     filterset_class = NotificationFilter
     ordering_fields = ['created_at', 'priority']
     ordering = ['-created_at']
+
+    @extend_schema(
+        summary="List user notifications",
+        description="Retrieve a paginated list of notifications for the authenticated user. Supports filtering by read status, notification type, priority, and date range.",
+        parameters=[
+            OpenApiParameter(
+                name='is_read',
+                type=OpenApiTypes.BOOL,
+                location=OpenApiParameter.QUERY,
+                description='Filter by read status (true/false)'
+            ),
+            OpenApiParameter(
+                name='notification_type',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description='Filter by notification type (e.g., payment_success, booking_confirmed)'
+            ),
+            OpenApiParameter(
+                name='priority',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description='Filter by priority level (low, medium, high, critical)'
+            ),
+            OpenApiParameter(
+                name='created_after',
+                type=OpenApiTypes.DATETIME,
+                location=OpenApiParameter.QUERY,
+                description='Filter notifications created after this date (ISO 8601 format)'
+            ),
+            OpenApiParameter(
+                name='created_before',
+                type=OpenApiTypes.DATETIME,
+                location=OpenApiParameter.QUERY,
+                description='Filter notifications created before this date (ISO 8601 format)'
+            ),
+            OpenApiParameter(
+                name='ordering',
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description='Sort order: created_at, -created_at (newest first), priority, -priority (highest first)'
+            ),
+            OpenApiParameter(
+                name='page',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                description='Page number for pagination'
+            ),
+            OpenApiParameter(
+                name='page_size',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                description='Number of results per page (max 100)'
+            ),
+        ]
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+    
+    @extend_schema(
+        summary="Retrieve a single notification",
+        description="Get details of a specific notification. Users can only access their own notifications."
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+    
+    @extend_schema(
+        summary="Delete a notification",
+        description="Permanently delete a specific notification. Users can only delete their own notifications."
+    )
+    def destroy(self, request, *args, **kwargs):
+        return super().destroy(request, *args, **kwargs)
 
     def get_queryset(self):
         return Notification.objects.filter(user=self.request.user)
@@ -248,7 +334,15 @@ class NotificationViewSet(
         }, status=status.HTTP_200_OK)
 
 
+@extend_schema(tags=['Notifications'])
 class NotificationPreferenceView(APIView):
+    """
+    API view for managing user notification preferences.
+    
+    Allows users to retrieve and update their notification delivery preferences
+    for both email and in-app notifications. Preferences are stored as JSON objects
+    allowing granular control over specific notification types.
+    """
     permission_classes = [permissions.IsAuthenticated]
     
     @extend_schema(
