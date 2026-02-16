@@ -26,29 +26,12 @@ class NotificationSerializer(serializers.ModelSerializer):
             'priority', 'notification_type', 'notification_type_display',
             'priority_display', 'delivered_in_app', 'delivered_email', 'email_sent_at'
         ]
-        extra_kwargs = {
-            'id': {'help_text': 'Unique notification identifier (UUID)'},
-            'notification_type': {'help_text': 'Type of notification (e.g., payment_success, booking_confirmed)'},
-            'title': {'help_text': 'Notification title/headline'},
-            'message': {'help_text': 'Detailed notification message'},
-            'action_url': {'help_text': 'Optional URL for deep linking to related resource'},
-            'metadata': {'help_text': 'Additional context data as JSON object'},
-            'is_read': {'help_text': 'Whether the notification has been read'},
-            'read_at': {'help_text': 'Timestamp when notification was marked as read'},
-            'priority': {'help_text': 'Priority level: low, medium, high, or critical'},
-            'created_at': {'help_text': 'Timestamp when notification was created'},
-            'delivered_in_app': {'help_text': 'Whether notification was delivered in-app'},
-            'delivered_email': {'help_text': 'Whether notification was sent via email'},
-            'email_sent_at': {'help_text': 'Timestamp when email was sent'},
-        }
 
 
 class NotificationPreferenceSerializer(serializers.ModelSerializer):
     class Meta:
         model = NotificationPreference
         fields = ['email_preferences', 'in_app_preferences', 'email_enabled']
-<<<<<<< Updated upstream
-=======
         extra_kwargs = {
             'email_preferences': {
                 'help_text': 'JSON object mapping notification types to email delivery preferences. Example: {"payment_success": true, "booking_confirmed": false}'
@@ -60,7 +43,6 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
                 'help_text': 'Global toggle for all email notifications. When false, no emails will be sent regardless of individual preferences.'
             },
         }
->>>>>>> Stashed changes
 
     def update(self, instance, validated_data):
         if 'email_preferences' in validated_data:
