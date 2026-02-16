@@ -1,7 +1,7 @@
 services:
   db:
     image: postgres:18.0
-    container_name: michot_db_staging
+    container_name: michot_db_prod
     env_file:
       - .env
     healthcheck:
@@ -10,24 +10,24 @@ services:
       timeout: 5s
       retries: 5
     volumes:
-      - marefiya_pgdata_staging:/var/lib/postgresql
+      - marefiya_pgdata_prod:/var/lib/postgresql
 
   redis:
     image: redis:7-alpine
-    container_name: marefiya_redis_staging
+    container_name: marefiya_redis_prod
     command: redis-server --appendonly yes
     volumes:
-      - marefiya_redis_data_staging:/data
+      - marefiya_redis_data_prod:/data
 
   pgadmin4:
     image: dpage/pgadmin4
-    container_name: michot_pgadmin_staging
+    container_name: michot_pgadmin_prod
     ports:
-      - "127.0.0.1:8002:80"
+      - "127.0.0.1:8008:80"
     env_file:
       - .env
     volumes:
-      - marefiya_pgadmin_data_staging:/var/lib/pgadmin
+      - marefiya_pgadmin_data_prod:/var/lib/pgadmin
     depends_on:
       db:
         condition: service_healthy
@@ -36,13 +36,10 @@ services:
     build:
       context: .
       dockerfile: ./docker/prod/Dockerfile
-      args:
-        USER_ID: ${UID}
-        GROUP_ID: ${GID}
-    image: marefiya_staging:dev
-    container_name: michot-api-staging
+    image: marefiya_prod:latest
+    container_name: michot-api-prod
     ports:
-      - "127.0.0.1:8005:8000"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./:/usr/src/app
       - ./staticfiles:/usr/src/app/staticfiles
@@ -60,8 +57,8 @@ services:
     build:
       context: .
       dockerfile: ./docker/prod/Dockerfile
-    image: marefiya_staging:dev
-    container_name: michot_celery_staging
+    image: marefiya_prod:latest
+    container_name: michot_celery_prod
     command: celery -A config.celery worker -l info
     volumes:
       - ./:/usr/src/app
@@ -76,8 +73,8 @@ services:
     build:
       context: .
       dockerfile: ./docker/prod/Dockerfile
-    image: marefiya_staging:dev
-    container_name: michot_celery_beat_staging
+    image: marefiya_prod:latest
+    container_name: michot_celery_beat_prod
     command: celery -A config.celery beat -l info
     depends_on:
       - api
@@ -88,6 +85,6 @@ services:
       - ./:/usr/src/app
 
 volumes:
-  marefiya_pgdata_staging:
-  marefiya_pgadmin_data_staging:
-  marefiya_redis_data_staging:
+  marefiya_pgdata_prod:
+  marefiya_pgadmin_data_prod:
+  marefiya_redis_data_prod:
