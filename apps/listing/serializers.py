@@ -19,6 +19,7 @@ from apps.core.serializers import (
     FlexibleAddressField,
     FacilitySerializer,
     JsonSerializerField,
+    StringArrayField,
 )
 from apps.listing.exceptions import BookingConflict
 from apps.account.enums import RoleCode
@@ -286,7 +287,11 @@ class RoomListingResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin, se
 class RoomListingSerializer(serializers.ModelSerializer):
     address = FlexibleAddressField(required=False)
     images = serializers.ListField(child=serializers.ImageField())
-    amenities = JsonSerializerField()
+    amenities = StringArrayField(
+        child=serializers.PrimaryKeyRelatedField(
+            queryset=Amenity.objects.all()
+        )
+    )
     hotel_id = serializers.UUIDField()
 
     class Meta:
@@ -434,7 +439,12 @@ class GuestHouseProfileResponseSerializer(serializers.ModelSerializer):
 
 class GuestHouseRoomSerializer(serializers.ModelSerializer):
     images = serializers.ListField(child=serializers.ImageField(), required=False)
-    amenities = JsonSerializerField(required=False)
+    amenities = StringArrayField(
+        child=serializers.PrimaryKeyRelatedField(
+            queryset=Amenity.objects.all()
+        ),
+        required=False
+    )
     guest_house_id = serializers.UUIDField()
 
     class Meta:

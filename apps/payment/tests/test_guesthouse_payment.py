@@ -8,11 +8,11 @@ from decimal import Decimal
 
 from apps.account.models import User, Role
 from apps.account.enums import RoleCode
-from apps.listing.models import GuestHouseBooking, GuestHouseBookingItem, TermsAndConditions
+from apps.listing.models import GuestHouseBooking, GuestHouseBookingItem, TermsAndConditions, GuestHouseProfile, GuestHouseRoom
 from apps.listing.services import GuestHouseAvailabilityService
 from apps.payment.models import PaymentTransaction
 from apps.core.models import Address
-from apps.listing.models import IndividualOwnerProfile
+from apps.account.models import IndividualOwnerProfile
 from django.contrib.contenttypes.models import ContentType
 
 class GuestHousePaymentTests(APITestCase):
@@ -47,22 +47,30 @@ class GuestHousePaymentTests(APITestCase):
             address=self.address
         )
 
-        # Guesthouse
-        self.guesthouse = GuestHouseListing.objects.create(
+        # Guesthouse Profile
+        self.gh_profile = GuestHouseProfile.objects.create(
             title="Payment Enabled GH",
             individual_owner=self.owner_profile,
             address=Address.objects.create(street_line1="GH Addr", city="Addis"),
+            phone="+251911223399"
+        )
+
+        # Guesthouse Room
+        self.gh_room = GuestHouseRoom.objects.create(
+            guest_house=self.gh_profile,
+            title="Standard Room",
             base_price=Decimal("1000.00"),
-            total_rooms=5
+            total_units=5,
+            bed_type=GuestHouseRoom.BedType.DOUBLE
         )
         
-        GuestHouseAvailabilityService.create_availability(self.guesthouse, 5)
+        GuestHouseAvailabilityService.create_availability(self.gh_room, 5)
         
         # T&C
-        ct = ContentType.objects.get_for_model(self.guesthouse)
+        ct = ContentType.objects.get_for_model(self.gh_profile)
         TermsAndConditions.objects.create(
             content_type=ct,
-            object_id=self.guesthouse.id,
+            object_id=self.gh_profile.id,
             version="1.0",
             content="Terms",
             is_active=True,
@@ -83,7 +91,7 @@ class GuestHousePaymentTests(APITestCase):
         
         GuestHouseBookingItem.objects.create(
             booking=self.booking,
-            room=self.guesthouse,
+            room=self.gh_room,
             units_booked=1,
             price_per_unit=Decimal("1000.00")
         )
@@ -114,3 +122,4 @@ class GuestHousePaymentTests(APITestCase):
         tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
         self.assertEqual(tx.content_type.model, "guesthousebooking")
         self.assertEqual(str(tx.object_id), str(self.booking.id))
+

@@ -72,11 +72,7 @@ class ListingService:
         )
 
         # Set amenities
-        amenities = []
-        for amenity_id in amenity_ids:
-            instance = get_object_or_404(Amenity, id=amenity_id)
-            amenities.append(instance)
-        room_listing_instance.amenities.set(amenities)
+        room_listing_instance.amenities.set(amenity_ids)
 
         # Create images
         ImageCreationService.create_images(room_listing_instance, images)
@@ -277,8 +273,7 @@ class ListingService:
             ListingService._update_address(instance, address_data)
             
         if amenity_ids is not None:
-            amenities = Amenity.objects.filter(id__in=amenity_ids)
-            instance.amenities.set(amenities)
+            instance.amenities.set(amenity_ids)
             
         ListingService._update_images(instance, images, kept_image_ids)
         
@@ -556,11 +551,17 @@ class StayAvailabilityService:
     @transaction.atomic()
     def update_guest_house_room(instance: GuestHouseRoom, validated_data: dict, kept_image_ids: list = None):
         images = validated_data.pop("images", [])
+        amenities = validated_data.pop("amenities", None)
         
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
         
+        instance.save()
+        
+        if amenities is not None:
+             instance.amenities.set(amenities)
+
         ListingService._update_images(instance, images, kept_image_ids)
         return instance
 
