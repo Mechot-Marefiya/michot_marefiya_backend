@@ -1586,24 +1586,19 @@ class BookingViewSet(AbstractModelViewSet):
 
         if self.request.query_params.get('as_guest') == 'true':
             return user_bookings
+
+        # Company sees bookings for their hotels
+        if hasattr(self.request.user, 'role') and self.request.user.role and self.request.user.role.code == RoleCode.COMPANY.value:
+             if hasattr(self.request.user, 'profile') and self.request.user.profile:
+                  company = self.request.user.profile
+                  try:
+                      hotel = HotelProfile.objects.get(company=company)
+                      hotel_bookings = queryset.filter(items__room__hotel=hotel)
+                      return (user_bookings | hotel_bookings).distinct()
+                  except HotelProfile.DoesNotExist:
+                      pass
         
-        # Companies see bookings for their listings + own bookings
-        if hasattr(self.request.user, 'role') and self.request.user.role:
-            if self.request.user.role.code == RoleCode.COMPANY.value:
-                # Get company's hotels
-                if hasattr(self.request.user, 'profile') and self.request.user.profile:
-                    from apps.account.models import HotelProfile
-                    company = self.request.user.profile
-                    try:
-                        hotel = HotelProfile.objects.get(company=company)
-                        # Get bookings for rooms in this hotel
-                        hotel_bookings = queryset.filter(
-                            items__room__hotel=hotel
-                        ).distinct()
-                        # Combine with user's own bookings (if they booked as customer)
-                        return (user_bookings | hotel_bookings).distinct()
-                    except HotelProfile.DoesNotExist:
-                        pass
+
         
         return user_bookings
     
@@ -2272,8 +2267,9 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         ):
             return queryset
         
-        user_bookings = queryset.filter(user=user)
         
+        # Users see only their own bookings
+        user_bookings = queryset.filter(user=user).distinct()
         if self.request.query_params.get('as_guest') == 'true':
             return user_bookings
         
