@@ -774,7 +774,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         if self.request.query_params.get('as_guest') == 'true':
             return queryset.filter(query).distinct()
         
-        # Company sees bookings for their guesthouses (Development branch logic)
+        # Company sees bookings for their guesthouses
         if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
             query |= Q(items__room__guest_house__company__user=user)
         
@@ -1229,7 +1229,7 @@ class CarRentalViewSet(AbstractModelViewSet):
         # Company sees rentals for their cars + own rentals
         if getattr(user, 'role', None) and user.role.code == RoleCode.COMPANY.value:
             company_rentals = queryset.filter(rental_items__car_listing__company=user.profile).distinct()
-            return (user_rentals | company_rentals).distinct()
+            return (user_rentals.distinct() | company_rentals).distinct()
 
         return user_rentals
 
@@ -1635,7 +1635,7 @@ class BookingViewSet(AbstractModelViewSet):
                   company = self.request.user.profile
                   try:
                       hotel = HotelProfile.objects.get(company=company)
-                      hotel_bookings = queryset.filter(items__room__hotel=hotel)
+                      hotel_bookings = queryset.filter(items__room__hotel=hotel).distinct()
                       return (user_bookings | hotel_bookings).distinct()
                   except HotelProfile.DoesNotExist:
                       pass
@@ -2342,7 +2342,7 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
                     
                     hotel_bookings = queryset.filter(
                         items__event_space__hotel=hotel
-                    )
+                    ).distinct()
                     
                     return (user_bookings | hotel_bookings).distinct()
                 except HotelProfile.DoesNotExist:
