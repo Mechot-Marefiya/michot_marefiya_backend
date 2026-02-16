@@ -520,7 +520,7 @@ class ChapaPaymentService:
                 return {"success": False, "message": "Empty webhook body"}
 
             headers = {k.lower(): v for k, v in request.headers.items()}
-            signature = headers.get("chapa-signature") or headers.get("x-chapa-signature")
+            signature = headers.get("x-chapa-signature") or headers.get("chapa-signature")
 
             secret = getattr(settings, "CHAPA_WEBHOOK_SECRET", None)
             if not secret:

@@ -10,9 +10,9 @@ from apps.listing.models import Amenity
 
 
 @pytest.fixture
-def company_user(django_user_model):
+def company_user(django_user_model, company_role):
     return django_user_model.objects.create_user(
-        email="company@example.com", password="pass"
+        email="company@example.com", password="pass", role=company_role
     )
 
 
