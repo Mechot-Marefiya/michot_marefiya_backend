@@ -70,7 +70,7 @@ jobs:
               PROJECT_DIR="/root/michot_marefiya_backend"
               COMPOSE_FILE="compose.prod.yaml"
               PROJECT_NAME="michot_prod"
-              API_CONTAINER="michot_prod-api-1"
+              API_CONTAINER="michot-api-prod"
               HEALTH_URL="https://michotmarefia.com/api/admin/login/"
             else
               # --- STAGING CONFIG ---
