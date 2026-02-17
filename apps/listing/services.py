@@ -2114,6 +2114,35 @@ class EventSpaceAvailabilityService:
             objs, batch_size=1000, ignore_conflicts=True
         )
         
+    @staticmethod
+    def ensure_availability(space_listing, start_date, days):
+        existing_dates = set(
+            EventSpaceAvailability.objects.filter(
+                space_listing=space_listing,
+                date__range=[start_date, start_date + timedelta(days=days)]
+            ).values_list('date', flat=True)
+        )
+        
+        objs = []
+        base_price = space_listing.base_price or 0 
+        
+        for i in range(days):
+            d = start_date + timedelta(days=i)
+            if d not in existing_dates:
+                 objs.append(
+                    EventSpaceAvailability(
+                        space_listing=space_listing,
+                        available_eventspace=space_listing.total_units, 
+                        date=d,
+                        price=base_price,
+                    )
+                )
+        
+        if objs:
+             EventSpaceAvailability.objects.bulk_create(
+                objs, batch_size=1000, ignore_conflicts=True
+            )
+
 
     @staticmethod
     def get_available_listings(hotel, space_type, check_in_date, check_out_date):
@@ -3003,8 +3032,11 @@ class InventoryGridService:
                 })
         
         elif property_type == 'eventspace':
-            hotel = get_object_or_404(HotelProfile, id=property_id)
-            spaces = EventSpaceListing.objects.filter(hotel=hotel, is_active=True)
+            space = get_object_or_404(EventSpaceListing, id=property_id)
+            
+            EventSpaceAvailabilityService.ensure_availability(space, start_date, days)
+            
+            spaces = [space]
             for space in spaces:
                 availability_qs = EventSpaceAvailability.objects.filter(
                     space_listing=space, date__range=[start_date, end_date - timedelta(days=1)]

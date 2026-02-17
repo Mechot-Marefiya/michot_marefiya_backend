@@ -2742,8 +2742,10 @@ class InventoryGridView(APIView):
 
         from django.apps import apps
         try:
-            if property_type == 'hotel' or property_type == 'eventspace':
+            if property_type == 'hotel':
                 model = apps.get_model('account', 'HotelProfile')
+            elif property_type == 'eventspace':
+                 model = apps.get_model('listing', 'EventSpaceListing')
             elif property_type == 'guesthouse':
                 model = apps.get_model('listing', 'GuestHouseProfile')
             else:
