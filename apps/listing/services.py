@@ -794,9 +794,9 @@ class PriceService:
             company = getattr(hotel, 'company', None) if hotel else None
 
             candidates = SeasonalRate.objects.filter(active=True).select_related('season')
-            scope_q = Q(room=listing) | Q(hotel=hotel)
+            scope_q = Q(room=listing) | (Q(hotel=hotel) & Q(room__isnull=True))
             if company:
-                scope_q |= Q(company=company)
+                scope_q |= (Q(company=company) & Q(hotel__isnull=True) & Q(room__isnull=True))
             scope_q |= Q(room__isnull=True, hotel__isnull=True, company__isnull=True)
             candidates = candidates.filter(scope_q)
 
