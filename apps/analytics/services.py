@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import List, Dict, Tuple
 
@@ -34,10 +34,12 @@ def compute_company_overview(company_id, start_date: date, end_date: date) -> Di
     - Event Space Bookings
     - Car Rentals
     """
+    next_day = end_date + timedelta(days=1)
+    
     booking_qs = Booking.objects.filter(
         status=Booking.BookingStatus.CONFIRMED,
         created_at__date__gte=start_date,
-        created_at__date__lte=end_date,
+        created_at__lt=next_day,
         items__room__hotel__company__id=company_id,
     ).distinct()
 
@@ -49,7 +51,7 @@ def compute_company_overview(company_id, start_date: date, end_date: date) -> Di
     guesthouse_booking_qs = GuestHouseBooking.objects.filter(
         status=GuestHouseBooking.RentStatus.CONFIRMED,
         created_at__date__gte=start_date,
-        created_at__date__lte=end_date,
+        created_at__lt=next_day,
         items__room__guest_house__company__id=company_id,
     ).distinct()
 
@@ -61,7 +63,7 @@ def compute_company_overview(company_id, start_date: date, end_date: date) -> Di
     eventspace_booking_qs = EventSpaceBooking.objects.filter(
         status=EventSpaceBooking.BookingStatus.CONFIRMED,
         created_at__date__gte=start_date,
-        created_at__date__lte=end_date,
+        created_at__lt=next_day,
         items__event_space__hotel__company__id=company_id,
     ).distinct()
 
@@ -74,7 +76,7 @@ def compute_company_overview(company_id, start_date: date, end_date: date) -> Di
     car_rental_qs = CarRental.objects.filter(
         status=CarRental.RentStatus.CONFIRMED,
         created_at__date__gte=start_date,
-        created_at__date__lte=end_date,
+        created_at__lt=next_day,
         rental_items__car_listing__company__id=company_id,
     ).distinct()
 
@@ -97,19 +99,19 @@ def compute_company_overview(company_id, start_date: date, end_date: date) -> Di
         Booking.objects.filter(
             status=Booking.BookingStatus.CONFIRMED,
             created_at__date__gte=start_date,
-            created_at__date__lte=end_date,
+            created_at__lt=next_day,
             items__room__hotel__company__id=company_id,
         ).distinct().count() +
         GuestHouseBooking.objects.filter(
             status=GuestHouseBooking.RentStatus.CONFIRMED,
             created_at__date__gte=start_date,
-            created_at__date__lte=end_date,
+            created_at__lt=next_day,
             items__room__guest_house__company__id=company_id,
         ).distinct().count() +
         EventSpaceBooking.objects.filter(
             status=EventSpaceBooking.BookingStatus.CONFIRMED,
             created_at__date__gte=start_date,
-            created_at__date__lte=end_date,
+            created_at__lt=next_day,
             items__event_space__hotel__company__id=company_id,
         ).distinct().count()
     )
@@ -118,19 +120,19 @@ def compute_company_overview(company_id, start_date: date, end_date: date) -> Di
         Booking.objects.filter(
             status=Booking.BookingStatus.CANCELLED,
             created_at__date__gte=start_date,
-            created_at__date__lte=end_date,
+            created_at__lt=next_day,
             items__room__hotel__company__id=company_id,
         ).distinct().count() +
         GuestHouseBooking.objects.filter(
             status=GuestHouseBooking.RentStatus.CANCELLED,
             created_at__date__gte=start_date,
-            created_at__date__lte=end_date,
+            created_at__lt=next_day,
             items__room__guest_house__company__id=company_id,
         ).distinct().count() +
         EventSpaceBooking.objects.filter(
             status=EventSpaceBooking.BookingStatus.CANCELLED,
             created_at__date__gte=start_date,
-            created_at__date__lte=end_date,
+            created_at__lt=next_day,
             items__event_space__hotel__company__id=company_id,
         ).distinct().count()
     )
@@ -219,10 +221,12 @@ def compute_company_overview(company_id, start_date: date, end_date: date) -> Di
 
 def compute_individual_owner_overview(owner_id, start_date: date, end_date: date) -> Dict:
     
+    next_day = end_date + timedelta(days=1)
+
     guesthouse_booking_qs = GuestHouseBooking.objects.filter(
         status=GuestHouseBooking.RentStatus.CONFIRMED,
         created_at__date__gte=start_date,
-        created_at__date__lte=end_date,
+        created_at__lt=next_day,
         items__room__guest_house__individual_owner__id=owner_id,
     ).distinct()
 
@@ -234,7 +238,7 @@ def compute_individual_owner_overview(owner_id, start_date: date, end_date: date
     eventspace_booking_qs = EventSpaceBooking.objects.filter(
         status=EventSpaceBooking.BookingStatus.CONFIRMED,
         created_at__date__gte=start_date,
-        created_at__date__lte=end_date,
+        created_at__lt=next_day,
         items__event_space__individual_owner__id=owner_id,
     ).distinct()
 
@@ -256,13 +260,13 @@ def compute_individual_owner_overview(owner_id, start_date: date, end_date: date
         GuestHouseBooking.objects.filter(
             status=GuestHouseBooking.RentStatus.CONFIRMED,
             created_at__date__gte=start_date,
-            created_at__date__lte=end_date,
+            created_at__lt=next_day,
             items__room__guest_house__individual_owner__id=owner_id,
         ).distinct().count() +
         EventSpaceBooking.objects.filter(
             status=EventSpaceBooking.BookingStatus.CONFIRMED,
             created_at__date__gte=start_date,
-            created_at__date__lte=end_date,
+            created_at__lt=next_day,
             items__event_space__individual_owner__id=owner_id,
         ).distinct().count()
     )
@@ -271,13 +275,13 @@ def compute_individual_owner_overview(owner_id, start_date: date, end_date: date
         GuestHouseBooking.objects.filter(
             status=GuestHouseBooking.RentStatus.CANCELLED,
             created_at__date__gte=start_date,
-            created_at__date__lte=end_date,
+            created_at__lt=next_day,
             items__room__guest_house__individual_owner__id=owner_id,
         ).distinct().count() +
         EventSpaceBooking.objects.filter(
             status=EventSpaceBooking.BookingStatus.CANCELLED,
             created_at__date__gte=start_date,
-            created_at__date__lte=end_date,
+            created_at__lt=next_day,
             items__event_space__individual_owner__id=owner_id,
         ).distinct().count()
     )
