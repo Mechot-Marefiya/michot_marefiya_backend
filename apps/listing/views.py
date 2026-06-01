@@ -391,6 +391,11 @@ class GuestHouseRoomViewSet(AbstractModelViewSet):
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["guest_house", "total_units", "number_of_guests"]
 
+    def get_serializer_class(self):
+        if self.action in ["list", "retrieve", "price_preview"]:
+            return GuestHouseRoomResponseSerializer
+        return GuestHouseRoomSerializer
+
     def get_permissions(self):
         if self.action == 'create':
             return [IsAuthenticated()]

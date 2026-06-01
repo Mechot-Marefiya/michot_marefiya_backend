@@ -1,0 +1,74 @@
+# BASELINE: written from CODEBASE_MAP.md
+# PRD status: verified
+# Flutter contract: yes
+# Last updated: 2026-06-01
+
+import pytest
+from decimal import Decimal
+
+pytestmark = pytest.mark.django_db
+
+from apps.core.models import CurrencyRate, Facility
+
+
+def test_get_facilities_public_contract(api_client):
+    Facility.objects.create(name="Pool", icon="pool")
+
+    response = api_client.get("/api/v1/core/facilities/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "count" in data
+    assert "results" in data
+    assert data["results"][0]["name"] == "Pool"
+    assert "id" in data["results"][0]
+    assert "icon" in data["results"][0]
+
+
+def test_get_facilities_detail_not_found(api_client):
+    response = api_client.get("/api/v1/core/facilities/00000000-0000-0000-0000-000000000000/")
+
+    assert response.status_code == 404
+
+
+def test_get_currencies_public_contract(api_client):
+    response = api_client.get("/api/v1/core/currencies/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert data[0]["code"]
+    assert data[0]["name"]
+
+
+def test_get_currency_rates_public_contract(api_client):
+    CurrencyRate.objects.create(base="USD", target="ETB", rate=Decimal("120.000000"))
+
+    response = api_client.get("/api/v1/core/currencies/rates/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, dict)
+    assert data["ETB"] == 120.0
+    assert "USD" in data
+
+
+def test_post_currency_convert_success(api_client):
+    CurrencyRate.objects.create(base="USD", target="ETB", rate=Decimal("120.000000"))
+
+    response = api_client.post(
+        "/api/v1/core/currency/convert/",
+        {"base": "USD", "target": "ETB", "amount": "10", "date": "2026-06-01"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "converted_amount" in data
+    assert "rate_used" in data
+
+
+def test_post_currency_convert_invalid_payload(api_client):
+    response = api_client.post("/api/v1/core/currency/convert/", {}, format="json")
+
+    assert response.status_code == 400

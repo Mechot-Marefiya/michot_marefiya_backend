@@ -2405,6 +2405,26 @@ class GuestHouseAvailabilityService:
         return profiles, aggregated_rooms
 
     @staticmethod
+    def get_availability_matrix(guest_house_id, start_date, end_date):
+        room_ids = GuestHouseRoom.objects.filter(guest_house_id=guest_house_id).values_list('id', flat=True)
+
+        inventory_qs = GuestHouseInventory.objects.filter(
+            guest_house_room_id__in=room_ids,
+            date__gte=start_date,
+            date__lte=end_date,
+        ).values('guest_house_room_id', 'date', 'available_rooms')
+
+        matrix = {}
+        for row in inventory_qs:
+            r_id = str(row['guest_house_room_id'])
+            d_str = row['date'].isoformat()
+            if r_id not in matrix:
+                matrix[r_id] = {}
+            matrix[r_id][d_str] = row['available_rooms']
+
+        return matrix
+
+    @staticmethod
     def validate_availability(room_infos, check_in_date, check_out_date, lock=True):
         """
         Validate availability for each room in room_infos:

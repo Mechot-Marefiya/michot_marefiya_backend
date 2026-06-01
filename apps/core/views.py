@@ -40,7 +40,7 @@ class CurrencyViewSet(ViewSet):
     @throttle_classes([ScopedRateThrottle])
     def rates(self, request):
         """Returns the latest exchange rates for all currencies against USD."""
-        rates.throttle_scope = 'currency_rates'
+        self.throttle_scope = 'currency_rates'
         from django.db.models import Max
         latest_date = CurrencyRate.objects.aggregate(Max('date'))['date__max']
         

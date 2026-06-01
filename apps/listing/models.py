@@ -1327,7 +1327,7 @@ class AddonOffering(AbstractBaseModel):
                 'daily_capacity': _("Daily capacity is required when inventory tracking is enabled")
             })
         
-        if self.price_per_unit and self.price_per_unit <= 0:
+        if self.price_per_unit is not None and self.price_per_unit <= 0:
             raise ValidationError({
                 'price_per_unit': _("Price must be greater than zero")
             })

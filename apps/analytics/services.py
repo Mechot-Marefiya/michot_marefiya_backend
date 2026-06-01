@@ -552,10 +552,10 @@ def get_recent_activity(company_id: str, limit: int = 15) -> List[Dict]:
 
     car_qs = CarRental.objects.filter(
         rental_items__car_listing__company__id=company_id
-    ).select_related("user").distinct().order_by("-created_at")[:limit]
+    ).select_related("renter").distinct().order_by("-created_at")[:limit]
 
     for b in car_qs:
-        user_name = f"{b.user.first_name} {b.user.last_name}" if b.user else (b.guest_email or "Guest")
+        user_name = f"{b.renter.first_name} {b.renter.last_name}" if b.renter else (b.guest_email or "Guest")
         activities.append({
             "id": f"car-{b.id}",
             "type": "booking_created",
