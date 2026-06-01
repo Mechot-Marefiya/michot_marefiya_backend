@@ -38,6 +38,12 @@ class Address(AbstractBaseModel):
         max_digits=9, decimal_places=6, blank=True, null=True
     )
 
+    google_place_id = models.CharField(
+        max_length=255,
+        blank=True,
+        null=True
+    )
+
     class Meta:
         verbose_name = _("Address")
         verbose_name_plural = _("Addresses")

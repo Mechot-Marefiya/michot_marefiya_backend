@@ -1,23 +1,25 @@
 services:
   db:
-    image: postgres
+    image: postgres:18.0
     env_file:
       - .env
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
     volumes:
-      - marefiya_pgdata:/var/lib/postgresql
-  redis:  # <-- NEW REDIS SERVICE
-      image: redis:7-alpine
-      container_name: marefiya_redis
-      ports:
-        - "6379:6379"
-      command: redis-server --appendonly yes
-      volumes:
-        - marefiya_redis_data:/data # Volume for persistence
+      - marefiya_pgdata_dev:/var/lib/postgresql
+
+  redis:
+    image: redis:7-alpine
+    container_name: marefiya_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - marefiya_redis_data:/data
+
   pgadmin4:
     image: dpage/pgadmin4
     ports:
@@ -53,39 +55,48 @@ services:
       db:
         condition: service_healthy
       redis:
-        condition: service_started # Add dependency on Redis
-  celery: # <-- NEW CELERY WORKER SERVICE
-      build:
-        context: .
-        dockerfile: ./docker/prod/Dockerfile
-        args:
-          USER_ID: ${UID}
-          GROUP_ID: ${GID}
-      image: marefiya:dev
-      # The command runs the Celery worker, pointing to your new app instance
-      command: celery -A config.celery worker -l info
-      volumes:
-        - ./:/usr/src/app
-      user: "${UID}:${GID}"
-      env_file:
-        - .env
-      depends_on:
-        - redis
-        - api # Ensure Django is built before Celery starts looking for tasks
-  celery-beat: #new Sevice
+        condition: service_started
+
+  celery:
     build:
       context: .
-      dockerfile: ./docker/prod/Dockerfile
-    command: celery -A config.celery beat -l info
-    depends_on:
-      - api
-      - redis
-    env_file:
-      - .env
+      dockerfile: ./docker/dev/Dockerfile  # ← fix: use dev, not prod
+      args:
+        USER_ID: ${UID}
+        GROUP_ID: ${GID}
+    image: marefiya:dev
+    command: celery -A config.celery worker -l info
     volumes:
       - ./:/usr/src/app
+    user: "${UID}:${GID}"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy  # ← fix: wait for db too, not just redis
+      redis:
+        condition: service_started
+      api:
+        condition: service_started
+
+  celery-beat:
+    build:
+      context: .
+      dockerfile: ./docker/dev/Dockerfile  # ← fix: use dev, not prod
+    command: celery -A config.celery beat -l info
+    volumes:
+      - ./:/usr/src/app
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy  # ← fix: wait for db
+      redis:
+        condition: service_started
+      api:
+        condition: service_started
 
 volumes:
-  marefiya_pgdata:
+  marefiya_pgdata_dev:
   marefiya_pgadmin_data:
-  marefiya_redis_data: # <-- NEW VOLUME FOR REDIS PERSISTENCE
+  marefiya_redis_data:

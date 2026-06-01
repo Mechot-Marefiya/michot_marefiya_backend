@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
+from django.contrib.contenttypes.models import ContentType
 from django.db import transaction, IntegrityError
 from apps.account.models import (
     Role,
@@ -23,6 +24,7 @@ from apps.listing.models import (
     StayAvailability,
     Booking,
     BookingItem,
+    TermsAndConditions,
 )
 from apps.listing.services import StayAvailabilityService, BookingService
 
@@ -96,6 +98,7 @@ class Command(BaseCommand):
             users = self._create_users(options["users"], roles)
             companies = self._create_companies(options["hotels"], roles, facilities)
             hotels = self._create_hotels(companies, facilities)
+            self._ensure_terms(hotels, kind="hotel")
             rooms = self._create_rooms(hotels, amenities, options["rooms_per_hotel"])
             self._create_availability(rooms)
             bookings = self._create_bookings(users, rooms, options["bookings"])
@@ -103,6 +106,7 @@ class Command(BaseCommand):
             cars = self._create_cars(companies, options["cars"])
             properties = self._create_properties(companies, options["properties"])
             guest_houses = self._create_guest_houses(companies, amenities, options["guest_houses"])
+            self._ensure_terms(guest_houses, kind="guesthouse")
 
         self.stdout.write(
             self.style.SUCCESS(
@@ -190,6 +194,28 @@ class Command(BaseCommand):
             amenity, _ = Amenity.objects.get_or_create(name=name, defaults={"icon": icon})
             amenities.append(amenity)
         return amenities
+
+    def _ensure_terms(self, objects, kind="listing"):
+        created = 0
+        for obj in objects:
+            content_type = ContentType.objects.get_for_model(obj)
+            _, was_created = TermsAndConditions.objects.get_or_create(
+                content_type=content_type,
+                object_id=obj.id,
+                version="1.0",
+                defaults={
+                    "title": f"Demo {kind.title()} Terms",
+                    "content": (
+                        f"<p>Demo terms and conditions for {obj}.</p>"
+                        "<p>These were seeded for local development.</p>"
+                    ),
+                    "effective_date": date.today(),
+                    "is_active": True,
+                },
+            )
+            if was_created:
+                created += 1
+        return created
 
     def _create_users(self, count, roles):
         users = []
@@ -395,6 +421,8 @@ class Command(BaseCommand):
                     "check_in_date": check_in,
                     "check_out_date": check_out,
                     "status": status,
+                    "terms_accepted": True,
+                    "terms_version": "1.0",
                     "items": [
                         {
                             "room": room,
