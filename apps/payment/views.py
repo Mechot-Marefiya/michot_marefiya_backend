@@ -32,6 +32,22 @@ from apps.core.utils import convert_currency
 from .models import PaymentTransaction
 from .services import ChapaPaymentService
 
+
+def _is_payment_owner_or_admin(user, payment_tx):
+    if user.is_superuser or (
+        hasattr(user, 'role') and
+        user.role and
+        user.role.code == RoleCode.ADMIN.value
+    ):
+        return True
+
+    booking = payment_tx.resolved_booking
+    if not booking:
+        return False
+
+    return getattr(booking, 'user', None) == user or getattr(booking, 'renter', None) == user
+
+
 @extend_schema(tags=["Payments"])
 class InitiatePaymentView(APIView):
     permission_classes = [AllowAny]
@@ -366,29 +382,21 @@ def verify_payment(request, tx_ref):
     Admin can verify any payment.
     """
     try:
-        result = ChapaPaymentService.handle_callback({"tx_ref": tx_ref})
-
         try:
             payment_tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
             
-            # Check permission
-            user = request.user
-            is_admin = user.is_superuser or (
-                hasattr(user, 'role') and
-                user.role and
-                user.role.code == RoleCode.ADMIN.value
-            )
-            
-            if not is_admin and payment_tx.booking.user != user:
+            if not _is_payment_owner_or_admin(request.user, payment_tx):
                 return Response(
                     {"error": "You can only verify your own payments."},
                     status=status.HTTP_403_FORBIDDEN
                 )
-            
+
+            result = ChapaPaymentService.handle_callback({"tx_ref": tx_ref})
             serializer = PaymentTransactionSerializer(payment_tx)
             response_data = serializer.data
             response_data["chapa_verification"] = result
         except PaymentTransaction.DoesNotExist:
+            result = ChapaPaymentService.handle_callback({"tx_ref": tx_ref})
             response_data = {"chapa_verification": result}
 
         return Response(response_data)
@@ -444,15 +452,7 @@ def cancel_payment(request, tx_ref):
     try:
         payment_tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
         
-        # Check permission
-        user = request.user
-        is_admin = user.is_superuser or (
-            hasattr(user, 'role') and
-            user.role and
-            user.role.code == RoleCode.ADMIN.value
-        )
-        
-        if not is_admin and payment_tx.booking.user != user:
+        if not _is_payment_owner_or_admin(request.user, payment_tx):
             return Response(
                 {"error": "You can only cancel your own payments."},
                 status=status.HTTP_403_FORBIDDEN

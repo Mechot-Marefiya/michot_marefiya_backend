@@ -3,6 +3,7 @@ import pytest
 from io import BytesIO
 from PIL import Image
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 from rest_framework.test import APIClient
 from apps.core.models import Address
 from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile
@@ -82,8 +83,13 @@ def company_profile(company_user) -> CompanyProfile:
         "address": address,
         "logo": logo,
         "category": CompanyProfile.CategoryChoice.HOTEL,
+        "status": CompanyProfile.StatusChoice.APPROVED,
+        "approved_at": timezone.now(),
     }
-    return CompanyProfile.objects.create(user=company_user, **data)
+    company = CompanyProfile.objects.create(user=company_user, **data)
+    company_user.company = company
+    company_user.save(update_fields=["company"])
+    return company
 
 
 @pytest.fixture
@@ -106,7 +112,6 @@ def individual_owner_profile() -> IndividualOwnerProfile:
         "last_name": "Bekele",
         "address": address,
         "phone": "+251911223344",
-        "category": IndividualOwnerProfile.PropertyCategoryChoice.APARTMENT,
         "national_id_number": 123456,
     }
     return IndividualOwnerProfile.objects.create(**data)
@@ -135,6 +140,23 @@ def authenticated_michot_admin_client(michot_admin) -> APIClient:
 def authenticated_hotel_profile_client(company_user, hotel_profile) -> APIClient:
     client = APIClient()
     client.force_authenticate(user=company_user)
+    return client
+
+
+@pytest.fixture
+def authenticated_individual_owner_client(
+    django_user_model, normal_role, individual_owner_profile
+) -> APIClient:
+    user = django_user_model.objects.create_user(
+        email="owner-listing@example.com",
+        password="pass1234",
+        role=normal_role,
+    )
+    user.individual_owner = individual_owner_profile
+    user.save(update_fields=["individual_owner"])
+
+    client = APIClient()
+    client.force_authenticate(user=user)
     return client
 
 

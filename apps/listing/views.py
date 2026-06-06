@@ -1074,17 +1074,19 @@ class CarListingViewSet(AbstractModelViewSet):
     def perform_create(self, serializer):
         user = self.request.user
         if not serializer.validated_data.get('company') and not serializer.validated_data.get('individual_owner'):
-            try:
-                individual_owner = IndividualOwnerProfile.objects.get(user=user)
+            individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+            if individual_owner:
                 serializer.save(individual_owner=individual_owner)
-            except IndividualOwnerProfile.DoesNotExist:
-                try:
-                    company = CompanyProfile.objects.get(user=user)
-                    if company.status != CompanyProfile.StatusChoice.APPROVED:
-                        raise PermissionDenied("Company profile is not approved.")
-                    serializer.save(company=company)
-                except CompanyProfile.DoesNotExist:
-                    serializer.save()
+                return
+
+            company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+            if company:
+                if company.status != CompanyProfile.StatusChoice.APPROVED:
+                    raise PermissionDenied("Company profile is not approved.")
+                serializer.save(company=company)
+                return
+
+            serializer.save()
         else:
             serializer.save()
     @extend_schema(responses=CarListingResponseSerializer)
@@ -1308,9 +1310,9 @@ class CarRentalViewSet(AbstractModelViewSet):
             )
             CarAvailabilityService.update_availability(
                 car_listing=car_listing,
-                rental=rental,
-                rental_item=rental_item,
-                action="create"
+                quantity=rental_item.units_rent,
+                start_date=rental.start_date,
+                end_date=rental.end_date,
             )
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -1323,19 +1325,15 @@ class CarRentalViewSet(AbstractModelViewSet):
 
         # Check daily availability again
         for item in rental.rental_items.all():
-            availability = CarAvailabilityService.validate_availability(
-                item.car_listing, rental.start_date, rental.end_date, item.units_rent
-            )
-            if not availability.get('available'):
-                return Response({"error": availability.get('reason')}, status=status.HTTP_400_BAD_REQUEST)
+            try:
+                CarAvailabilityService.validate_availability(
+                    item.car_listing, item.units_rent, rental.start_date, rental.end_date
+                )
+            except Exception as exc:
+                return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         rental.status = CarRental.RentStatus.CONFIRMED
         rental.save()
-
-        for item in rental.rental_items.all():
-            CarAvailabilityService.update_availability(
-                item.car_listing, rental, item, action="confirm"
-            )
         return Response(self.get_serializer(rental).data)
 
     @action(detail=True, methods=['post'])
@@ -1349,7 +1347,11 @@ class CarRentalViewSet(AbstractModelViewSet):
 
         for item in rental.rental_items.all():
             CarAvailabilityService.update_availability(
-                item.car_listing, rental, item, action="cancel"
+                item.car_listing,
+                item.units_rent,
+                rental.start_date,
+                rental.end_date,
+                increment=True,
             )
         return Response(self.get_serializer(rental).data)
 
@@ -2038,9 +2040,45 @@ class StayAvailabilityUpdateView(APIView):
         )
 class CarAvailabilityUpdateAPIView(APIView):
     permission_classes = [IsAuthenticated]
+
+    def _can_update_availability(self, user, availability):
+        if user.is_superuser or (
+            hasattr(user, 'role') and
+            user.role and
+            user.role.code == RoleCode.ADMIN.value
+        ):
+            return True
+
+        car = availability.car_listing
+        company = getattr(car, 'company', None)
+        if company:
+            if getattr(company, 'user', None) == user:
+                return True
+            if getattr(user, 'company', None) == company:
+                return True
+
+        individual_owner = getattr(car, 'individual_owner', None)
+        if individual_owner and getattr(user, 'individual_owner', None) == individual_owner:
+            return True
+
+        return False
+
     def patch(self, request, pk, format=None):
         """Update a CarAvailability instance (partial update)."""
-        availability = get_object_or_404(CarAvailability, pk=pk)
+        availability = get_object_or_404(
+            CarAvailability.objects.select_related(
+                'car_listing',
+                'car_listing__company',
+                'car_listing__individual_owner',
+            ),
+            pk=pk,
+        )
+        if not self._can_update_availability(request.user, availability):
+            return Response(
+                {"detail": "You do not have permission to update this availability."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
         # Set partial=True to allow missing fields
         serializer = CarAvailabilityUpdateSerializer(availability, data=request.data, partial=True)
         

@@ -5,6 +5,7 @@
 
 import pytest
 from decimal import Decimal
+from datetime import date, timedelta
 
 pytestmark = pytest.mark.django_db
 
@@ -39,10 +40,12 @@ def test_get_currencies_public_contract(api_client):
     assert isinstance(data, list)
     assert data[0]["code"]
     assert data[0]["name"]
+    assert "results" not in data
+    assert any(item["code"] == "USD" for item in data)
 
 
 def test_get_currency_rates_public_contract(api_client):
-    CurrencyRate.objects.create(base="USD", target="ETB", rate=Decimal("120.000000"))
+    CurrencyRate.objects.create(base="USD", target="ETB", rate=Decimal("120.000000"), date=date.today())
 
     response = api_client.get("/api/v1/core/currencies/rates/")
 
@@ -53,22 +56,84 @@ def test_get_currency_rates_public_contract(api_client):
     assert "USD" in data
 
 
+def test_get_currency_rates_uses_latest_rate_date(api_client):
+    yesterday = date.today() - timedelta(days=1)
+    today = date.today()
+    CurrencyRate.objects.create(base="USD", target="ETB", rate=Decimal("100.000000"), date=yesterday)
+    CurrencyRate.objects.create(base="USD", target="ETB", rate=Decimal("125.000000"), date=today)
+    CurrencyRate.objects.create(base="USD", target="EUR", rate=Decimal("0.900000"), date=today)
+
+    response = api_client.get("/api/v1/core/currencies/rates/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ETB"] == 125.0
+    assert data["EUR"] == 0.9
+    assert data["USD"] == 1.0
+
+
+def test_get_currency_rates_not_found_when_empty(api_client):
+    response = api_client.get("/api/v1/core/currencies/rates/")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "No rate data available."}
+
+
 def test_post_currency_convert_success(api_client):
-    CurrencyRate.objects.create(base="USD", target="ETB", rate=Decimal("120.000000"))
+    rate_date = date.today()
+    CurrencyRate.objects.create(base="USD", target="ETB", rate=Decimal("120.000000"), date=rate_date)
 
     response = api_client.post(
         "/api/v1/core/currency/convert/",
-        {"base": "USD", "target": "ETB", "amount": "10", "date": "2026-06-01"},
+        {"base": "USD", "target": "ETB", "amount": "10", "date": rate_date.isoformat()},
         format="json",
     )
 
     assert response.status_code == 200
     data = response.json()
-    assert "converted_amount" in data
-    assert "rate_used" in data
+    assert data["status"] == "success"
+    assert data["input_amount"] == 10.0
+    assert data["base"] == "USD"
+    assert data["target"] == "ETB"
+    assert data["converted_amount"] == 1200.0
+    assert data["rate_date"] == rate_date.isoformat()
+    assert data["rate_used"] == 120.0
+
+
+def test_post_currency_convert_same_currency_returns_identity(api_client):
+    rate_date = date.today()
+
+    response = api_client.post(
+        "/api/v1/core/currency/convert/",
+        {"base": "USD", "target": "USD", "amount": "10", "date": rate_date.isoformat()},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["converted_amount"] == 10.0
+    assert data["rate_used"] == 1.0
+
+
+def test_post_currency_convert_missing_rate_returns_not_found(api_client):
+    response = api_client.post(
+        "/api/v1/core/currency/convert/",
+        {"base": "EUR", "target": "ETB", "amount": "10", "date": date.today().isoformat()},
+        format="json",
+    )
+
+    assert response.status_code == 404
+    data = response.json()
+    assert "error" in data
+    assert "No exchange rate found" in data["error"]
 
 
 def test_post_currency_convert_invalid_payload(api_client):
     response = api_client.post("/api/v1/core/currency/convert/", {}, format="json")
 
     assert response.status_code == 400
+    data = response.json()
+    assert "base" in data
+    assert "target" in data
+    assert "amount" in data
+    assert "date" in data

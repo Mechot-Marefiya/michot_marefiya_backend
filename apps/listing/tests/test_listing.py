@@ -1,3 +1,4 @@
+import json
 import pytest
 from PIL import Image
 from io import BytesIO
@@ -74,6 +75,7 @@ class TestRoomListingAPI:
     def test_room_listing_creation(
         self,
         authenticated_hotel_profile_client,
+        hotel_profile,
         address_payload,
         images_list,
         amenities,
@@ -81,6 +83,7 @@ class TestRoomListingAPI:
         data = {
             "images": images_list,
             "title": "Deluxe room",
+            "hotel_id": str(hotel_profile.id),
             "description": "A very luxury room with 2 king bed",
             "base_price": "2000",
             "address": address_payload,
@@ -106,6 +109,7 @@ class TestRoomListingAPI:
     def test_room_listing_creation_fails_on_missed_data(
         self,
         authenticated_hotel_profile_client,
+        hotel_profile,
         amenities,
         address_payload,
         images_list,
@@ -113,6 +117,7 @@ class TestRoomListingAPI:
         data = {
             "images": images_list,
             "title": "",
+            "hotel_id": str(hotel_profile.id),
             "base_price": "2000",
             "address": address_payload,
             "number_of_guests": 2,
@@ -138,7 +143,7 @@ class TestGuestHouseListingAPI:
 
     def test_create_guest_house_with_individual_owner(
         self,
-        authenticated_client,
+        authenticated_individual_owner_client,
         individual_owner_profile,
         address_payload,
         images_list,
@@ -146,14 +151,13 @@ class TestGuestHouseListingAPI:
     ):
         payload = {
             "title": "ABCD",
-            "base_price": 12500.00,
-            "amenities": amenities,
+            "amenities": json.dumps([str(amenity_id) for amenity_id in amenities]),
             "address": address_payload,
             "individual_owner": individual_owner_profile.id,
             "images": images_list,
         }
 
-        res = authenticated_client.post(
+        res = authenticated_individual_owner_client.post(
             reverse(self.endpoint), payload, format="multipart"
         )
 
@@ -175,8 +179,7 @@ class TestGuestHouseListingAPI:
     ):
         payload = {
             "title": "ABCD",
-            "base_price": 12500.00,
-            "amenities": amenities,
+            "amenities": json.dumps([str(amenity_id) for amenity_id in amenities]),
             "address": address_payload,
             "images": images_list,
         }
@@ -200,8 +203,7 @@ class TestGuestHouseListingAPI:
         """
         payload = {
             "title": "ABCD",
-            "base_price": 12500.00,
-            "amenities": amenities,
+            "amenities": json.dumps([str(amenity_id) for amenity_id in amenities]),
             "address": address_payload,
             "images": images_list,
         }
@@ -210,7 +212,7 @@ class TestGuestHouseListingAPI:
             reverse(self.endpoint), payload, format="multipart"
         )
         assert res.status_code == 400
-        assert "Valid Company or individual owner must exist" in str(res.data)
+        assert "An owner is required." in str(res.data)
 
 
 @pytest.mark.django_db(transaction=True)
@@ -234,6 +236,9 @@ class TestCarListingAPI:
             "transmission": CarListing.TransmissionChoices.AUTOMATIC,
             "listing_type": CarListing.ListingTypeChoices.SELL,
             "condition": CarListing.ConditionChoices.NEW,
+            "car_class": CarListing.CarClassChoices.NORMAL,
+            "quantity": 1,
+            "seats": 5,
         }
 
         res = authenticated_company_profile_client.post(
@@ -244,11 +249,11 @@ class TestCarListingAPI:
         assert res.status_code == status.HTTP_201_CREATED
         car = CarListing.objects.get(id=res.data["id"])
         assert car.individual_owner is None
-        assert str(car) == "bmw::X5::normal"
+        assert str(car) == "bmw::X5"
 
     def test_create_car_with_individual_owner(
         self,
-        authenticated_company_profile_client,
+        authenticated_individual_owner_client,
         images_list,
         individual_owner_profile,
     ):
@@ -265,9 +270,12 @@ class TestCarListingAPI:
             "transmission": CarListing.TransmissionChoices.MANUAL,
             "listing_type": CarListing.ListingTypeChoices.SELL,
             "condition": CarListing.ConditionChoices.NEW,
+            "car_class": CarListing.CarClassChoices.NORMAL,
+            "quantity": 1,
+            "seats": 5,
         }
 
-        res = authenticated_company_profile_client.post(
+        res = authenticated_individual_owner_client.post(
             self.endpoint, payload, format="multipart"
         )
         # print("RES", res.data)
@@ -291,6 +299,9 @@ class TestCarListingAPI:
             "transmission": CarListing.TransmissionChoices.AUTOMATIC,
             "listing_type": CarListing.ListingTypeChoices.SELL,
             "condition": CarListing.ConditionChoices.NEW,
+            "car_class": CarListing.CarClassChoices.NORMAL,
+            "quantity": 1,
+            "seats": 5,
         }
         res = authenticated_michot_admin_client.post(
             self.endpoint, payload, format="multipart"
@@ -298,7 +309,7 @@ class TestCarListingAPI:
 
         print("RES", res.data)
         assert res.status_code == status.HTTP_400_BAD_REQUEST
-        assert "Valid Company or individual owner must exist" in str(res.data)
+        assert "An owner is required." in str(res.data)
 
 
 @pytest.mark.db(transaction=True)
@@ -318,7 +329,6 @@ class TestPropertyListingAPI:
             "bathrooms": 2,
             "square_meters": 120,
             "is_furnished": True,
-            "listing_type": PropertyListing.ListingTypeChoices.SELL,
         }
 
         res = authenticated_company_profile_client.post(
@@ -335,7 +345,7 @@ class TestPropertyListingAPI:
 
     def test_create_property_with_individual_owner(
         self,
-        authenticated_client,
+        authenticated_individual_owner_client,
         individual_owner_profile,
         images_list,
         address_payload,
@@ -350,10 +360,10 @@ class TestPropertyListingAPI:
             "bedrooms": 4,
             "bathrooms": 2,
             "square_meters": 120,
-            "listing_type": PropertyListing.ListingTypeChoices.RENT,
+            "is_furnished": True,
         }
 
-        res = authenticated_client.post(
+        res = authenticated_individual_owner_client.post(
             reverse(self.endpoint), payload, format="multipart"
         )
 
@@ -377,7 +387,7 @@ class TestPropertyListingAPI:
             "bedrooms": 4,
             "bathrooms": 2,
             "square_meters": 120,
-            "listing_type": PropertyListing.ListingTypeChoices.RENT,
+            "is_furnished": True,
         }
 
         res = authenticated_michot_admin_client.post(
@@ -400,7 +410,7 @@ class TestPropertyListingAPI:
             "bedrooms": 4,
             "bathrooms": 2,
             "square_meters": 120,
-            "listing_type": PropertyListing.ListingTypeChoices.RENT,
+            "is_furnished": True,
         }
 
         res = authenticated_company_profile_client.post(

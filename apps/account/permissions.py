@@ -143,10 +143,20 @@ class IsCompanyOwner(permissions.BasePermission):
 
         if hasattr(obj, 'company') and hasattr(obj.company, 'user'):
             return obj.company.user == request.user
+
+        if hasattr(obj, 'vendor_company') and obj.vendor_company:
+            if hasattr(request.user, 'company') and request.user.company == obj.vendor_company:
+                return True
+            if hasattr(obj.vendor_company, 'user') and obj.vendor_company.user == request.user:
+                return True
             
         if hasattr(obj, 'individual_owner') and hasattr(request.user, 'individual_owner'):
              if obj.individual_owner == request.user.individual_owner:
                  return True
+
+        if hasattr(obj, 'vendor_individual') and obj.vendor_individual:
+            if hasattr(request.user, 'individual_owner') and request.user.individual_owner == obj.vendor_individual:
+                return True
 
         return False
 

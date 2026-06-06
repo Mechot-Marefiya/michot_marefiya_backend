@@ -42,6 +42,25 @@ def _company_application_client(api_client):
     return api_client
 
 
+def _pending_company_profile(company_user, name="Pending Company"):
+    return CompanyProfile.objects.create(
+        user=company_user,
+        name=name,
+        phone="0911222333",
+        category="hotel",
+        description="Pending approval",
+        address=Address.objects.create(
+            street_line1="Pending Street",
+            country="Ethiopia",
+            city="Addis Ababa",
+            sub_city="Bole",
+            state="Addis Ababa",
+            postal_code="1000",
+        ),
+        status=CompanyProfile.StatusChoice.PENDING,
+    )
+
+
 def test_post_company_application_success(api_client, image_file):
     client = _company_application_client(api_client)
     response = client.post(
@@ -63,6 +82,31 @@ def test_post_company_application_success(api_client, image_file):
     assert data["status"] in {"pending", "approved"}
     assert "address" in data
     assert "user" in data
+    assert "name" in data
+    assert "phone" in data
+    assert "category" in data
+
+
+def test_get_company_list_public_contract(api_client, company):
+    response = api_client.get("/api/v1/account/companies/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "count" in data
+    assert "results" in data
+    assert data["results"][0]["id"] == str(company.id)
+
+
+def test_get_company_detail_public_contract(api_client, company):
+    response = api_client.get(f"/api/v1/account/companies/{company.id}/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == str(company.id)
+    assert data["status"] == company.status
+    assert "approved_at" in data
+    assert "approved_by" in data
+    assert "address" in data
 
 
 def test_post_company_application_unauthenticated(api_client, image_file):
@@ -90,29 +134,26 @@ def test_post_company_application_invalid_payload(api_client):
     assert isinstance(response.json(), dict)
 
 
+def test_post_company_application_unauthenticated_invalid_payload(api_client):
+    response = api_client.post("/api/v1/account/companies/apply/", {}, format="json")
+
+    assert response.status_code == 401
+
+
 def test_post_company_approve_forbidden_for_non_admin(auth_client, company):
     response = auth_client.post(f"/api/v1/account/companies/{company.id}/approve/")
 
     assert response.status_code == 403
 
 
-def test_post_company_approve_success(admin_client, company_user):
-    pending_profile = CompanyProfile.objects.create(
-        user=company_user,
-        name="Pending Company",
-        phone="0911222333",
-        category="hotel",
-        description="Pending approval",
-        address=Address.objects.create(
-            street_line1="Pending Street",
-            country="Ethiopia",
-            city="Addis Ababa",
-            sub_city="Bole",
-            state="Addis Ababa",
-            postal_code="1000",
-        ),
-        status=CompanyProfile.StatusChoice.PENDING,
-    )
+def test_post_company_approve_unauthenticated(api_client, company):
+    response = api_client.post(f"/api/v1/account/companies/{company.id}/approve/")
+
+    assert response.status_code == 401
+
+
+def test_post_company_approve_success(admin_client, admin_user, company_user):
+    pending_profile = _pending_company_profile(company_user)
 
     response = admin_client.post(f"/api/v1/account/companies/{pending_profile.id}/approve/")
 
@@ -120,26 +161,15 @@ def test_post_company_approve_success(admin_client, company_user):
     data = response.json()
     assert data["status"] == "approved"
     assert data["approved_by"] is not None
+    assert data["approved_at"] is not None
+    pending_profile.refresh_from_db()
+    assert pending_profile.status == CompanyProfile.StatusChoice.APPROVED
+    assert pending_profile.approved_by == admin_user
 
 
 def test_post_company_reject_success(admin_client):
     user = User.objects.create_user(email="reject@example.com", password="pass1234")
-    profile = CompanyProfile.objects.create(
-        user=user,
-        name="Reject Company",
-        phone="0911222444",
-        category="hotel",
-        description="Pending approval",
-        address=Address.objects.create(
-            street_line1="Reject Street",
-            country="Ethiopia",
-            city="Addis Ababa",
-            sub_city="Bole",
-            state="Addis Ababa",
-            postal_code="1000",
-        ),
-        status=CompanyProfile.StatusChoice.PENDING,
-    )
+    profile = _pending_company_profile(user, name="Reject Company")
 
     response = admin_client.post(
         f"/api/v1/account/companies/{profile.id}/reject/",
@@ -148,7 +178,47 @@ def test_post_company_reject_success(admin_client):
     )
 
     assert response.status_code == 200
-    assert response.json()["status"] == "rejected"
+    data = response.json()
+    assert data["status"] == "rejected"
+    profile.refresh_from_db()
+    assert profile.status == CompanyProfile.StatusChoice.REJECTED
+    assert profile.rejection_reason == "Incomplete documents"
+
+
+def test_post_company_reject_forbidden_for_non_admin(auth_client, company):
+    response = auth_client.post(
+        f"/api/v1/account/companies/{company.id}/reject/",
+        {"reason": "Missing documents"},
+        format="json",
+    )
+
+    assert response.status_code == 403
+
+
+def test_post_company_reject_unauthenticated(api_client, company):
+    response = api_client.post(
+        f"/api/v1/account/companies/{company.id}/reject/",
+        {"reason": "Missing documents"},
+        format="json",
+    )
+
+    assert response.status_code == 401
+
+
+def test_post_company_approve_not_found(admin_client):
+    response = admin_client.post("/api/v1/account/companies/00000000-0000-0000-0000-000000000000/approve/")
+
+    assert response.status_code == 404
+
+
+def test_post_company_reject_not_found(admin_client):
+    response = admin_client.post(
+        "/api/v1/account/companies/00000000-0000-0000-0000-000000000000/reject/",
+        {"reason": "Missing"},
+        format="json",
+    )
+
+    assert response.status_code == 404
 
 
 def test_get_hotel_list_public_contract(api_client, hotel):
@@ -237,6 +307,35 @@ def test_post_hotel_create_success(company_client, company, image_file):
     assert data["name"] == company.name
 
 
+def test_patch_hotel_success(company_client, hotel):
+    response = company_client.patch(
+        f"/api/v1/account/hotels/{hotel.id}/",
+        {"name": "Updated Hotel Name"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    hotel.refresh_from_db()
+    assert hotel.name == "Updated Hotel Name"
+    assert "name" in response.json()
+
+
+def test_patch_hotel_forbidden_for_non_owner(auth_client, hotel):
+    response = auth_client.patch(
+        f"/api/v1/account/hotels/{hotel.id}/",
+        {"name": "Updated Hotel Name"},
+        format="json",
+    )
+
+    assert response.status_code == 403
+
+
+def test_delete_hotel_success(company_client, hotel):
+    response = company_client.delete(f"/api/v1/account/hotels/{hotel.id}/")
+
+    assert response.status_code == 204
+
+
 def test_get_hotel_check_availability_public_contract(api_client, hotel, room):
     StayAvailability.objects.create(hotel=hotel, room=room, date="2026-06-10", available_rooms=2)
     response = api_client.get(
@@ -273,6 +372,17 @@ def test_get_hotel_addons_owner_only(company_client, hotel, addon):
     data = response.json()
     assert isinstance(data, list)
     assert data[0]["id"] == str(addon.id)
+
+
+def test_get_hotel_addons_excludes_inactive(company_client, hotel, addon):
+    addon.hotel = hotel
+    addon.is_active = False
+    addon.save(update_fields=["hotel", "is_active"])
+
+    response = company_client.get(f"/api/v1/account/hotels/{hotel.id}/addons/")
+
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 def test_get_hotel_addons_forbidden_for_non_owner(auth_client, hotel):

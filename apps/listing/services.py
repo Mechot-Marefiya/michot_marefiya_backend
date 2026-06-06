@@ -783,6 +783,7 @@ class PriceService:
                 p = Decimal(inv.price).quantize(Decimal('0.01'))
                 base = Decimal(listing.base_price)
                 return {
+                    "price": p,
                     "price_per_unit": p,
                     "source": "inventory",
                     "rate_id": None,
@@ -829,6 +830,7 @@ class PriceService:
                     p = Decimal(chosen.price_override).quantize(Decimal('0.01'))
                     base = Decimal(listing.base_price)
                     return {
+                        "price": p,
                         "price_per_unit": p,
                         "source": "seasonal",
                         "rate_id": str(chosen.id),
@@ -839,6 +841,7 @@ class PriceService:
                     base = Decimal(listing.base_price)
                     p = (base * Decimal(chosen.multiplier)).quantize(Decimal('0.01'))
                     return {
+                        "price": p,
                         "price_per_unit": p,
                         "source": "seasonal",
                         "rate_id": str(chosen.id),
@@ -848,6 +851,7 @@ class PriceService:
 
         base = Decimal(listing.base_price).quantize(Decimal('0.01'))
         return {
+            "price": base,
             "price_per_unit": base,
             "source": "base",
             "rate_id": None,
@@ -907,6 +911,7 @@ class PriceService:
                 p = Decimal(inv.price).quantize(Decimal('0.01'))
                 results.append({
                     "date": date_val,
+                    "price": p,
                     "price_per_unit": p,
                     "source": "inventory",
                     "rate_id": None,
@@ -939,6 +944,7 @@ class PriceService:
                     p = Decimal(chosen.price_override).quantize(Decimal('0.01'))
                     results.append({
                         "date": date_val,
+                        "price": p,
                         "price_per_unit": p,
                         "source": "seasonal",
                         "rate_id": str(chosen.id),
@@ -951,6 +957,7 @@ class PriceService:
                     p = (base_price * Decimal(chosen.multiplier)).quantize(Decimal('0.01'))
                     results.append({
                         "date": date_val,
+                        "price": p,
                         "price_per_unit": p,
                         "source": "seasonal",
                         "rate_id": str(chosen.id),
@@ -963,6 +970,7 @@ class PriceService:
             p = base_price.quantize(Decimal('0.01'))
             results.append({
                 "date": date_val,
+                "price": p,
                 "price_per_unit": p,
                 "source": "base",
                 "rate_id": None,
@@ -994,6 +1002,7 @@ class PriceService:
                 p = Decimal(inv.price).quantize(Decimal('0.01'))
                 results.append({
                     "date": date_val,
+                    "price": p,
                     "price_per_unit": f"{p:.2f}",
                     "source": "inventory",
                     "rate_id": None,
@@ -1004,6 +1013,7 @@ class PriceService:
                 p = base_price.quantize(Decimal('0.01'))
                 results.append({
                     "date": date_val,
+                    "price": p,
                     "price_per_unit": f"{p:.2f}",
                     "source": "base",
                     "rate_id": None,
@@ -1560,10 +1570,8 @@ class EventSpaceBookingService:
         
         check_in = validated_data["check_in_date"]
         check_out = validated_data["check_out_date"]
-        items_data = validated_data.pop("items")
-        terms_accepted = validated_data.pop("terms_accepted", False)
-        terms_version = validated_data.pop("terms_version", "")
         payment_currency = validated_data.pop("payment_currency", "ETB")
+        validated_data.pop("is_walk_in", None)
 
         if not items_data:
             raise ValidationError("Items are required")
@@ -1597,16 +1605,10 @@ class EventSpaceBookingService:
             logger.error(f"T&C validation failed: {e}")
             raise
 
-        booking = EventSpaceBooking(
-             check_in_date=check_in,
-             check_out_date=check_out,
-             status=validated_data.get("status", EventSpaceBooking.BookingStatus.PENDING),
-             currency=payment_currency,
-             **validated_data
+        booking = EventSpaceBooking.objects.create(
+            currency=payment_currency,
+            **validated_data,
         )
-        if user:
-            booking.user = user
-        
         booking.terms_accepted = True
         booking.terms_version = snapshot_data['version']
         booking.terms_content_snapshot = snapshot_data['content_snapshot']
@@ -1640,11 +1642,6 @@ class EventSpaceBookingService:
                 event_space=space,
                 units_booked=item_data["units_booked"],
                 price_per_unit=price_per_unit,
-                snapshot = {
-                    "original_currency": space.currency,
-                    "original_price": float(space.base_price),
-                    "space_title": space.title
-                }
             )
 
         EventSpaceAvailabilityService.update_availability(
@@ -2537,6 +2534,7 @@ class GuestHouseBookingService:
         terms_accepted = validated_data.pop("terms_accepted", False)
         terms_version = validated_data.pop("terms_version", "")
         payment_currency = validated_data.pop("payment_currency", "ETB")
+        validated_data.pop("is_walk_in", None)
 
         if user:
             validated_data["renter"] = user
@@ -2580,31 +2578,38 @@ class GuestHouseBookingService:
                 logger.error(f"T&C validation failed: {e}")
                 raise
 
-            from apps.listing.models import GuestHouseBooking, GuestHouseBookingItem
+            from apps.listing.models import GuestHouseBookingItem
             from apps.listing.services import PriceService, StayAvailabilityService
-            from apps.core.currency import convert_currency
             from django.conf import settings
             from decimal import Decimal
 
             booking = GuestHouseBooking(
-                start_date=validated_data.get("start_date"),
-                end_date=validated_data.get("end_date"),
-                status=validated_data.get("status", GuestHouseBooking.RentStatus.PENDING),
+                total_price=Decimal("0.00"),
                 currency=payment_currency,
-                **validated_data
+                **validated_data,
             )
-
-            if user:
-                booking.renter = user
-
             booking.save()
             
             rooms_info = []
+            currencies = set()
             for item_data in items_data:
+                room = item_data["room"]
                 rooms_info.append({
-                     "guesthouse_room": item_data['room'],
+                     "guesthouse_room": room,
                      "quantity": item_data['units_booked']
                 })
+                if getattr(room, "currency", None):
+                    currencies.add(room.currency)
+
+            if len(currencies) > 1:
+                raise ValidationError({
+                    "items": f"All guesthouse rooms must have the same currency. Found: {', '.join(sorted(currencies))}"
+                })
+
+            if currencies:
+                booking_currency = currencies.pop()
+            else:
+                booking_currency = payment_currency or "ETB"
 
             GuestHouseAvailabilityService.validate_availability(
                 rooms_info, booking.start_date, booking.end_date
@@ -2620,13 +2625,15 @@ class GuestHouseBookingService:
                      room, booking.start_date, booking.end_date
                 )
                 
-                total_room_native = sum(d['price_per_unit'] for d in price_details)
+                total_room_native = sum(
+                    Decimal(str(d["price_per_unit"])) for d in price_details
+                )
                 avg_rate_native = total_room_native / nights if nights > 0 else 0
                 
                 converted_rate = avg_rate_native
-                if room.currency != payment_currency:
+                if room.currency != booking_currency:
                     try:
-                        converted_rate = convert_currency(avg_rate_native, room.currency, payment_currency)
+                        converted_rate = convert_currency(avg_rate_native, room.currency, booking_currency)
                     except Exception:
                         converted_rate = avg_rate_native 
 
@@ -2635,16 +2642,6 @@ class GuestHouseBookingService:
                     room=room,
                     units_booked=item_data['units_booked'],
                     price_per_unit=converted_rate,
-                    snapshot={
-                        "original_currency": room.currency,
-                        "original_price": float(avg_rate_native),
-                        "room_title": room.title,
-                        "hotel_name": hotel.name if hotel else "N/A",
-                        "price_details": [
-                            {k: str(v) if isinstance(v, Decimal) else v for k, v in d.items()}
-                            for d in price_details
-                        ]
-                    }
                 )
                 
                 total_price += booking_item.subtotal() # Removed nights parameter, assuming subtotal handles it internally
@@ -2677,10 +2674,11 @@ class GuestHouseBookingService:
             
             grand_total = Decimal(0)
             for item in booking.items.all():
-                grand_total += item.subtotal()
+                grand_total += item.subtotal(nights=nights)
             
             platform_fee_rate = Decimal(getattr(settings, 'PLATFORM_FEE_RATE', '0.05'))
             platform_fee = grand_total * platform_fee_rate
+            booking.currency = booking_currency
             booking.total_price = grand_total + platform_fee
             
             booking.terms_accepted = True
@@ -2694,7 +2692,6 @@ class GuestHouseBookingService:
                 rooms_info, booking.start_date, booking.end_date, increment=False
             )
 
-            from apps.core.services import BookingEmailService # Assuming this service exists
             BookingEmailService.send_booking_confirmation(booking)
             
             return booking

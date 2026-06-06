@@ -34,7 +34,7 @@ class ChapaPaymentService:
         }
 
     @staticmethod
-    def initialize_payment(booking, booking_type, email, first_name, last_name, amount, currency="ETB", metadata=None):
+    def initialize_payment(booking, email, first_name, last_name, amount, booking_type="booking", currency="ETB", metadata=None):
         tx_ref = ChapaPaymentService.generate_tx_ref()
 
         callback_url = getattr(settings, "CHAPA_CALLBACK_URL", None)

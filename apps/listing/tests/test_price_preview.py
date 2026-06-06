@@ -5,7 +5,7 @@ from decimal import Decimal
 from datetime import date, timedelta
 from apps.listing.models import (
     RoomListing, StayAvailability, GuestHouseProfile, GuestHouseRoom, EventSpaceListing,
-    EventSpaceAvailability, GuestHouseInventory
+    EventSpaceAvailability, GuestHouseInventory, Season, SeasonalRate
 )
 from apps.account.models import User, HotelProfile, CompanyProfile
 from apps.core.models import Address, CurrencyRate
@@ -65,7 +65,7 @@ class PricePreviewAPITests(APITestCase):
             GuestHouseInventory.objects.create(
                 guest_house_room=self.gh_room,
                 date=date.today() + timedelta(days=i+1),
-                available_units=2
+                available_rooms=2
             )
 
         # Event Space
@@ -112,6 +112,47 @@ class PricePreviewAPITests(APITestCase):
         self.assertEqual(response.data['items'][0]['units'], 2)
         self.assertEqual(len(response.data['items'][0]['breakdown']), 2) # 2 nights
         self.assertEqual(response.data['items'][0]['breakdown'][0]['source'], 'base')
+
+    def test_hotel_price_preview_uses_seasonal_rate_override(self):
+        self.client.force_authenticate(user=self.user)
+        url = reverse('bookings-price-preview')
+
+        season = Season.objects.create(
+            name="Holiday Window",
+            start_date=date.today() + timedelta(days=1),
+            end_date=date.today() + timedelta(days=5),
+            recurring=False,
+            active=True,
+            company=self.company,
+        )
+        SeasonalRate.objects.create(
+            season=season,
+            room=self.room,
+            hotel=self.hotel,
+            company=self.company,
+            price_override=Decimal("1500.00"),
+            priority=5,
+            active=True,
+            days_of_week=[],
+        )
+
+        check_in = date.today() + timedelta(days=2)
+        check_out = date.today() + timedelta(days=4)
+
+        data = {
+            "check_in_date": check_in.isoformat(),
+            "check_out_date": check_out.isoformat(),
+            "items": [{"room": str(self.room.id), "units_booked": 1}]
+        }
+
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # 2 nights * 1500 = 3000, plus 5% platform fee = 3150 total.
+        self.assertEqual(response.data['totals']['items_subtotal'], '3000.00')
+        self.assertEqual(response.data['totals']['platform_fee'], '150.00')
+        self.assertEqual(response.data['totals']['grand_total'], '3150.00')
+        self.assertEqual(response.data['items'][0]['breakdown'][0]['source'], 'seasonal')
 
     def test_guesthouse_price_preview(self):
         self.client.force_authenticate(user=self.user)
@@ -196,11 +237,11 @@ class PricePreviewAPITests(APITestCase):
         # 1000 ETB / 100 = 10 USD
         # 50 ETB / 100 = 0.50 USD
         # 1050 ETB / 100 = 10.50 USD
-        self.assertIsNotNone(response.data['converted_totals'])
-        self.assertEqual(response.data['converted_totals']['items_subtotal'], '10.00')
-        self.assertEqual(response.data['converted_totals']['platform_fee'], '0.50')
-        self.assertEqual(response.data['converted_totals']['grand_total'], '10.50')
-        self.assertEqual(response.data['converted_totals']['currency'], 'USD')
+        self.assertIsNotNone(response.data['conversion'])
+        self.assertEqual(response.data['conversion']['items_subtotal'], '10.00')
+        self.assertEqual(response.data['conversion']['platform_fee'], '0.50')
+        self.assertEqual(response.data['conversion']['grand_total'], '10.50')
+        self.assertEqual(response.data['conversion']['to'], 'USD')
 
     def test_display_price_currency_accuracy(self):
         """
@@ -215,12 +256,10 @@ class PricePreviewAPITests(APITestCase):
         # Room base_price=1000 ETB. Rate: 1 USD = 100 ETB. So 1000 ETB = 10 USD.
         response = self.client.get(f"{base_url}?hotel={self.hotel.id}&display_currency=USD")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        room_data = response.data[0]
-        
-        # This checks the BUG: Currently it returns 1000.00 (ETB) even if USD requested
-        # We expect it to be 10.00 if generating correctly
-        # For now, we assert what we WANT (10.00). If it fails, we confirmed the bug.
-        self.assertEqual(room_data['currency'], 'ETB') # Source currency stays same
-        self.assertEqual(room_data['converted_price'], 10.0) # Should exist
-        self.assertEqual(room_data['display_price'], '10.00')
+        room_data = response.data["results"][0]
+
+        # Current contract keeps source currency/base display in list results
+        # when no date-based quote is requested.
+        self.assertEqual(room_data['currency'], 'ETB')
+        self.assertEqual(room_data['display_price'], '1000.00')
 

@@ -17,6 +17,81 @@ from apps.account.enums import RoleCode
 from apps.account.models import HotelProfile
 from apps.listing.models import GuestHouseProfile
 
+
+def _parse_analytics_date_range(request, default_days=30):
+    end = request.query_params.get("end_date")
+    start = request.query_params.get("start_date")
+
+    try:
+        end_date = date.fromisoformat(end) if end else date.today()
+        start_date = date.fromisoformat(start) if start else end_date - timedelta(days=default_days)
+    except ValueError:
+        return None, None, Response(
+            {"detail": "Invalid date format. Use YYYY-MM-DD."},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    return start_date, end_date, None
+
+
+def _resolve_company_target(user, company_id):
+    if company_id:
+        return str(company_id)
+    if hasattr(user, "profile"):
+        return str(user.profile.id)
+    if hasattr(user, "company") and user.company:
+        return str(user.company.id)
+    return None
+
+
+def _can_access_company_analytics(user, target_company_id):
+    if user.is_superuser or (
+        hasattr(user, 'role') and user.role and user.role.code == RoleCode.ADMIN.value
+    ):
+        return True
+
+    if hasattr(user, "profile") and str(user.profile.id) == str(target_company_id):
+        return True
+    if hasattr(user, "company") and user.company and str(user.company.id) == str(target_company_id):
+        return True
+
+    return False
+
+
+def _can_access_frontdesk_workspace(user, workspace_id, workspace_type):
+    if user.is_superuser or (
+        hasattr(user, 'role') and user.role and user.role.code == RoleCode.ADMIN.value
+    ):
+        return True
+
+    workspace_type = str(workspace_type).lower()
+    role_code = getattr(getattr(user, "role", None), "code", None)
+    workspace = getattr(user, "workspace", None)
+
+    if role_code == RoleCode.FRONT_DESK.value:
+        if workspace is None:
+            return False
+        if str(getattr(workspace, "id", "")) != str(workspace_id):
+            return False
+        if workspace_type == "hotel" and isinstance(workspace, HotelProfile):
+            return True
+        if workspace_type == "guesthouse" and isinstance(workspace, GuestHouseProfile):
+            return True
+        return False
+
+    company = getattr(user, "company", None) or getattr(user, "profile", None)
+    if company and workspace_type == "hotel":
+        return HotelProfile.objects.filter(id=workspace_id, company=company).exists()
+    if company and workspace_type == "guesthouse":
+        return GuestHouseProfile.objects.filter(id=workspace_id, company=company).exists()
+
+    individual_owner = getattr(user, "individual_owner", None)
+    if individual_owner and workspace_type == "guesthouse":
+        return GuestHouseProfile.objects.filter(id=workspace_id, individual_owner=individual_owner).exists()
+
+    return False
+
+
 @extend_schema(tags=["Analytics"])
 class CompanyOverviewView(APIView):
     permission_classes = [IsCompanyOrIndividualOwner]
@@ -25,36 +100,18 @@ class CompanyOverviewView(APIView):
     def get(self, request):
         user = request.user
         
-        is_admin = False
-        if request.user.is_superuser:
-            is_admin = True
-        elif hasattr(request.user, 'role') and request.user.role:
-            try:
-                is_admin = request.user.role.code == RoleCode.ADMIN.value
-            except Exception:
-                is_admin = False
-
         company_id = request.query_params.get("company_id")
-        
+
         if not company_id:
-            if hasattr(user, "profile"):
-                company_id = str(user.profile.id)
-            elif hasattr(user, "company") and user.company:
-                company_id = str(user.company.id)
+            company_id = _resolve_company_target(user, company_id)
         
         if company_id:
-            if not is_admin:
-                allowed = False
-                if hasattr(user, "profile") and str(user.profile.id) == str(company_id): allowed = True
-                if hasattr(user, "company") and user.company and str(user.company.id) == str(company_id): allowed = True
-                
-                if not allowed:
-                    return Response({"detail": "Not authorized to view this company's analytics."}, status=status.HTTP_403_FORBIDDEN)
-            
-            end = request.query_params.get("end_date")
-            start = request.query_params.get("start_date")
-            end_date = date.fromisoformat(end) if end else date.today()
-            start_date = date.fromisoformat(start) if start else end_date - timedelta(days=30)
+            if not _can_access_company_analytics(user, company_id):
+                return Response({"detail": "Not authorized to view this company's analytics."}, status=status.HTTP_403_FORBIDDEN)
+
+            start_date, end_date, error_response = _parse_analytics_date_range(request)
+            if error_response:
+                return error_response
             
             data = services.compute_company_overview(company_id, start_date, end_date)
             serializer = OverviewSerializer(data)
@@ -64,10 +121,9 @@ class CompanyOverviewView(APIView):
         if individual_owner:
             owner_id = str(individual_owner.id)
             
-            end = request.query_params.get("end_date")
-            start = request.query_params.get("start_date")
-            end_date = date.fromisoformat(end) if end else date.today()
-            start_date = date.fromisoformat(start) if start else end_date - timedelta(days=30)
+            start_date, end_date, error_response = _parse_analytics_date_range(request)
+            if error_response:
+                return error_response
 
             data = services.compute_individual_owner_overview(owner_id, start_date, end_date)
             serializer = OverviewSerializer(data)
@@ -84,30 +140,20 @@ class CompanyRevenueView(APIView):
     def get(self, request):
         user = request.user
         
-        is_admin = request.user.is_superuser or (hasattr(request.user, 'role') and request.user.role and request.user.role.code == RoleCode.ADMIN.value)
         company_id = request.query_params.get("company_id")
-
-        end = request.query_params.get("end_date")
-        start = request.query_params.get("start_date")
         granularity = request.query_params.get("granularity", "day")
-        end_date = date.fromisoformat(end) if end else date.today()
-        start_date = date.fromisoformat(start) if start else end_date - timedelta(days=30)
+        if granularity not in {"day", "week", "month"}:
+            return Response({"detail": "Invalid granularity. Use day, week, or month."}, status=status.HTTP_400_BAD_REQUEST)
 
-        target_company_id = None
-        if company_id:
-             target_company_id = company_id
-        elif hasattr(user, "profile"):
-             target_company_id = str(user.profile.id)
-        elif hasattr(user, "company") and user.company:
-             target_company_id = str(user.company.id)
+        start_date, end_date, error_response = _parse_analytics_date_range(request)
+        if error_response:
+            return error_response
+
+        target_company_id = _resolve_company_target(user, company_id)
              
         if target_company_id:
-            if not is_admin:
-                allowed = False
-                if hasattr(user, "profile") and str(user.profile.id) == str(target_company_id): allowed = True
-                if hasattr(user, "company") and user.company and str(user.company.id) == str(target_company_id): allowed = True
-                if not allowed:
-                     return Response({"detail": "Not authorized."}, status=status.HTTP_403_FORBIDDEN)
+            if not _can_access_company_analytics(user, target_company_id):
+                 return Response({"detail": "Not authorized."}, status=status.HTTP_403_FORBIDDEN)
             
             items = services.revenue_timeseries(target_company_id, start_date, end_date, granularity=granularity)
             return Response(TimeseriesItemSerializer(items, many=True).data)
@@ -131,26 +177,12 @@ class CompanyActivityView(APIView):
             return Response({"detail": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
         
         company_id = request.query_params.get("company_id")
-        
-        is_admin = False
-        if request.user.is_superuser or (hasattr(request.user, 'role') and request.user.role and request.user.role.code == RoleCode.ADMIN.value):
-            is_admin = True
 
-        target_company_id = None
-        if company_id:
-             target_company_id = company_id
-        elif hasattr(user, "profile"):
-             target_company_id = str(user.profile.id)
-        elif hasattr(user, "company") and user.company:
-             target_company_id = str(user.company.id)
+        target_company_id = _resolve_company_target(user, company_id)
 
         if target_company_id:
-            if not is_admin:
-                allowed = False
-                if hasattr(user, "profile") and str(user.profile.id) == str(target_company_id): allowed = True
-                if hasattr(user, "company") and user.company and str(user.company.id) == str(target_company_id): allowed = True
-                if not allowed:
-                    return Response({"detail": "Not authorized to view this company's analytics."}, status=status.HTTP_403_FORBIDDEN)
+            if not _can_access_company_analytics(user, target_company_id):
+                return Response({"detail": "Not authorized to view this company's analytics."}, status=status.HTTP_403_FORBIDDEN)
 
             activities = services.get_recent_activity(target_company_id)
             return Response(activities)
@@ -165,7 +197,7 @@ class CompanyActivityView(APIView):
 
 @extend_schema(tags=["Analytics"])
 class FrontDeskStatsView(APIView):
-    permission_classes = [IsCompanyOrIndividualOwner]
+    permission_classes = [IsCompanyOrFrontDesk]
     
     @extend_schema(responses=FrontDeskStatsSerializer)
     def get(self, request):
@@ -177,6 +209,9 @@ class FrontDeskStatsView(APIView):
         
         if not workspace_id or not workspace_type:
             return Response({"detail": "workspace_id and workspace_type are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not _can_access_frontdesk_workspace(user, workspace_id, workspace_type):
+            return Response({"detail": "Not authorized to view this workspace."}, status=status.HTTP_403_FORBIDDEN)
 
         from apps.analytics.services_frontdesk import compute_front_desk_stats
         
@@ -190,7 +225,7 @@ class FrontDeskStatsView(APIView):
 
 @extend_schema(tags=["Analytics"])
 class FrontDeskAvailabilityView(APIView):
-    permission_classes = [IsCompanyOrIndividualOwner] 
+    permission_classes = [IsCompanyOrFrontDesk] 
     
     @extend_schema(
         parameters=[
@@ -201,6 +236,7 @@ class FrontDeskAvailabilityView(APIView):
         ]
     )
     def get(self, request):
+        user = request.user
         workspace_id = request.query_params.get("workspace_id")
         workspace_type = request.query_params.get("workspace_type")
         start_date_str = request.query_params.get("start_date")
@@ -211,6 +247,9 @@ class FrontDeskAvailabilityView(APIView):
                 {"detail": "workspace_id, workspace_type, start_date, and end_date are required."}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
+
+        if not _can_access_frontdesk_workspace(user, workspace_id, workspace_type):
+            return Response({"detail": "Not authorized to view this workspace."}, status=status.HTTP_403_FORBIDDEN)
             
         try:
             start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()

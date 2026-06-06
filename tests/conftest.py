@@ -772,6 +772,11 @@ def car_listing(company):
 
 
 @pytest.fixture
+def property_listing(company):
+    return PropertyListingFactory(company=company)
+
+
+@pytest.fixture
 def guesthouse_booking():
     return GuestHouseBookingFactory()
 

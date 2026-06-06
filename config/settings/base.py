@@ -280,6 +280,13 @@ CHAPA_SECRET_KEY = env("CHAPA_SECRET_KEY", default=None)
 CHAPA_WEBHOOK_SECRET = env("CHAPA_WEBHOOK_SECRET", default=None)
 CHAPA_CALLBACK_URL = env("CHAPA_CALLBACK_URL", default=None)
 FRONTEND_URL = env("FRONTEND_URL", default=None)
+AFRO_MESSAGE_TOKEN = env("AFRO_MESSAGE_TOKEN", default=None)
+AFRO_MESSAGE_URL = env("AFRO_MESSAGE_URL", default=None)
+AFRO_MESSAGE_IDENTIFIER_ID = env("AFRO_MESSAGE_IDENTIFIER_ID", default=None)
+AFRO_MESSAGE_SENDER_NAME = env("AFRO_MESSAGE_SENDER_NAME", default=None)
+AFRO_MESSAGE_TIMEOUT_SECONDS = env("AFRO_MESSAGE_TIMEOUT_SECONDS", default=30, cast=int)
+
+
 # --- Celery Configuration ---
 # Use the Docker service name 'redis' as the hostname for the broker and backend.
 CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://redis:6379/0') 
@@ -323,6 +330,11 @@ EMAIL_HOST_PASSWORD = env('EMAIL_HOST_PASSWORD', default='')
 DEFAULT_FROM_EMAIL = env(
     'DEFAULT_FROM_EMAIL', 
     default='Michot Marefiya <noreply@michotmarefia.com>'
+)
+
+SMS_ERROR_LOG_FILE = env(
+    "SMS_ERROR_LOG_FILE",
+    default=str(BASE_DIR / "logs" / "sms.log"),
 )
 
 # Override to console backend in DEBUG mode for safety

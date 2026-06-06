@@ -43,16 +43,29 @@ def _build_snapshot_for_object(ct, obj):
     return snapshot
 
 
+def _build_snapshot_for_favorite(favorite):
+    """Build a best-effort snapshot from the current favorite target."""
+    try:
+        ct = favorite.content_type
+        target = ct.model_class()._default_manager.filter(pk=favorite.object_id).first()
+        if target:
+            return _build_snapshot_for_object(ct, target)
+    except Exception:
+        pass
+    return {"id": str(favorite.object_id), "type": f"{favorite.content_type.app_label}.{favorite.content_type.model}"}
+
+
 class FavoriteSerializer(serializers.ModelSerializer):
     content_type = serializers.CharField(write_only=True)
     object_id = serializers.CharField()
     content_type_display = serializers.SerializerMethodField(read_only=True)
+    snapshot = serializers.SerializerMethodField(read_only=True)
     object = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Favorite
-        fields = ("id", "content_type", "object_id", "content_type_display", "object", "created_at")
-        read_only_fields = ("id", "created_at", "content_type_display")
+        fields = ("id", "content_type", "object_id", "content_type_display", "snapshot", "object", "created_at")
+        read_only_fields = ("id", "created_at", "content_type_display", "snapshot")
 
     def validate(self, attrs):
         ct_label = attrs.get("content_type")
@@ -73,15 +86,7 @@ class FavoriteSerializer(serializers.ModelSerializer):
         ct = validated_data.pop("content_type_obj")
         object_id = validated_data.get("object_id")
         # build snapshot first (best-effort)
-        snapshot = {}
-        try:
-            # attempt to fetch live object and build snapshot
-            obj = ct.model_class()._default_manager.filter(pk=object_id).first()
-            if obj:
-                snapshot = _build_snapshot_for_object(ct, obj)
-        except Exception:
-            snapshot = {}
-
+        snapshot = _build_snapshot_for_favorite(type("FavoriteStub", (), {"content_type": ct, "object_id": object_id})())
         snapshot_at = timezone.now()
 
         try:
@@ -99,23 +104,32 @@ class FavoriteSerializer(serializers.ModelSerializer):
             # race: someone else created it; return existing
             return Favorite.objects.filter(user=user, content_type=ct, object_id=str(object_id)).first()
 
+    def update(self, instance, validated_data):
+        ct = validated_data.pop("content_type_obj", None)
+        if ct is not None:
+            instance.content_type = ct
+        validated_data.pop("content_type", None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+
+        instance.save()
+        refreshed_snapshot = _build_snapshot_for_favorite(instance)
+        instance.snapshot = refreshed_snapshot
+        instance.snapshot_at = timezone.now()
+        instance.save(update_fields=["snapshot", "snapshot_at"])
+        return instance
+
     def get_content_type_display(self, obj):
         return f"{obj.content_type.app_label}.{obj.content_type.model}"
 
-    def get_object(self, obj):
-        # prefer stored snapshot
+    def get_snapshot(self, obj):
         if obj.snapshot:
             result = dict(obj.snapshot)
             if obj.snapshot_at:
                 result["snapshot_at"] = obj.snapshot_at.isoformat()
             return result
+        return _build_snapshot_for_favorite(obj)
 
-        # fallback to live inspection
-        try:
-            ct = obj.content_type
-            target = obj.content_object
-            if target is None:
-                return {"id": obj.object_id, "type": f"{ct.app_label}.{ct.model}"}
-            return _build_snapshot_for_object(ct, target)
-        except Exception:
-            return {"id": obj.object_id, "type": f"{obj.content_type.app_label}.{obj.content_type.model}"}
+    def get_object(self, obj):
+        return self.get_snapshot(obj)

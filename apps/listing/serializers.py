@@ -24,7 +24,13 @@ from apps.core.serializers import (
 from apps.listing.exceptions import BookingConflict
 from apps.account.enums import RoleCode
 from apps.core.models import Address, Facility
-from apps.listing.services import BookingService, ListingService, EventSpaceAvailabilityService, GuestHouseAvailabilityService
+from apps.listing.services import (
+    BookingService,
+    ListingService,
+    EventSpaceAvailabilityService,
+    GuestHouseAvailabilityService,
+    StayAvailabilityService,
+)
 
 from apps.listing.models import (
     Amenity,
@@ -195,6 +201,7 @@ class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
 
         return {
             'breakdown': breakdown,
+            'daily_breakdown': breakdown,
             'items_subtotal': str(subtotal.quantize(Decimal('0.01'))),
             'subtotal': str(subtotal.quantize(Decimal('0.01'))),       # legacy
             'base_total': str(subtotal.quantize(Decimal('0.01'))),
@@ -498,8 +505,13 @@ class GuestHouseRoomSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
         if kept_image_ids is None and "kept_image_ids" in self.initial_data:
-             kept_image_ids = self.initial_data["kept_image_ids"]
-        return ListingService.update_guest_house_room(instance, validated_data, kept_image_ids)
+            kept_image_ids = self.initial_data["kept_image_ids"]
+        return StayAvailabilityService.update_guest_house_room(instance, validated_data, kept_image_ids)
+
+    def to_representation(self, instance):
+        return GuestHouseRoomResponseSerializer(
+            instance, context=self.context
+        ).to_representation(instance)
 
 class GuestHouseProfileSerializer(serializers.ModelSerializer):
     address = FlexibleAddressField()
@@ -545,6 +557,9 @@ class GuestHouseProfileSerializer(serializers.ModelSerializer):
 
         if company_id and individual_id:
             raise serializers.ValidationError("Only one owner type allowed.")
+
+        if not company_id and not individual_id and not company and not individual_owner:
+            raise serializers.ValidationError("An owner is required.")
         
         # If both are missing, we'll auto-assign in create based on context
         # But if they ARE provided, they must match the user
@@ -1026,21 +1041,34 @@ class CarListingSerializer(serializers.ModelSerializer):
         return value
     
     def validate(self, data):
-        company = data.get("company")
-        individual_owner = data.get("individual_owner")
+        request = self.context.get("request")
+        request_user = getattr(request, "user", None)
+        request_company = getattr(request_user, "company", None) or getattr(request_user, "profile", None)
+        request_individual_owner = getattr(request_user, "individual_owner", None) or getattr(
+            request_user, "individual_owner_profile", None
+        )
+
+        company = data.get("company", getattr(self.instance, "company", None) or request_company)
+        individual_owner = data.get(
+            "individual_owner",
+            getattr(self.instance, "individual_owner", None) or request_individual_owner,
+        )
 
         if company and individual_owner:
             raise serializers.ValidationError("Only one owner type allowed.")
         if not company and not individual_owner:
             raise serializers.ValidationError("An owner is required.")
         
-        listing_type = data.get('listing_type', CarListing.ListingTypeChoices.RENT)
-        quantity = data.get('quantity', 1)
+        listing_type = data.get(
+            "listing_type",
+            getattr(self.instance, "listing_type", CarListing.ListingTypeChoices.RENT),
+        )
+        quantity = data.get("quantity", getattr(self.instance, "quantity", 1))
         
         if listing_type == CarListing.ListingTypeChoices.RENT and quantity < 1:
             raise serializers.ValidationError("Quantity must be at least 1 for rental listings.")
         
-        base_price = data.get('base_price')
+        base_price = data.get("base_price", getattr(self.instance, "base_price", None))
         if base_price and base_price <= 0:
             raise serializers.ValidationError("Base price must be greater than 0.")
         # Ensure provided company profile (if any) is approved
@@ -1061,7 +1089,7 @@ class CarListingSerializer(serializers.ModelSerializer):
             ImageCreationService.create_images(car_listing_instance, images)
         
         # Creates daily availability records
-        CarAvailabilityService.create_availability_for_car_listing(car_listing_instance)
+        CarAvailabilityService.create_availability(car_listing_instance)
         
         return car_listing_instance
 
@@ -1334,6 +1362,7 @@ class CarAvailabilityUpdateSerializer(serializers.Serializer):
     available_from = serializers.DateTimeField(required=False, allow_null=True)
     available_to = serializers.DateTimeField(required=False, allow_null=True)
     quantity_available = serializers.IntegerField(required=False, min_value=0)
+    available_units = serializers.IntegerField(required=False, min_value=0)
     base_price = serializers.DecimalField(max_digits=10, decimal_places=2, required=False) # Example field type
 
     def update(self, instance, validated_data):
@@ -1342,12 +1371,19 @@ class CarAvailabilityUpdateSerializer(serializers.Serializer):
         Includes logic to set is_available=False if quantity_available=0.
         """
         quantity = validated_data.get('quantity_available')
+        if quantity is not None:
+            validated_data['available_units'] = quantity
+
+        quantity = validated_data.get('available_units')
         if quantity == 0:
             validated_data['is_available'] = False
         elif quantity is not None and quantity > 0:
             if validated_data.get('is_available') is not False:
                  validated_data['is_available'] = True
+        writable_fields = {'available_units'}
         for attr, value in validated_data.items():
+            if attr not in writable_fields:
+                continue
             setattr(instance, attr, value)
             
         instance.save()
@@ -1407,8 +1443,18 @@ class PropertyListingSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, data):
-        company_id = data.get("company")
-        individual_id = data.get("individual_owner")
+        request = self.context.get("request")
+        request_user = getattr(request, "user", None)
+        request_company = getattr(request_user, "company", None) or getattr(request_user, "profile", None)
+        request_individual_owner = getattr(request_user, "individual_owner", None) or getattr(
+            request_user, "individual_owner_profile", None
+        )
+
+        company_id = data.get("company", getattr(self.instance, "company", None) or request_company)
+        individual_id = data.get(
+            "individual_owner",
+            getattr(self.instance, "individual_owner", None) or request_individual_owner,
+        )
 
         if company_id and individual_id:
             raise serializers.ValidationError(
@@ -1421,23 +1467,18 @@ class PropertyListingSerializer(serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
-        # user = self.context["request"].user
-        # individual_owner = validated_data.get("individual_owner")
-        # company_owner = validated_data.get("company_owner")
+        request = self.context.get("request")
+        request_user = getattr(request, "user", None)
+        request_company = getattr(request_user, "company", None) or getattr(request_user, "profile", None)
+        request_individual_owner = getattr(request_user, "individual_owner", None) or getattr(
+            request_user, "individual_owner_profile", None
+        )
 
-        # ? Just for testing purpose
-        # validated_data['individual_owner'] = "6ca9a7cf-44cc-4979-be3b-d49b8b484ef6"
-
-        # if not individual_owner:
-        #     # Checking if the company is not doing this
-        #     # but rather the Michot admin doing this and in some case the individual owner is missed.
-        #     # Which means the logged in user is Michot admin (not another vendor)
-        #     if user.role and user.role.code == RoleCode.ADMIN.value:
-        #         raise serializers.ValidationError(
-        #             "Valid Company or individual owner must exist."
-        #         )
-        #     company = get_object_or_404(CompanyProfile, user=user)
-        #     validated_data["company"] = company
+        if not validated_data.get("company") and not validated_data.get("individual_owner"):
+            if request_company:
+                validated_data["company"] = request_company
+            elif request_individual_owner:
+                validated_data["individual_owner"] = request_individual_owner
 
         return ListingService.create_property_listing(validated_data)
 
