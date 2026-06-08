@@ -184,6 +184,7 @@ class HotelProfileFactory(factory.django.DjangoModelFactory):
     address = factory.SubFactory(AddressFactory)
     stars = 4
     featured = False
+    is_active = True
 
 
 class ListingImageFactory(factory.django.DjangoModelFactory):
@@ -343,6 +344,7 @@ class CarListingFactory(factory.django.DjangoModelFactory):
     fuel_type = CarListing.FuelTypeChoices.PETROL
     transmission = CarListing.TransmissionChoices.AUTOMATIC
     listing_type = CarListing.ListingTypeChoices.RENT
+    rental_mode = CarListing.RentalModeChoices.WITH_DRIVER
     car_class = CarListing.CarClassChoices.NORMAL
     condition = CarListing.ConditionChoices.USED
     title = "Toyota Camry"
@@ -351,6 +353,9 @@ class CarListingFactory(factory.django.DjangoModelFactory):
     currency = "ETB"
     quantity = 1
     seats = 4
+    requires_code_3 = False
+    requires_business_license = False
+    pre_rental_requirements = ""
 
 
 class PropertyListingFactory(factory.django.DjangoModelFactory):
@@ -404,6 +409,9 @@ class CarRentalFactory(factory.django.DjangoModelFactory):
     guest_email = "guest@example.com"
     guest_phone = "0911000112"
     special_requests = "Need driver"
+    renter_driver_license_number = ""
+    renter_code_3_license_number = ""
+    renter_business_license_number = ""
     booking_reference = factory.Sequence(lambda n: f"C-{n:06d}")
     terms_version = 1
     terms_accepted = True
@@ -602,7 +610,11 @@ class NotificationPreferenceFactory(factory.django.DjangoModelFactory):
     user = factory.SubFactory(UserFactory)
     email_preferences = factory.LazyFunction(dict)
     in_app_preferences = factory.LazyFunction(dict)
+    sms_preferences = factory.LazyFunction(dict)
+    push_preferences = factory.LazyFunction(dict)
     email_enabled = True
+    sms_enabled = False
+    push_enabled = True
 
 
 class NotificationTemplateFactory(factory.django.DjangoModelFactory):
@@ -615,6 +627,9 @@ class NotificationTemplateFactory(factory.django.DjangoModelFactory):
     email_subject_template = "Booking created"
     email_body_template = "Your booking has been received."
     email_html_template = "<p>Your booking has been received.</p>"
+    sms_template = "Booking {{booking_reference}} update"
+    push_title_template = "Booking update"
+    push_body_template = "Booking {{booking_reference}} update"
     required_variables = factory.LazyFunction(list)
 
 

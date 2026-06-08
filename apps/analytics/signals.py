@@ -2,7 +2,16 @@ from datetime import timedelta
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 
-from apps.listing.models import Booking, CarRental
+from apps.listing.models import (
+    Booking,
+    BookingItem,
+    CarRental,
+    CarRentalItem,
+    EventSpaceBooking,
+    EventSpaceBookingItem,
+    GuestHouseBooking,
+    GuestHouseBookingItem,
+)
 from apps.analytics.models import AnalyticsDirtyDate
 
 
@@ -12,6 +21,20 @@ def _mark_dirty(company_id, dt):
     AnalyticsDirtyDate.objects.update_or_create(
         company_id=company_id, date=dt, defaults={"processed": False}
     )
+
+
+def _mark_date_range(company_ids, created_at=None, start_date=None, end_date=None):
+    created_date = created_at.date() if created_at else None
+    for company_id in company_ids:
+        if created_date:
+            _mark_dirty(company_id, created_date)
+        if start_date:
+            _mark_dirty(company_id, start_date)
+        if end_date:
+            try:
+                _mark_dirty(company_id, end_date - timedelta(days=1))
+            except Exception:
+                pass
 
 
 @receiver(post_save, sender=Booking)
@@ -29,27 +52,18 @@ def booking_changed(sender, instance, **kwargs):
         if room and getattr(room, "hotel", None) and getattr(room.hotel, "company", None):
             company_ids.add(room.hotel.company.id)
 
-    # also try to infer from booking items
-    created_date = getattr(instance, "created_at", None)
-    if created_date:
-        created_date = created_date.date()
+    _mark_date_range(
+        company_ids,
+        created_at=getattr(instance, "created_at", None),
+        start_date=getattr(instance, "check_in_date", None),
+        end_date=getattr(instance, "check_out_date", None),
+    )
 
-    # mark booking check-in/check-out dates
-    check_in = getattr(instance, "check_in_date", None)
-    check_out = getattr(instance, "check_out_date", None)
 
-    for cid in company_ids:
-        if created_date:
-            _mark_dirty(cid, created_date)
-        if check_in:
-            _mark_dirty(cid, check_in)
-        if check_out:
-            # also mark the last night (check_out - 1)
-            try:
-                last_night = check_out - timedelta(days=1)
-                _mark_dirty(cid, last_night)
-            except Exception:
-                pass
+@receiver(post_save, sender=BookingItem)
+@receiver(post_delete, sender=BookingItem)
+def booking_item_changed(sender, instance, **kwargs):
+    booking_changed(sender=Booking, instance=instance.booking, **kwargs)
 
 
 @receiver(post_save, sender=CarRental)
@@ -65,14 +79,74 @@ def car_rental_changed(sender, instance, **kwargs):
     except Exception:
         pass
 
-    created_date = getattr(instance, "created_at", None)
-    if created_date:
-        created_date = created_date.date()
-
     start_date = getattr(instance, "start_date", None)
 
     for cid in company_ids:
-        if created_date:
-            _mark_dirty(cid, created_date)
-        if start_date:
-            _mark_dirty(cid, start_date)
+        _mark_date_range(
+            [cid],
+            created_at=getattr(instance, "created_at", None),
+            start_date=start_date,
+            end_date=getattr(instance, "end_date", None),
+        )
+
+
+@receiver(post_save, sender=CarRentalItem)
+@receiver(post_delete, sender=CarRentalItem)
+def car_rental_item_changed(sender, instance, **kwargs):
+    car_rental_changed(sender=CarRental, instance=instance.car_rental, **kwargs)
+
+
+@receiver(post_save, sender=GuestHouseBooking)
+@receiver(post_delete, sender=GuestHouseBooking)
+def guesthouse_booking_changed(sender, instance, **kwargs):
+    company_ids = set()
+    try:
+        for item in instance.items.all():
+            room = getattr(item, "room", None)
+            guest_house = getattr(room, "guest_house", None)
+            company = getattr(guest_house, "company", None)
+            if company:
+                company_ids.add(company.id)
+    except Exception:
+        pass
+
+    _mark_date_range(
+        company_ids,
+        created_at=getattr(instance, "created_at", None),
+        start_date=getattr(instance, "start_date", None),
+        end_date=getattr(instance, "end_date", None),
+    )
+
+
+@receiver(post_save, sender=GuestHouseBookingItem)
+@receiver(post_delete, sender=GuestHouseBookingItem)
+def guesthouse_booking_item_changed(sender, instance, **kwargs):
+    guesthouse_booking_changed(sender=GuestHouseBooking, instance=instance.booking, **kwargs)
+
+
+@receiver(post_save, sender=EventSpaceBooking)
+@receiver(post_delete, sender=EventSpaceBooking)
+def eventspace_booking_changed(sender, instance, **kwargs):
+    company_ids = set()
+    try:
+        for item in instance.items.all():
+            event_space = getattr(item, "event_space", None)
+            hotel = getattr(event_space, "hotel", None)
+            company = getattr(hotel, "company", None)
+            if company:
+                company_ids.add(company.id)
+    except Exception:
+        pass
+
+    _mark_date_range(
+        company_ids,
+        created_at=getattr(instance, "created_at", None),
+        start_date=getattr(instance, "check_in_date", None),
+        end_date=getattr(instance, "check_out_date", None),
+    )
+
+
+@receiver(post_save, sender=EventSpaceBookingItem)
+@receiver(post_delete, sender=EventSpaceBookingItem)
+def eventspace_booking_item_changed(sender, instance, **kwargs):
+    eventspace_booking_changed(sender=EventSpaceBooking, instance=instance.booking, **kwargs)

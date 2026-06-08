@@ -1,12 +1,25 @@
+from datetime import timedelta
+
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.contrib.contenttypes.models import ContentType
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from apps.account.managers import CustomUserManager
 from apps.core.models import AbstractBaseModel, Address, Facility
+
+
+def normalize_phone_number(phone: str | None) -> str:
+    value = (phone or "").strip().replace(" ", "").replace("-", "")
+    if value.startswith("+251"):
+        return "0" + value[4:]
+    if value.startswith("251") and len(value) == 12:
+        return "0" + value[3:]
+    return value
 
 
 class Role(AbstractBaseModel):
@@ -28,8 +41,22 @@ class Role(AbstractBaseModel):
 
 
 class User(AbstractUser, AbstractBaseModel):
+    PHONE_CHANGE_LIMIT = 3
+    PHONE_CHANGE_COOLDOWN = timedelta(days=7)
+
     email = models.EmailField(verbose_name=_("Email"), unique=True, null=False)
     phone = models.CharField(max_length=20, verbose_name=_("Phone Number"), blank=True, null=True)
+    phone_verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Phone Verified At"),
+    )
+    phone_change_count = models.PositiveSmallIntegerField(default=0, verbose_name=_("Phone Change Count"))
+    phone_last_changed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Phone Last Changed At"),
+    )
 
     role = models.ForeignKey(
         Role, on_delete=models.RESTRICT, related_name="+", null=True
@@ -88,6 +115,120 @@ class User(AbstractUser, AbstractBaseModel):
 
     def __str__(self) -> str:
         return self.email
+
+    @property
+    def phone_verified(self) -> bool:
+        return self.phone_verified_at is not None
+
+    def phone_change_cooldown_expires_at(self):
+        if not self.phone_last_changed_at:
+            return None
+        return self.phone_last_changed_at + self.PHONE_CHANGE_COOLDOWN
+
+    def _phone_change_error(self, message: str):
+        raise ValidationError({"phone": message})
+
+    def can_change_phone(self, phone: str | None):
+        normalized_original_phone = normalize_phone_number(self.phone)
+        normalized_new_phone = normalize_phone_number(phone)
+
+        if normalized_original_phone == normalized_new_phone:
+            return normalized_new_phone
+
+        if self.phone_change_count >= self.PHONE_CHANGE_LIMIT:
+            self._phone_change_error(
+                "Phone number can only be changed three times. Please contact support if you need help."
+            )
+
+        cooldown_expires_at = self.phone_change_cooldown_expires_at()
+        if cooldown_expires_at and timezone.now() < cooldown_expires_at:
+            self._phone_change_error(
+                "Phone number can only be changed once every 7 days. Please try again later."
+            )
+
+        return normalized_new_phone
+
+    def _apply_phone_change_policy(self, original_phone: str | None):
+        normalized_new_phone = self.can_change_phone(self.phone)
+        self.phone = normalized_new_phone
+
+        if normalize_phone_number(original_phone) == normalized_new_phone:
+            return
+
+        self.phone_change_count += 1
+        self.phone_last_changed_at = timezone.now()
+        self.phone_verified_at = None
+
+    def save(self, *args, **kwargs):
+        update_fields = kwargs.get("update_fields")
+        if self.pk:
+            original = type(self).objects.filter(pk=self.pk).only(
+                "phone",
+                "phone_change_count",
+                "phone_last_changed_at",
+                "phone_verified_at",
+            ).first()
+            if original:
+                if normalize_phone_number(original.phone) != normalize_phone_number(self.phone):
+                    self.phone_change_count = original.phone_change_count
+                    self.phone_last_changed_at = original.phone_last_changed_at
+                    self._apply_phone_change_policy(original.phone)
+                    if update_fields is not None:
+                        update_fields = set(update_fields)
+                        update_fields.update({"phone", "phone_change_count", "phone_last_changed_at", "phone_verified_at"})
+                        kwargs["update_fields"] = list(update_fields)
+        else:
+            self.phone = normalize_phone_number(self.phone)
+
+        super().save(*args, **kwargs)
+
+
+class OtpChallenge(AbstractBaseModel):
+    class Purpose(models.TextChoices):
+        LOGIN = "login", _("Login")
+        SIGNUP = "signup", _("Signup")
+        PASSWORD_CHANGE = "password_change", _("Password Change")
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="otp_challenges",
+        verbose_name=_("User"),
+    )
+    phone = models.CharField(max_length=20, verbose_name=_("Phone Number"))
+    purpose = models.CharField(
+        max_length=32,
+        choices=Purpose.choices,
+        default=Purpose.LOGIN,
+        verbose_name=_("Purpose"),
+    )
+    code_hash = models.CharField(max_length=128, verbose_name=_("Code Hash"))
+    expires_at = models.DateTimeField(verbose_name=_("Expires At"))
+    consumed_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Consumed At"))
+    attempts = models.PositiveSmallIntegerField(default=0, verbose_name=_("Attempts"))
+    max_attempts = models.PositiveSmallIntegerField(default=5, verbose_name=_("Max Attempts"))
+    sent_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Sent At"))
+
+    class Meta:
+        verbose_name = _("OTP Challenge")
+        verbose_name_plural = _("OTP Challenges")
+        db_table = "otp_challenges"
+        ordering = ("-created_at",)
+        indexes = [
+            models.Index(fields=["phone", "purpose", "created_at"]),
+            models.Index(fields=["user", "purpose", "consumed_at"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.phone} - {self.purpose}"
+
+    @property
+    def is_consumed(self) -> bool:
+        return self.consumed_at is not None
+
+    @property
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
 
 
 class ListingImage(AbstractBaseModel):
@@ -303,6 +444,35 @@ class HotelProfile(AbstractBaseModel):
     )
 
     images = GenericRelation(ListingImage, related_query_name="listings")
+
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name=_("Is Active"),
+        help_text=_("Whether the hotel is active and visible."),
+    )
+
+    is_verified = models.BooleanField(
+        default=False,
+        verbose_name=_("Is Verified"),
+        help_text=_("Whether the hotel has been verified by an administrator."),
+    )
+
+    verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Verified At"),
+        help_text=_("When the hotel was last verified by an administrator."),
+    )
+
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("Verified By"),
+        help_text=_("Administrator who last verified this hotel."),
+    )
 
     # category = models.CharField(
     #     max_length=100,

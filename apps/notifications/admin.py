@@ -4,16 +4,22 @@ from .models import Notification, NotificationPreference, NotificationTemplate
 @admin.register(Notification)
 class NotificationAdmin(admin.ModelAdmin):
     list_display = ['id', 'user', 'notification_type', 'title', 'is_read', 'priority', 'created_at']
-    list_filter = ['notification_type', 'is_read', 'priority', 'delivered_in_app', 'delivered_email']
+    list_filter = [
+        'notification_type', 'is_read', 'priority', 'delivered_in_app',
+        'delivered_email', 'delivered_sms', 'delivered_push'
+    ]
     search_fields = ['user__email', 'title', 'message']
-    readonly_fields = ['created_at', 'updated_at', 'read_at', 'email_sent_at']
+    readonly_fields = [
+        'created_at', 'updated_at', 'read_at', 'email_sent_at',
+        'sms_sent_at', 'push_sent_at'
+    ]
     date_hierarchy = 'created_at'
 
 @admin.register(NotificationPreference)
 class NotificationPreferenceAdmin(admin.ModelAdmin):
-    list_display = ['user', 'email_enabled']
+    list_display = ['user', 'email_enabled', 'sms_enabled', 'push_enabled']
     search_fields = ['user__email']
-    list_filter = ['email_enabled']
+    list_filter = ['email_enabled', 'sms_enabled', 'push_enabled']
 
 @admin.register(NotificationTemplate)
 class NotificationTemplateAdmin(admin.ModelAdmin):

@@ -9,6 +9,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 _sms_file_handler = None
 _sms_file_handler_path = None
+AFRO_MESSAGE_SEND_URL = "https://api.afromessage.com/api/send"
 
 
 class SMSDeliveryError(Exception):
@@ -31,6 +32,17 @@ def _get_required_setting(name: str) -> str:
 
     logger.error("SMS configuration missing: %s", name)
     raise SMSDeliveryError("SMS delivery is not configured.")
+
+
+def normalize_phone_number(phone: str) -> str:
+    value = (phone or "").strip().replace(" ", "").replace("-", "")
+    if value.startswith("+251"):
+        return value[1:]
+    if value.startswith("251"):
+        return value
+    if value.startswith("0") and len(value) == 10:
+        return f"251{value[1:]}"
+    return value
 
 
 def _ensure_sms_file_handler() -> None:
@@ -67,23 +79,22 @@ def _log_sms_error(message: str, *args) -> None:
 def send_sms(to: str, message: str) -> bool:
     """Send an SMS through Afro Message."""
     token = _get_required_setting("AFRO_MESSAGE_TOKEN")
-    base_url = _get_required_setting("AFRO_MESSAGE_URL")
     identifier_id = _get_required_setting("AFRO_MESSAGE_IDENTIFIER_ID")
-    sender_name = _get_required_setting("AFRO_MESSAGE_SENDER_NAME")
     timeout_seconds = getattr(settings, "AFRO_MESSAGE_TIMEOUT_SECONDS", 30)
+    recipient = normalize_phone_number(to)
 
     headers = {"Authorization": f"Bearer {token}"}
     params = {
         "from": identifier_id,
-        "sender": sender_name,
-        "to": to,
+        "sender": "",
+        "to": recipient,
         "message": message,
         "callback": "",
     }
 
     try:
         response = requests.get(
-            base_url,
+            AFRO_MESSAGE_SEND_URL,
             params=params,
             headers=headers,
             timeout=timeout_seconds,
@@ -93,7 +104,7 @@ def send_sms(to: str, message: str) -> bool:
             detail = f"HTTP {response.status_code}: {response.text}"
             _log_sms_error(
                 "SMS delivery failed for %s with HTTP status %s: %s",
-                to,
+                recipient,
                 response.status_code,
                 response.text,
             )
@@ -108,7 +119,7 @@ def send_sms(to: str, message: str) -> bool:
                 detail = str(payload)
             _log_sms_error(
                 "SMS delivery failed for %s with provider response: %s",
-                to,
+                recipient,
                 payload,
             )
             raise SMSDeliveryError("Failed to deliver SMS.", detail)
@@ -117,11 +128,11 @@ def send_sms(to: str, message: str) -> bool:
     except SMSDeliveryError:
         raise
     except requests.RequestException as exc:
-        _log_sms_error("SMS delivery request failed for %s: %s", to, exc)
+        _log_sms_error("SMS delivery request failed for %s: %s", recipient, exc)
         raise SMSDeliveryError("Failed to deliver SMS.", str(exc))
     except ValueError as exc:
-        _log_sms_error("SMS delivery returned invalid JSON for %s: %s", to, exc)
+        _log_sms_error("SMS delivery returned invalid JSON for %s: %s", recipient, exc)
         raise SMSDeliveryError("Failed to deliver SMS.", str(exc))
     except Exception as exc:
-        _log_sms_error("SMS delivery failed unexpectedly for %s: %s", to, exc)
+        _log_sms_error("SMS delivery failed unexpectedly for %s: %s", recipient, exc)
         raise SMSDeliveryError("Failed to deliver SMS.", str(exc))

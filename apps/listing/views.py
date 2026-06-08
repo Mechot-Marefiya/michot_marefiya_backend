@@ -25,6 +25,7 @@ from apps.favorites.services import get_favorite_object_ids
 from apps.listing.docs.schema import search_schema
 from apps.core.views import AbstractModelViewSet
 from apps.core.utils import get_display_currency
+from apps.notifications.services import NotificationService
 from rest_framework import viewsets
 from apps.listing.utils import ParseDatesAndQuantity
 from apps.listing.filters import PropertyFilter, RoomFilter, BookingFilter,EventSpaceFilter,EventSpaceBookingFilter
@@ -88,6 +89,7 @@ from apps.listing.serializers import (
     AvailabilityCheckSerializer,
     CarSearchSerializer,
     CarRentalSerializer,
+    CarRentalRescheduleSerializer,
     EventSpaceBookingResponseSerializer,
     EventSpaceBookingSerializer,
     GuestHouseBookingSerializer,
@@ -95,17 +97,78 @@ from apps.listing.serializers import (
     AddonOfferingListSerializer,
     BookingLookupSerializer,
     GuestCancellationSerializer,
+    GuestBookingOtpRequestSerializer,
     SeasonSerializer, SeasonalRateSerializer,
 )
 from apps.listing.services import (
     StayAvailabilityService, BookingService, CarAvailabilityService, 
     PriceService, GuestHouseAvailabilityService, EventSpaceAvailabilityService,
-    PriceCalculationService
+    PriceCalculationService, CarRentalService, get_effective_platform_fee_rate
 )
+from apps.listing.exceptions import BookingConflict
 from rest_framework.exceptions import PermissionDenied
 
+NO_REFUND_POLICY_CODE = "no_refunds"
+NO_REFUND_POLICY_MESSAGE = "No refunds are available for any service payment on the platform."
+BOOKING_CANCEL_NOTE = "Cancelling a booking does not create a refund for any completed service payment."
+
+
+def _with_booking_no_refund_policy(payload, *, cancellation_effect="booking_cancelled"):
+    response = dict(payload)
+    response.update(
+        {
+            "refund_supported": False,
+            "refund_policy": NO_REFUND_POLICY_CODE,
+            "refund_message": NO_REFUND_POLICY_MESSAGE,
+            "pending_cancel_note": BOOKING_CANCEL_NOTE,
+            "cancellation_effect": cancellation_effect,
+        }
+    )
+    return response
+
+
+def _set_listing_verification(instance, *, verified, actor):
+    instance.is_verified = verified
+    instance.verified_at = timezone.now() if verified else None
+    instance.verified_by = actor if verified else None
+    instance.save(update_fields=["is_verified", "verified_at", "verified_by", "updated_at"])
+
+
+def _request_guest_booking_otp(request, *, booking_type):
+    serializer = GuestBookingOtpRequestSerializer(
+        data=request.data,
+        context={"booking_type": booking_type},
+    )
+    serializer.is_valid(raise_exception=True)
+    challenge = serializer.save()
+    return Response(
+        {
+            "success": True,
+            "challenge_id": challenge.challenge_id,
+            "purpose": "guest_booking",
+            "booking_type": challenge.booking_type,
+            "expires_at": challenge.expires_at,
+            "phone": challenge.phone,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+class SavedListingDeletionNotificationMixin:
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        notification_plan = NotificationService.prepare_saved_listing_deletion_notifications(
+            instance,
+            deleted_by=request.user,
+        )
+        response = super().destroy(request, *args, **kwargs)
+        if response.status_code == status.HTTP_204_NO_CONTENT:
+            NotificationService.dispatch_saved_listing_deletion_notifications(notification_plan)
+        return response
+
+
 @extend_schema(tags=["Accommodations"])
-class RoomListingViewSet(AbstractModelViewSet):
+class RoomListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelViewSet):
     serializer_class = RoomListingSerializer
     queryset = RoomListing.objects.all()
     filter_backends = [DjangoFilterBackend]
@@ -385,7 +448,7 @@ class RoomListingViewSet(AbstractModelViewSet):
 
 
 @extend_schema(tags=["Guest House Rooms"])
-class GuestHouseRoomViewSet(AbstractModelViewSet):
+class GuestHouseRoomViewSet(SavedListingDeletionNotificationMixin, AbstractModelViewSet):
     serializer_class = GuestHouseRoomSerializer
     queryset = GuestHouseRoom.objects.all()
     filter_backends = [DjangoFilterBackend]
@@ -410,9 +473,24 @@ class GuestHouseRoomViewSet(AbstractModelViewSet):
         ).prefetch_related(
             "images", "amenities"
         )
-        if not self.request.user or not self.request.user.is_authenticated:
-            return queryset.filter(guest_house__is_active=True)
-        return queryset
+        user = self.request.user
+        managed_only = self.request.query_params.get('managed') == 'true'
+
+        if user and (user.is_superuser or (hasattr(user, 'role') and user.role and user.role.code == RoleCode.ADMIN.value)):
+            return queryset
+
+        if managed_only and user and user.is_authenticated:
+            company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+            individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+
+            q = Q()
+            if company:
+                q |= Q(guest_house__company=company)
+            if individual_owner:
+                q |= Q(guest_house__individual_owner=individual_owner)
+            return queryset.filter(q).order_by("-created_at")
+
+        return queryset.filter(is_active=True, guest_house__is_active=True).order_by("-created_at")
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -513,7 +591,7 @@ class GuestHouseRoomViewSet(AbstractModelViewSet):
 
 
 @extend_schema(tags=["Accommodations"])
-class GuestHouseProfileViewSet(AbstractModelViewSet):
+class GuestHouseProfileViewSet(SavedListingDeletionNotificationMixin, AbstractModelViewSet):
     serializer_class = GuestHouseProfileSerializer
     queryset = GuestHouseProfile.objects.all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
@@ -530,6 +608,8 @@ class GuestHouseProfileViewSet(AbstractModelViewSet):
             return [IsAuthenticated()]
         elif self.action in ['list', 'retrieve', 'check_availability']:
             return [AllowAny()]
+        elif self.action in ["verify", "unverify"]:
+            return [IsAdmin()]
         else:
             return [IsListingOwner()]
 
@@ -672,6 +752,20 @@ class GuestHouseProfileViewSet(AbstractModelViewSet):
                 "results": serializer.data
             })
 
+    @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
+    def verify(self, request, pk=None):
+        guest_house = self.get_object()
+        _set_listing_verification(guest_house, verified=True, actor=request.user)
+        serializer = GuestHouseProfileResponseSerializer(guest_house, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
+    def unverify(self, request, pk=None):
+        guest_house = self.get_object()
+        _set_listing_verification(guest_house, verified=False, actor=request.user)
+        serializer = GuestHouseProfileResponseSerializer(guest_house, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 @extend_schema(tags=["Accommodations"])
 class GuestHouseBookingViewSet(AbstractModelViewSet):
     """
@@ -711,7 +805,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         - READ: Authenticated users (see own + companies see their guesthouses)
         - UPDATE/DELETE: Booking owner or guesthouse owner
         """
-        if self.action in ['create', 'lookup', 'price_preview']:
+        if self.action in ['create', 'lookup', 'price_preview', 'guest_otp']:
             return [AllowAny()]
         elif self.action in ['list', 'retrieve', 'my_bookings']:
             return [IsAuthenticated()]
@@ -721,7 +815,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
             return [IsGuestHouseBookingOwner()]
 
     def get_throttles(self):
-        if self.action == 'create':
+        if self.action in ['create', 'guest_otp']:
             self.throttle_scope = 'booking_create'
             return [ScopedRateThrottle()]
         return super().get_throttles()
@@ -853,11 +947,22 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
     
     @extend_schema(
+        summary="Request guesthouse booking phone OTP",
+        description="Issue a phone OTP challenge before creating a guesthouse booking as a guest.",
+        request=GuestBookingOtpRequestSerializer,
+        responses={201: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+    )
+    @action(detail=False, methods=["post"], url_path="guest-otp/request", permission_classes=[AllowAny])
+    def guest_otp(self, request):
+        return _request_guest_booking_otp(request, booking_type="guesthouse")
+
+    @extend_schema(
         summary="Create a new guesthouse booking (supports guest checkout)",
         description="""
         Initiates a booking for one or more rooms in a guest house.
         - Supports both authenticated users and guest checkout.
         - Required guest fields: `guest_email`, `guest_phone`, `guest_first_name`, `guest_last_name`.
+        - Guest checkout now requires a prior `guest-otp/request/` call and both `otp_challenge_id` and `otp_code` on create.
         - `terms_accepted` and `terms_version` are mandatory.
         - Returns a pending booking with a `booking_reference` (prefix 'G').
         """,
@@ -883,7 +988,10 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
 
     @extend_schema(
         summary="Cancel a guesthouse booking",
-        description="Cancel a pending or confirmed booking and restore availability.",
+        description=(
+            "Cancel a pending or confirmed booking and restore availability. "
+            "Booking cancellation does not create a refund because the platform does not support refunds."
+        ),
         responses={200: GuestHouseBookingSerializer}
     )
     @action(detail=True, methods=['post'])
@@ -899,11 +1007,16 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
             GuestHouseBookingService.cancel_booking(booking)
         except Exception as e:
             return Response(
-                {"error": str(e)},
+                _with_booking_no_refund_policy(
+                    {"error": str(e)},
+                    cancellation_effect="booking_not_cancelled",
+                ),
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        return Response(self.get_serializer(booking).data)
+        return Response(
+            _with_booking_no_refund_policy(self.get_serializer(booking).data)
+        )
     
     @extend_schema(
         summary="Get my guesthouse bookings",
@@ -957,6 +1070,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         start_date = data['start_date']
         end_date = data['end_date']
         items = data['items']
+        preview_phone = data.get('guest_phone') or (request.user.phone if request.user.is_authenticated else None)
         
         # Validate availability (lock=False for previews)
         room_infos = [
@@ -1000,12 +1114,18 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         return Response({
             "nights": nights,
             "items": total_items,
-            **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency, items=total_items)
+            **PriceCalculationService.calculate_preview_totals(
+                item_subtotals,
+                currency,
+                display_currency,
+                items=total_items,
+                fee_rate=get_effective_platform_fee_rate(phone=preview_phone),
+            )
         })
 
 # Car Listing ViewSet
 @extend_schema(tags=["Car Rentals"])
-class CarListingViewSet(AbstractModelViewSet):
+class CarListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelViewSet):
     serializer_class = CarListingSerializer
     queryset = CarListing.objects.all()
     throttle_scope = None
@@ -1026,6 +1146,8 @@ class CarListingViewSet(AbstractModelViewSet):
         # 'list' is the action for GET /api/v1/listing/cars/
         elif self.action in ['list', 'retrieve', 'check_availability', 'available_for_rent', 'search']:
             return [AllowAny()]
+        elif self.action in ["verify", "unverify"]:
+            return [IsAdmin()]
         elif self.action == 'my_listings':
             return [IsAuthenticated()]
         else:
@@ -1109,6 +1231,20 @@ class CarListingViewSet(AbstractModelViewSet):
         # No pagination
         serializer = CarListingResponseSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
+    def verify(self, request, pk=None):
+        car_listing = self.get_object()
+        _set_listing_verification(car_listing, verified=True, actor=request.user)
+        serializer = CarListingResponseSerializer(car_listing, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
+    def unverify(self, request, pk=None):
+        car_listing = self.get_object()
+        _set_listing_verification(car_listing, verified=False, actor=request.user)
+        serializer = CarListingResponseSerializer(car_listing, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     # --- Availability Actions ---
     @extend_schema(request=AvailabilityCheckSerializer)
@@ -1207,7 +1343,7 @@ class CarRentalViewSet(AbstractModelViewSet):
         return context
 
     def get_permissions(self):
-        if self.action in ['create', 'lookup']:
+        if self.action in ['create', 'lookup', 'guest_otp']:
             return [AllowAny()]
         elif self.action in ['list', 'retrieve', 'my_rentals', 'rental_stats']:
             return [IsAuthenticated()]
@@ -1215,7 +1351,7 @@ class CarRentalViewSet(AbstractModelViewSet):
             return [IsCarRentalOwner()]
 
     def get_throttles(self):
-        if self.action == 'create':
+        if self.action in ['create', 'guest_otp']:
             self.throttle_scope = 'booking_create'
             return [ScopedRateThrottle()]
         return super().get_throttles()
@@ -1239,6 +1375,16 @@ class CarRentalViewSet(AbstractModelViewSet):
             return (user_rentals.distinct() | company_rentals).distinct()
 
         return user_rentals
+
+    @extend_schema(
+        summary="Request car rental guest phone OTP",
+        description="Issue a phone OTP challenge before creating a car rental as a guest.",
+        request=GuestBookingOtpRequestSerializer,
+        responses={201: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+    )
+    @action(detail=False, methods=["post"], url_path="guest-otp/request", permission_classes=[AllowAny])
+    def guest_otp(self, request):
+        return _request_guest_booking_otp(request, booking_type="car_rental")
 
     @extend_schema(
         summary="Lookup car rental status (Guest)",
@@ -1273,6 +1419,7 @@ class CarRentalViewSet(AbstractModelViewSet):
         Initiates a rental booking for one or more vehicles.
         - Supports both authenticated users and guest checkout.
         - If guest, provide renter details in `guest_*` fields.
+        - Guest checkout now requires a prior `guest-otp/request/` call and both `otp_challenge_id` and `otp_code` on create.
         - Checks vehicle availability across the requested date range.
         - Returns a pending booking with a `booking_reference` (prefix 'C').
         """,
@@ -1287,33 +1434,17 @@ class CarRentalViewSet(AbstractModelViewSet):
         # --- Check availability for all rental items ---
         for item_data in rental_items_data:
             car_listing = CarListing.objects.get(id=item_data['car_listing'])
-            availability = CarAvailabilityService.validate_availability(
-                car_listing,
-                serializer.validated_data['start_date'],
-                serializer.validated_data['end_date'],
-                item_data.get('units_rent', 1)
+            availability = CarAvailabilityService.check_daily_availability(
+                car_listing=car_listing,
+                start_date=serializer.validated_data['start_date'],
+                end_date=serializer.validated_data['end_date'],
+                quantity=item_data.get('units_rent', 1),
             )
             if not availability.get('available'):
                 return Response({"error": availability.get('reason')}, status=status.HTTP_400_BAD_REQUEST)
 
         user = request.user if request.user.is_authenticated else None
         rental = serializer.save(renter=user)
-
-        # --- Create rental items & update availability ---
-        for item_data in rental_items_data:
-            car_listing = CarListing.objects.get(id=item_data['car_listing'])
-            rental_item = CarRentalItem.objects.create(
-                car_rental=rental,
-                car_listing=car_listing,
-                units_rent=item_data['units_rent'],
-                price_per_unit=item_data['price_per_unit']
-            )
-            CarAvailabilityService.update_availability(
-                car_listing=car_listing,
-                quantity=rental_item.units_rent,
-                start_date=rental.start_date,
-                end_date=rental.end_date,
-            )
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -1336,11 +1467,25 @@ class CarRentalViewSet(AbstractModelViewSet):
         rental.save()
         return Response(self.get_serializer(rental).data)
 
+    @extend_schema(
+        summary="Cancel a car rental",
+        description=(
+            "Cancel a car rental and restore availability. "
+            "Booking cancellation does not create a refund because the platform does not support refunds."
+        ),
+        responses={200: CarRentalSerializer, 400: OpenApiTypes.OBJECT},
+    )
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
         rental = self.get_object()
         if rental.status == CarRental.RentStatus.CANCELLED:
-            return Response({"error": "Rental is already cancelled."}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                _with_booking_no_refund_policy(
+                    {"error": "Rental is already cancelled."},
+                    cancellation_effect="booking_not_cancelled",
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         rental.status = CarRental.RentStatus.CANCELLED
         rental.save()
@@ -1353,7 +1498,36 @@ class CarRentalViewSet(AbstractModelViewSet):
                 rental.end_date,
                 increment=True,
             )
-        return Response(self.get_serializer(rental).data)
+        return Response(
+            _with_booking_no_refund_policy(self.get_serializer(rental).data)
+        )
+
+    @extend_schema(
+        summary="Reschedule car rental dates",
+        description=(
+            "Change the start and end dates for an existing car rental when the target inventory "
+            "is available. Preserves the existing booking and recalculates totals."
+        ),
+        request=CarRentalRescheduleSerializer,
+        responses={200: CarRentalSerializer, 400: OpenApiTypes.OBJECT, 409: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=["post"], url_path="reschedule")
+    def reschedule(self, request, pk=None):
+        rental = self.get_object()
+        serializer = CarRentalRescheduleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        try:
+            rental = CarRentalService.reschedule_booking(
+                rental,
+                start_date=serializer.validated_data["start_date"],
+                end_date=serializer.validated_data["end_date"],
+            )
+        except BookingConflict as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        response_serializer = self.get_serializer(rental)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'])
     def my_rentals(self, request):
@@ -1454,7 +1628,7 @@ class CarAvailabilityByCarAndDateView(APIView):
         })
 
 @extend_schema(responses=PropertyListingResponseSerializer)
-class PropertyListingViewSet(AbstractModelViewSet):
+class PropertyListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelViewSet):
     serializer_class = PropertyListingSerializer
     queryset = PropertyListing.objects.all()
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
@@ -1476,6 +1650,8 @@ class PropertyListingViewSet(AbstractModelViewSet):
             return [IsAuthenticated()]
         elif self.action in ['list', 'retrieve']:
             return [AllowAny()]
+        elif self.action in ["verify", "unverify"]:
+            return [IsAdmin()]
         else:
             return [IsListingOwner()]
 
@@ -1499,15 +1675,32 @@ class PropertyListingViewSet(AbstractModelViewSet):
             if individual_owner:
                 q |= Q(individual_owner=individual_owner)
             return queryset.filter(q).order_by("-created_at")
-        
+
         return queryset.filter(is_active=True).order_by("-created_at")
+
+    @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
+    def verify(self, request, pk=None):
+        property_listing = self.get_object()
+        _set_listing_verification(property_listing, verified=True, actor=request.user)
+        serializer = PropertyListingResponseSerializer(property_listing, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
+    def unverify(self, request, pk=None):
+        property_listing = self.get_object()
+        _set_listing_verification(property_listing, verified=False, actor=request.user)
+        serializer = PropertyListingResponseSerializer(property_listing, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class AmenityViewSet(AbstractModelViewSet):
-    http_method_names = ["get"]
-    permission_classes = [AllowAny]
     serializer_class = AmenityResponseSSerializer
     queryset = Amenity.objects.all()
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [AllowAny()]
+        return [IsAdmin()]
 
 
 class BookingViewSet(AbstractModelViewSet):
@@ -1557,6 +1750,7 @@ class BookingViewSet(AbstractModelViewSet):
         Initiates a booking for one or more hotel rooms. 
         - Supports both authenticated users and guest checkout.
         - If not logged in, `guest_email`, `guest_phone`, `guest_first_name`, and `guest_last_name` are required.
+        - Guest checkout now requires a prior `guest-otp/request/` call and both `otp_challenge_id` and `otp_code` on create.
         - `terms_accepted` must be true.
         - `terms_version` must match the hotel's latest active T&C version.
         - Returns a pending booking with a human-readable `booking_reference` (e.g., H-X7Y2Z9).
@@ -1578,7 +1772,7 @@ class BookingViewSet(AbstractModelViewSet):
         - READ: Users see own bookings, companies see bookings for their listings, admin sees all
         - Special actions: partial_cancel, rate require ownership
         """
-        if self.action in ['create', 'lookup', 'cancel', 'price_preview']:
+        if self.action in ['create', 'lookup', 'cancel', 'price_preview', 'guest_otp']:
             return [AllowAny()]
         elif self.action in ['list', 'retrieve']:
             return [IsAuthenticated()]
@@ -1588,7 +1782,7 @@ class BookingViewSet(AbstractModelViewSet):
             return [IsAuthenticated()]
 
     def get_throttles(self):
-        if self.action == 'create':
+        if self.action in ['create', 'guest_otp']:
             self.throttle_scope = 'booking_create'
             return [ScopedRateThrottle()]
         return super().get_throttles()
@@ -1654,6 +1848,16 @@ class BookingViewSet(AbstractModelViewSet):
         serializer.save(user=user)
 
     @extend_schema(
+        summary="Request hotel booking guest phone OTP",
+        description="Issue a phone OTP challenge before creating a hotel room booking as a guest.",
+        request=GuestBookingOtpRequestSerializer,
+        responses={201: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+    )
+    @action(detail=False, methods=["post"], url_path="guest-otp/request", permission_classes=[AllowAny])
+    def guest_otp(self, request):
+        return _request_guest_booking_otp(request, booking_type="hotel")
+
+    @extend_schema(
         summary="Lookup room booking status (Guest)",
         description="Retrieve booking details using reference and guest email. No login required.",
         parameters=[
@@ -1711,6 +1915,7 @@ class BookingViewSet(AbstractModelViewSet):
         check_in = data['check_in_date']
         check_out = data['check_out_date']
         items = data['items']
+        preview_phone = data.get('guest_phone') or (request.user.phone if request.user.is_authenticated else None)
         
         # Validate availability (lock=False for previews)
         rooms_info = [{"room": item["room"], "quantity": item["units_booked"]} for item in items]
@@ -1750,7 +1955,13 @@ class BookingViewSet(AbstractModelViewSet):
         return Response({
             "nights": nights,
             "items": total_items,
-            **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency, items=total_items)
+            **PriceCalculationService.calculate_preview_totals(
+                item_subtotals,
+                currency,
+                display_currency,
+                items=total_items,
+                fee_rate=get_effective_platform_fee_rate(phone=preview_phone),
+            )
         })
     @extend_schema(
         summary="Cancel a booking (User or Guest)",
@@ -1758,6 +1969,7 @@ class BookingViewSet(AbstractModelViewSet):
         Cancel a booking.
         - **Authenticated**: User cancels their own booking.
         - **Guest**: Must provide `guest_email` matching the booking to verify ownership.
+        - Cancellation does not create a refund because the platform does not support refunds.
         """,
         request=GuestCancellationSerializer,
         responses={200: BookingResponseSerializer}
@@ -1795,12 +2007,20 @@ class BookingViewSet(AbstractModelViewSet):
         try:
             cancelled_booking = BookingService.cancel_booking(booking)
         except BookingConflict as e:
-            return Response({"detail": str(e)}, status=status.HTTP_409_CONFLICT)
+            return Response(
+                _with_booking_no_refund_policy(
+                    {"detail": str(e)},
+                    cancellation_effect="booking_not_cancelled",
+                ),
+                status=status.HTTP_409_CONFLICT,
+            )
 
         return Response(
-            BookingResponseSerializer(
-                cancelled_booking, context=self.get_serializer_context()
-            ).data,
+            _with_booking_no_refund_policy(
+                BookingResponseSerializer(
+                    cancelled_booking, context=self.get_serializer_context()
+                ).data
+            ),
             status=status.HTTP_200_OK
         )
     @action(detail=True, methods=["post"],serializer_class=PartialCancelSerializer, url_path="partial-cancel")
@@ -2087,7 +2307,7 @@ class CarAvailabilityUpdateAPIView(APIView):
             return Response(serializer.data)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 @extend_schema(responses=EventSpaceListingResponseSerializer)
-class EventSpaceListingViewSet(AbstractModelViewSet):
+class EventSpaceListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelViewSet):
     """
     ViewSet for viewing and managing Event Space Listings, including 
     handling seasonal pricing display.
@@ -2114,6 +2334,8 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
         elif self.action in ['list', 'retrieve', 'search']:
             # Public access for reading listings
             return [AllowAny()]
+        elif self.action in ["verify", "unverify"]:
+            return [IsAdmin()]
         else:
             # Update/Delete requires the user to own the listing
             return [IsListingOwner()]
@@ -2272,6 +2494,21 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
 
         serializer = self.get_serializer(available_listings, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
+    def verify(self, request, pk=None):
+        event_space = self.get_object()
+        _set_listing_verification(event_space, verified=True, actor=request.user)
+        serializer = EventSpaceListingResponseSerializer(event_space, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
+    def unverify(self, request, pk=None):
+        event_space = self.get_object()
+        _set_listing_verification(event_space, verified=False, actor=request.user)
+        serializer = EventSpaceListingResponseSerializer(event_space, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
 @extend_schema(
     responses=EventSpaceBookingResponseSerializer,
 )
@@ -2282,6 +2519,7 @@ class EventSpaceListingViewSet(AbstractModelViewSet):
     Initiates a booking for an event space.
     - Supports both authenticated users and guest checkout.
     - If not logged in, guest details must be provided.
+    - Guest checkout now requires a prior `guest-otp/request/` call and both `otp_challenge_id` and `otp_code` on create.
     - Captures additional fields for `event_type`.
     - Returns a pending booking with a `booking_reference`.
     """,
@@ -2317,7 +2555,7 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         """
         Applies access control based on the action and user role.
         """
-        if self.action in ['create', 'lookup', 'price_preview']:
+        if self.action in ['create', 'lookup', 'price_preview', 'guest_otp']:
             # Allow guests to create and lookup bookings
             return [AllowAny()]
         elif self.action in ['list', 'retrieve']:
@@ -2328,7 +2566,7 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
             return [IsAuthenticated()]
 
     def get_throttles(self):
-        if self.action == 'create':
+        if self.action in ['create', 'guest_otp']:
             self.throttle_scope = 'booking_create'
             return [ScopedRateThrottle()]
         return super().get_throttles()
@@ -2398,6 +2636,16 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         """Passes the request user to the serializer's create method."""
         user = self.request.user if self.request.user.is_authenticated else None
         serializer.save(user=user)
+
+    @extend_schema(
+        summary="Request event-space booking guest phone OTP",
+        description="Issue a phone OTP challenge before creating an event-space booking as a guest.",
+        request=GuestBookingOtpRequestSerializer,
+        responses={201: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+    )
+    @action(detail=False, methods=["post"], url_path="guest-otp/request", permission_classes=[AllowAny])
+    def guest_otp(self, request):
+        return _request_guest_booking_otp(request, booking_type="eventspace")
 
     @extend_schema(request=EventSpaceBookingSerializer, responses=EventSpaceBookingSerializer)
     @action(detail=False, methods=['post'], url_path='walk-in', permission_classes=[IsAuthenticated])
@@ -2472,6 +2720,7 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         check_in = data['check_in_date']
         check_out = data['check_out_date']
         items = data['items']
+        preview_phone = data.get('guest_phone') or (request.user.phone if request.user.is_authenticated else None)
         
         # validate availability (lock=False for previews)
         spaces_info = [{"space_listing": item["event_space"], "quantity": item["units_booked"]} for item in items]
@@ -2511,7 +2760,13 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         return Response({
             "nights": nights,
             "items": total_items,
-            **PriceCalculationService.calculate_preview_totals(item_subtotals, currency, display_currency, items=total_items)
+            **PriceCalculationService.calculate_preview_totals(
+                item_subtotals,
+                currency,
+                display_currency,
+                items=total_items,
+                fee_rate=get_effective_platform_fee_rate(phone=preview_phone),
+            )
         })
 
 

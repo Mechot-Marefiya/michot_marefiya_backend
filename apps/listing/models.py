@@ -43,6 +43,29 @@ class BaseListing(AbstractBaseModel):
 
     images = GenericRelation(ListingImage, related_query_name="listings")
 
+    is_verified = models.BooleanField(
+        default=False,
+        verbose_name=_("Is Verified"),
+        help_text=_("Whether the listing has been verified by an administrator."),
+    )
+
+    verified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Verified At"),
+        help_text=_("When the listing was last verified by an administrator."),
+    )
+
+    verified_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name=_("Verified By"),
+        help_text=_("Administrator who last verified this listing."),
+    )
+
     title = models.CharField(
         max_length=255,
         verbose_name=_("Title"),
@@ -75,6 +98,12 @@ class BaseListing(AbstractBaseModel):
         default=True,
         verbose_name=_("Is Active"),
         help_text=_("Whether the listing is active and visible."),
+    )
+
+    booking_forward_window_days = models.PositiveIntegerField(
+        default=5,
+        verbose_name=_("Booking Forward Window Days"),
+        help_text=_("Maximum number of days ahead a booking can start for this listing."),
     )
 
     class Meta:
@@ -143,6 +172,10 @@ class CarListing(BaseListing):
         NEW = "new", _("Brand New")
         USED = "used", _("Used")
 
+    class RentalModeChoices(models.TextChoices):
+        WITH_DRIVER = "with_driver", _("With Driver")
+        WITHOUT_DRIVER = "without_driver", _("Without Driver")
+
     company = models.ForeignKey(
         CompanyProfile,
         on_delete=models.CASCADE,
@@ -206,6 +239,14 @@ class CarListing(BaseListing):
         help_text=_("Whether the item is For sell or Rent."),
     )
 
+    rental_mode = models.CharField(
+        max_length=32,
+        choices=RentalModeChoices.choices,
+        default=RentalModeChoices.WITH_DRIVER,
+        verbose_name=_("Rental Mode"),
+        help_text=_("Whether the vehicle is rented with a driver or as a self-drive booking."),
+    )
+
     car_class = models.CharField(
         max_length=200,
         choices=CarClassChoices.choices,
@@ -215,6 +256,22 @@ class CarListing(BaseListing):
 
     condition = models.CharField(
         max_length=200, choices=ConditionChoices.choices, verbose_name=_("Condition")
+    )
+    requires_code_3 = models.BooleanField(
+        default=False,
+        verbose_name=_("Requires Code 3"),
+        help_text=_("Whether self-drive renters must provide a Code 3 license/permit."),
+    )
+    requires_business_license = models.BooleanField(
+        default=False,
+        verbose_name=_("Requires Business License"),
+        help_text=_("Whether self-drive renters must provide a business license number."),
+    )
+    pre_rental_requirements = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("Pre-rental Requirements"),
+        help_text=_("Owner-defined instructions or compliance notes that renters must review before booking."),
     )
     images = GenericRelation(ListingImage, related_query_name="listings")
     quantity=models.PositiveSmallIntegerField(default=1,null=False)
@@ -298,6 +355,27 @@ class CarRental(AbstractBaseModel):
         blank=True,
         default="",
         verbose_name=_("Special Requests")
+    )
+    renter_driver_license_number = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name=_("Driver License Number"),
+        help_text=_("Driver license number supplied for self-drive compliance."),
+    )
+    renter_code_3_license_number = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name=_("Code 3 License Number"),
+        help_text=_("Code 3 license/permit number supplied when required by the owner."),
+    )
+    renter_business_license_number = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name=_("Business License Number"),
+        help_text=_("Business license number supplied when required by the owner."),
     )
     
     booking_reference = models.CharField(

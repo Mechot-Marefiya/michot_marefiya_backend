@@ -28,7 +28,14 @@ from drf_spectacular.views import (
     SpectacularSwaggerView,
 )
 
-from apps.account.views import CustomTokenObtainPairView, LogoutView, MeView, CustomTokenRefreshView
+from apps.account.views import (
+    CustomTokenObtainPairView,
+    CustomTokenRefreshView,
+    LogoutView,
+    MeView,
+    OtpRequestView,
+    OtpVerifyView,
+)
 
 urlpatterns = [
     path("api/admin/", admin.site.urls),
@@ -44,6 +51,8 @@ urlpatterns = [
     path(
         "api/v1/auth/token/refresh/", CustomTokenRefreshView.as_view(), name="token_refresh"
     ),
+    path("api/v1/auth/otp/request/", OtpRequestView.as_view(), name="otp_request"),
+    path("api/v1/auth/otp/verify/", OtpVerifyView.as_view(), name="otp_verify"),
     path("api/v1/auth/logout/", LogoutView.as_view(), name="token_blacklist"),
     path("api/v1/auth/me/", MeView.as_view(), name="auth_me"),
     path(

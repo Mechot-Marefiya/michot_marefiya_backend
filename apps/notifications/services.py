@@ -1,13 +1,56 @@
 from django.db import transaction
 from django.utils import timezone
 from django.core.cache import cache
+import logging
 from .models import Notification, NotificationPreference, NotificationTemplate
+
+logger = logging.getLogger(__name__)
+
 
 def get_unread_count_cache_key(user_id):
     return f"notifications:unread_count:{user_id}"
 
 
 class NotificationService:
+    MANDATORY_TYPES = [
+        Notification.NotificationType.BOOKING_CONFIRMED,
+        Notification.NotificationType.BOOKING_CANCELLED,
+        Notification.NotificationType.PAYMENT_SUCCESS,
+        Notification.NotificationType.PAYMENT_FAILED,
+        Notification.NotificationType.PASSWORD_CHANGED,
+        Notification.NotificationType.EMAIL_VERIFIED,
+        Notification.NotificationType.COMPANY_APPROVED,
+        Notification.NotificationType.COMPANY_REJECTED,
+        Notification.NotificationType.NEW_COMPANY_REGISTRATION,
+    ]
+
+    @staticmethod
+    def _render_template(template_text, metadata):
+        rendered = template_text or ""
+        for key, value in metadata.items():
+            placeholder = f"{{{{{key}}}}}"
+            if value is not None:
+                rendered = rendered.replace(placeholder, str(value))
+        return rendered
+
+    @staticmethod
+    def _preference_allowed(prefs, channel, notification_type):
+        enabled_field = f"{channel}_enabled"
+        preferences_field = f"{channel}_preferences"
+        return getattr(prefs, enabled_field, True) and getattr(prefs, preferences_field, {}).get(notification_type, True)
+
+    @staticmethod
+    def _record_delivery_error(notification, channel, error):
+        if not notification:
+            return
+
+        metadata = dict(notification.metadata or {})
+        delivery_errors = dict(metadata.get("delivery_errors", {}))
+        delivery_errors[channel] = str(error)
+        metadata["delivery_errors"] = delivery_errors
+        notification.metadata = metadata
+        notification.save(update_fields=["metadata"])
+
     @staticmethod
     def create_notification(user, notification_type, title=None, message=None, 
                           metadata=None, action_url=None, priority=Notification.Priority.MEDIUM):
@@ -18,46 +61,30 @@ class NotificationService:
         try:
             template = NotificationTemplate.objects.get(notification_type=notification_type)
             
-            rendered_title = template.title_template
-            rendered_message = template.message_template
-            
-            for key, value in metadata.items():
-                placeholder = f"{{{{{key}}}}}"
-                if value is not None:
-                    rendered_title = rendered_title.replace(placeholder, str(value))
-                    rendered_message = rendered_message.replace(placeholder, str(value))
-            
-            title = rendered_title
-            message = rendered_message
+            title = NotificationService._render_template(template.title_template, metadata)
+            message = NotificationService._render_template(template.message_template, metadata)
             
         except NotificationTemplate.DoesNotExist:
             if not title or not message:
-                pass 
+                raise ValueError("title and message are required when no notification template exists.")
 
         in_app_allowed = True
         email_allowed = True
+        sms_allowed = False
+        push_allowed = True
         
         try:
             prefs = NotificationPreference.objects.get(user=user)
             in_app_allowed = prefs.in_app_preferences.get(notification_type, True)
+            email_allowed = NotificationService._preference_allowed(prefs, "email", notification_type)
+            sms_allowed = NotificationService._preference_allowed(prefs, "sms", notification_type)
+            push_allowed = NotificationService._preference_allowed(prefs, "push", notification_type)
             
-            email_allowed = prefs.email_enabled and prefs.email_preferences.get(notification_type, True)
-
-            MANDATORY_TYPES = [
-                Notification.NotificationType.BOOKING_CONFIRMED,
-                Notification.NotificationType.BOOKING_CANCELLED,
-                Notification.NotificationType.PAYMENT_SUCCESS,
-                Notification.NotificationType.PAYMENT_FAILED,
-                Notification.NotificationType.PASSWORD_CHANGED,
-                Notification.NotificationType.EMAIL_VERIFIED,
-                Notification.NotificationType.COMPANY_APPROVED,
-                Notification.NotificationType.COMPANY_REJECTED,
-                Notification.NotificationType.NEW_COMPANY_REGISTRATION,
-            ]
-            
-            if notification_type in MANDATORY_TYPES:
+            if notification_type in NotificationService.MANDATORY_TYPES:
                 email_allowed = True
                 in_app_allowed = True
+                sms_allowed = True
+                push_allowed = True
         except NotificationPreference.DoesNotExist:
             pass
 
@@ -77,20 +104,18 @@ class NotificationService:
 
         if template and email_allowed:
             try:
-                email_subject = template.email_subject_template
-                email_body = template.email_body_template
-                email_html = template.email_html_template
-                
-                for key, value in metadata.items():
-                    placeholder = f"{{{{{key}}}}}"
-                    if value is not None:
-                        email_subject = email_subject.replace(placeholder, str(value))
-                        email_body = email_body.replace(placeholder, str(value))
-                        if email_html:
-                            email_html = email_html.replace(placeholder, str(value))
+                email_subject = NotificationService._render_template(template.email_subject_template, metadata)
+                email_body = NotificationService._render_template(template.email_body_template, metadata)
+                email_html = NotificationService._render_template(template.email_html_template, metadata) if template.email_html_template else None
                 
                 from apps.notifications.tasks import send_notification_email_task
-                send_notification_email_task.delay(user.id, email_subject, email_body, email_html)
+                send_notification_email_task.delay(
+                    user.id,
+                    email_subject,
+                    email_body,
+                    email_html,
+                    str(notification.id) if notification else None,
+                )
                 
                 if notification:
                     notification.delivered_email = True  
@@ -98,9 +123,53 @@ class NotificationService:
                     notification.save(update_fields=['delivered_email', 'email_sent_at'])
 
             except Exception as e:
-                import logging
-                logger = logging.getLogger(__name__)
                 logger.error(f"Failed to send email for notification type {notification_type} to user {user.email}: {str(e)}", exc_info=True)
+                NotificationService._record_delivery_error(notification, "email", e)
+
+        if sms_allowed:
+            try:
+                sms_message = (
+                    NotificationService._render_template(template.sms_template, metadata)
+                    if template and template.sms_template
+                    else message
+                )
+
+                from apps.notifications.tasks import send_notification_sms_task
+                send_notification_sms_task.delay(
+                    user.id,
+                    sms_message,
+                    str(notification.id) if notification else None,
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to send SMS for notification type {notification_type} to user {user.email}: {str(e)}", exc_info=True)
+                NotificationService._record_delivery_error(notification, "sms", e)
+
+        if push_allowed:
+            try:
+                push_title = (
+                    NotificationService._render_template(template.push_title_template, metadata)
+                    if template and template.push_title_template
+                    else title
+                )
+                push_body = (
+                    NotificationService._render_template(template.push_body_template, metadata)
+                    if template and template.push_body_template
+                    else message
+                )
+
+                from apps.notifications.tasks import send_notification_push_task
+                send_notification_push_task.delay(
+                    user.id,
+                    push_title,
+                    push_body,
+                    metadata,
+                    str(notification.id) if notification else None,
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to queue push for notification type {notification_type} to user {user.email}: {str(e)}", exc_info=True)
+                NotificationService._record_delivery_error(notification, "push", e)
         
         return notification
 
@@ -179,6 +248,210 @@ class NotificationService:
             cache.delete(get_unread_count_cache_key(user.id))
             
         return deleted_count
+
+    @staticmethod
+    def _listing_display_title(instance):
+        brand = getattr(instance, "brand", None)
+        model = getattr(instance, "model", None)
+        if brand:
+            brand_text = str(brand)
+            model_text = str(model).strip() if model else ""
+            if model_text:
+                return f"{brand_text} {model_text}".strip()
+            return brand_text
+
+        title_candidates = [
+            getattr(instance, "title", None),
+            getattr(instance, "name", None),
+        ]
+        company = getattr(instance, "company", None)
+        if company is not None:
+            title_candidates.append(getattr(company, "name", None))
+
+        for candidate in title_candidates:
+            if candidate:
+                return str(candidate)
+
+        return str(instance)
+
+    @staticmethod
+    def _listing_has_booking(instance, *, user=None, phone_candidates=None):
+        from django.db.models import Q
+
+        from apps.account.models import HotelProfile, normalize_phone_number
+        from apps.listing.models import (
+            Booking,
+            CarListing,
+            CarRental,
+            EventSpaceListing,
+            EventSpaceBooking,
+            GuestHouseProfile,
+            GuestHouseRoom,
+            GuestHouseBooking,
+            PropertyListing,
+            RoomListing,
+        )
+
+        normalized_phones = {
+            normalize_phone_number(phone)
+            for phone in (phone_candidates or [])
+            if normalize_phone_number(phone)
+        }
+
+        booking_filters = Q()
+        if user is not None:
+            if isinstance(instance, CarListing):
+                booking_filters |= Q(renter=user)
+            elif isinstance(instance, EventSpaceListing):
+                booking_filters |= Q(user=user)
+            elif isinstance(instance, GuestHouseProfile) or isinstance(instance, GuestHouseRoom):
+                booking_filters |= Q(renter=user)
+            elif isinstance(instance, HotelProfile) or isinstance(instance, RoomListing):
+                booking_filters |= Q(user=user)
+
+        if normalized_phones:
+            booking_filters |= Q(guest_phone__in=list(normalized_phones))
+
+        if not booking_filters.children:
+            return False
+
+        if isinstance(instance, HotelProfile):
+            return Booking.objects.filter(items__room__hotel=instance).filter(booking_filters).exists()
+
+        if isinstance(instance, GuestHouseProfile):
+            return GuestHouseBooking.objects.filter(items__room__guest_house=instance).filter(booking_filters).exists()
+
+        if isinstance(instance, GuestHouseRoom):
+            return GuestHouseBooking.objects.filter(items__room=instance).filter(booking_filters).exists()
+
+        if isinstance(instance, CarListing):
+            return CarRental.objects.filter(rental_items__car_listing=instance).filter(booking_filters).exists()
+
+        if isinstance(instance, EventSpaceListing):
+            return EventSpaceBooking.objects.filter(items__event_space=instance).filter(booking_filters).exists()
+
+        if isinstance(instance, RoomListing):
+            return Booking.objects.filter(items__room=instance).filter(booking_filters).exists()
+
+        if isinstance(instance, PropertyListing):
+            return False
+
+        return False
+
+    @staticmethod
+    def prepare_saved_listing_deletion_notifications(instance, *, deleted_by=None):
+        from django.contrib.contenttypes.models import ContentType
+
+        from apps.account.models import normalize_phone_number
+        from apps.favorites.models import Favorite, GuestFavorite
+
+        content_type = ContentType.objects.get_for_model(instance.__class__)
+        listing_title = NotificationService._listing_display_title(instance)
+        listing_id = str(getattr(instance, "id", ""))
+        listing_type = f"{content_type.app_label}.{content_type.model}"
+
+        plan = {
+            "notification_type": Notification.NotificationType.LISTING_DELETED,
+            "title": "Listing Deleted",
+            "message": f"The listing '{listing_title}' you saved is no longer available on Mechot Marefiya.",
+            "sms_message": f"The listing '{listing_title}' you saved is no longer available on Mechot Marefiya.",
+            "metadata": {
+                "listing_id": listing_id,
+                "listing_type": listing_type,
+                "listing_title": listing_title,
+                "deleted_by_id": str(getattr(deleted_by, "id", "")) if deleted_by else None,
+            },
+            "users": [],
+            "guest_phones": [],
+        }
+
+        user_ids = set()
+        guest_phones = set()
+
+        favorite_qs = Favorite.objects.filter(
+            content_type=content_type,
+            object_id=listing_id,
+        ).select_related("user")
+
+        for favorite in favorite_qs:
+            user = getattr(favorite, "user", None)
+            if not user or user.id in user_ids:
+                continue
+            phone_candidates = [getattr(user, "phone", None)]
+            if NotificationService._listing_has_booking(instance, user=user, phone_candidates=phone_candidates):
+                continue
+            user_ids.add(user.id)
+            plan["users"].append(user)
+
+        guest_favorite_qs = GuestFavorite.objects.filter(
+            content_type=content_type,
+            object_id=listing_id,
+        ).select_related("linked_user")
+
+        for guest_favorite in guest_favorite_qs:
+            linked_user = getattr(guest_favorite, "linked_user", None)
+            if linked_user:
+                if linked_user.id in user_ids:
+                    continue
+                phone_candidates = [guest_favorite.guest_phone, getattr(linked_user, "phone", None)]
+                if NotificationService._listing_has_booking(
+                    instance,
+                    user=linked_user,
+                    phone_candidates=phone_candidates,
+                ):
+                    continue
+                user_ids.add(linked_user.id)
+                plan["users"].append(linked_user)
+                continue
+
+            guest_phone = normalize_phone_number(guest_favorite.guest_phone)
+            if not guest_phone or guest_phone in guest_phones:
+                continue
+            if NotificationService._listing_has_booking(instance, phone_candidates=[guest_phone]):
+                continue
+            guest_phones.add(guest_phone)
+            plan["guest_phones"].append(guest_phone)
+
+        return plan
+
+    @staticmethod
+    def dispatch_saved_listing_deletion_notifications(plan):
+        from services.sms import send_sms
+
+        notification_type = plan["notification_type"]
+        title = plan["title"]
+        message = plan["message"]
+        sms_message = plan["sms_message"]
+        metadata = plan["metadata"]
+
+        for user in plan.get("users", []):
+            try:
+                NotificationService.create_notification(
+                    user=user,
+                    notification_type=notification_type,
+                    title=title,
+                    message=message,
+                    metadata=metadata,
+                    priority=Notification.Priority.HIGH,
+                )
+            except Exception as exc:
+                logger.error(
+                    "Failed to create listing deletion notification for user %s: %s",
+                    getattr(user, "id", user),
+                    exc,
+                    exc_info=True,
+                )
+
+        for guest_phone in plan.get("guest_phones", []):
+            try:
+                send_sms(guest_phone, sms_message)
+            except Exception as exc:
+                logger.error(
+                    "Failed to send listing deletion SMS to %s: %s",
+                    guest_phone,
+                    exc,
+                    exc_info=True,
+                )
 
     @staticmethod
     @transaction.atomic

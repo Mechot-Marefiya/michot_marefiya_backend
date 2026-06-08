@@ -15,7 +15,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import extend_schema, OpenApiTypes
+from drf_spectacular.utils import extend_schema, OpenApiTypes, OpenApiExample
 from apps.listing.models import Booking, RoomListing, AddonOffering
 from apps.listing.services import StayAvailabilityService
 from apps.account.docs.schemas import HotelProfileDocSerializer
@@ -48,6 +48,7 @@ from apps.account.serializers import (
     UserResponseSerializer,
     UserUpdateSerializer,
     ChangePasswordSerializer,
+    GuestBookingConversionSerializer,
     StaffCreateSerializer,
     ChangePasswordSerializer,
     StaffCreateSerializer,
@@ -58,6 +59,9 @@ from apps.account.serializers import (
     VerifyEmailChangeSerializer,
     CompanyRegistrationSerializer,
     IndividualOwnerRegistrationSerializer,
+    OtpRequestSerializer,
+    OtpVerifySerializer,
+    RoleSerializer,
 )
 from apps.listing.serializers import AddonOfferingListSerializer
 from apps.account.enums import RoleCode
@@ -72,6 +76,18 @@ from apps.account.permissions import (
 )
 
 
+def _set_listing_verification(instance, *, verified, actor):
+    instance.is_verified = verified
+    instance.verified_at = timezone.now() if verified else None
+    instance.verified_by = actor if verified else None
+    instance.save(update_fields=["is_verified", "verified_at", "verified_by", "updated_at"])
+
+
+def _set_listing_activation(instance, *, active):
+    instance.is_active = active
+    instance.save(update_fields=["is_active", "updated_at"])
+
+
 @extend_schema(tags=["Identity & Auth"])
 class CustomTokenObtainPairView(TokenObtainPairView):
     permission_classes = [AllowAny]
@@ -81,7 +97,8 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
     @extend_schema(
         summary="Obtain JWT Token",
-        description="Login with email and password to receive access and refresh tokens.",
+        description="Deprecated migration endpoint. Phone OTP login is primary; email/password login remains temporarily available.",
+        deprecated=True,
         responses={
             200: CustomTokenObtainPairSerializer,
             401: OpenApiTypes.OBJECT
@@ -106,6 +123,64 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 )
 
             return Response({"detail": "Invalid email or password."}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+@extend_schema(tags=["Identity & Auth"])
+class OtpRequestView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp_request"
+    serializer_class = OtpRequestSerializer
+
+    @extend_schema(
+        summary="Request phone OTP",
+        description="Send a phone OTP for login or password-change verification.",
+        request=OtpRequestSerializer,
+        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+    )
+    def post(self, request):
+        serializer = OtpRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        challenge = serializer.save()
+        return Response(
+            {
+                "success": True,
+                "challenge_id": str(challenge.id),
+                "purpose": challenge.purpose,
+                "expires_at": challenge.expires_at,
+                "phone": challenge.phone,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
+@extend_schema(tags=["Identity & Auth"])
+class OtpVerifyView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "otp_verify"
+    serializer_class = OtpVerifySerializer
+
+    @extend_schema(
+        summary="Verify phone OTP",
+        description="Verify a phone OTP. Login challenges return JWT access and refresh tokens.",
+        request=OtpVerifySerializer,
+        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+    )
+    def post(self, request):
+        serializer = OtpVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        result = serializer.result
+        data = {
+            "success": True,
+            "purpose": result.challenge.purpose,
+            "user": UserResponseSerializer(result.user, context={"request": request}).data,
+        }
+        if result.tokens:
+            data.update(result.tokens)
+            if result.user.role:
+                data["role"] = result.user.role.code
+        return Response(data, status=status.HTTP_200_OK)
 
 
 @extend_schema(tags=["Identity & Auth"])
@@ -216,6 +291,13 @@ class StaffViewSet(viewsets.ModelViewSet):
         return Response(workspaces)
 
 
+@extend_schema(tags=["Account Management"])
+class RoleViewSet(AbstractModelViewSet):
+    serializer_class = RoleSerializer
+    queryset = Role.objects.all().order_by("name")
+    permission_classes = [IsAdmin]
+
+
 
 @extend_schema(tags=["Identity & Auth"])
 class MeView(APIView):
@@ -244,6 +326,8 @@ class UserViewSet(AbstractModelViewSet):
             return UserUpdateSerializer
         elif self.action == 'change_password':
             return ChangePasswordSerializer
+        elif self.action == 'convert_guest_bookings':
+            return GuestBookingConversionSerializer
         return UserResponseSerializer
 
     def get_permissions(self):
@@ -251,7 +335,7 @@ class UserViewSet(AbstractModelViewSet):
             return [AllowAny()]
         elif self.action in ['list', 'retrieve']:
             return [IsAuthenticated()]
-        elif self.action in ['me', 'change_password']:
+        elif self.action in ['me', 'change_password', 'convert_guest_bookings']:
             return [IsAuthenticated()]
         else:
             return [IsOwnerOrReadOnly()]
@@ -288,6 +372,27 @@ class UserViewSet(AbstractModelViewSet):
 
         return Response({"detail": "Not allowed to delete this user."}, status=status.HTTP_403_FORBIDDEN)
 
+    @extend_schema(
+        summary="Current user profile",
+        description=(
+            "Retrieve or update the authenticated user's profile. "
+            "Phone updates are rate-limited to three total changes with a seven-day cooldown between changes."
+        ),
+        request=UserUpdateSerializer,
+        responses={200: UserResponseSerializer, 400: OpenApiTypes.OBJECT},
+        examples=[
+            OpenApiExample(
+                "Phone cooldown error",
+                value={"phone": ["Phone number can only be changed once every 7 days. Please try again later."]},
+                status_codes=["400"],
+            ),
+            OpenApiExample(
+                "Phone limit error",
+                value={"phone": ["Phone number can only be changed three times. Please contact support if you need help."]},
+                status_codes=["400"],
+            ),
+        ],
+    )
     @action(detail=False, methods=['get', 'patch', 'put', 'delete'], url_path='me')
     def me(self, request):
         if request.method == 'GET':
@@ -320,6 +425,37 @@ class UserViewSet(AbstractModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response({"detail": "Password changed successfully."}, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="Convert guest bookings to the current account",
+        description=(
+            "Link historical guest bookings that match the authenticated user's phone number. "
+            "If the user's phone is already verified, no OTP payload is required. "
+            "Legacy accounts can provide a login OTP challenge and code to prove phone ownership."
+        ),
+        request=GuestBookingConversionSerializer,
+        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+    )
+    @action(detail=False, methods=['post'], url_path='me/convert-guest-bookings')
+    def convert_guest_bookings(self, request):
+        serializer = GuestBookingConversionSerializer(
+            data=request.data,
+            context={'user': request.user, 'request': request}
+        )
+        serializer.is_valid(raise_exception=True)
+        result = serializer.save()
+        return Response(
+            {
+                "success": True,
+                "phone": result.phone,
+                "verified_via": result.verified_via,
+                "linked_counts": result.linked_counts,
+                "already_linked_counts": result.already_linked_counts,
+                "linked_total": result.linked_total,
+                "already_linked_total": result.already_linked_total,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=['post'], url_path='change-password')
     def change_password_for_user(self, request, pk=None):
@@ -495,7 +631,7 @@ class IndividualOwnerProfileViewSet(AbstractModelViewSet):
 
     def get_permissions(self):
         if self.action == 'create':
-            return [AllowAny()]
+            return [IsAdmin()]
         elif self.action in ['list', 'retrieve']:
             return [AllowAny()]
         else:
@@ -503,7 +639,7 @@ class IndividualOwnerProfileViewSet(AbstractModelViewSet):
 
     def get_serializer_class(self):
         if self.action == 'create':
-            return IndividualOwnerRegistrationSerializer
+            return IndividualOwnerProfileSerializer
         return IndividualOwnerProfileSerializer
 
     def get_queryset(self):
@@ -522,8 +658,21 @@ class HotelProfileViewSet(AbstractModelViewSet):
     def get_permissions(self):
         if self.action in ['list', 'retrieve', 'check_availability', 'get_featured_hotels']:
             return [AllowAny()]
+        if self.action in ["verify", "unverify", "activate", "deactivate"]:
+            return [IsAdmin()]
         else:
             return [IsCompanyOwner()]
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        notification_plan = NotificationService.prepare_saved_listing_deletion_notifications(
+            instance,
+            deleted_by=request.user,
+        )
+        response = super().destroy(request, *args, **kwargs)
+        if response.status_code == status.HTTP_204_NO_CONTENT:
+            NotificationService.dispatch_saved_listing_deletion_notifications(notification_plan)
+        return response
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -543,6 +692,15 @@ class HotelProfileViewSet(AbstractModelViewSet):
             queryset = queryset.filter(q)
 
         if self.action in ['list', 'retrieve', 'get_featured_hotels']:
+            if not managed_only and not (
+                user
+                and user.is_authenticated
+                and (
+                    user.is_superuser
+                    or (hasattr(user, 'role') and user.role and user.role.code == RoleCode.ADMIN.value)
+                )
+            ):
+                queryset = queryset.filter(is_active=True)
             queryset = queryset.select_related(
                 "company",
                 "company__user",
@@ -639,9 +797,37 @@ class HotelProfileViewSet(AbstractModelViewSet):
         url_path='featured',
     )
     def get_featured_hotels(self, request):
-        featured_hotels = HotelProfile.objects.filter(featured=True)
+        featured_hotels = HotelProfile.objects.filter(featured=True, is_active=True)
         serializer = self.get_serializer(featured_hotels, many=True)
         return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
+    def verify(self, request, pk=None):
+        hotel = self.get_object()
+        _set_listing_verification(hotel, verified=True, actor=request.user)
+        serializer = self.get_serializer(hotel)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
+    def unverify(self, request, pk=None):
+        hotel = self.get_object()
+        _set_listing_verification(hotel, verified=False, actor=request.user)
+        serializer = self.get_serializer(hotel)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="activate", permission_classes=[IsAdmin])
+    def activate(self, request, pk=None):
+        hotel = self.get_object()
+        _set_listing_activation(hotel, active=True)
+        serializer = self.get_serializer(hotel)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="deactivate", permission_classes=[IsAdmin])
+    def deactivate(self, request, pk=None):
+        hotel = self.get_object()
+        _set_listing_activation(hotel, active=False)
+        serializer = self.get_serializer(hotel)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
         summary="List addons for this hotel",

@@ -6,13 +6,13 @@ from django.views.decorators.csrf import csrf_exempt
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework import status, serializers
 from rest_framework.views import APIView
 from django.conf import settings
 from django.utils import timezone
 from apps.listing.models import Booking
 from apps.account.enums import RoleCode
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample, inline_serializer
 from .models import PaymentTransaction
 from .services import ChapaPaymentService
 from rest_framework import viewsets, filters
@@ -33,6 +33,11 @@ from .models import PaymentTransaction
 from .services import ChapaPaymentService
 
 
+NO_REFUND_POLICY_CODE = "no_refunds"
+NO_REFUND_POLICY_MESSAGE = "No refunds are available for any service payment on the platform."
+PENDING_CANCEL_NOTE = "Cancelling a pending payment only stops that pending transaction. It does not create a refund."
+
+
 def _is_payment_owner_or_admin(user, payment_tx):
     if user.is_superuser or (
         hasattr(user, 'role') and
@@ -46,6 +51,19 @@ def _is_payment_owner_or_admin(user, payment_tx):
         return False
 
     return getattr(booking, 'user', None) == user or getattr(booking, 'renter', None) == user
+
+
+def _with_no_refund_policy(payload, *, cancellation_effect):
+    response = dict(payload)
+    response.update(
+        {
+            "refund_supported": False,
+            "refund_policy": NO_REFUND_POLICY_CODE,
+            "refund_message": NO_REFUND_POLICY_MESSAGE,
+            "cancellation_effect": cancellation_effect,
+        }
+    )
+    return response
 
 
 @extend_schema(tags=["Payments"])
@@ -166,13 +184,17 @@ class InitiatePaymentView(APIView):
         
         if booking_type == 'booking':
             from apps.listing.models import Booking as BookingClass
-            if booking_status != BookingClass.BookingStatus.PENDING:
+            payable_statuses = {
+                BookingClass.BookingStatus.PENDING,
+                BookingClass.BookingStatus.WALK_IN,
+            }
+            if booking_status not in payable_statuses:
                 return Response(
                     {"error": "Booking is already processed"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         elif booking_type in ['guesthouse', 'eventspace']:
-            if booking_status != 'pending':
+            if booking_status not in {'pending', 'walk_in'}:
                 return Response(
                     {"error": "Booking is already processed"},
                     status=status.HTTP_400_BAD_REQUEST
@@ -438,8 +460,43 @@ def verify_payment_public(request, tx_ref):
 @extend_schema(
     tags=["Payments"],
     summary="Cancel a pending payment",
-    description="Cancel a payment transaction that is still in PENDING status.",
-    responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT}
+    description=(
+        "Cancel a payment transaction that is still in PENDING status. "
+        "This endpoint does not issue refunds because the platform does not support refunds."
+    ),
+    request=None,
+    responses={
+        200: inline_serializer(
+            name="PaymentCancelSuccessResponse",
+            fields={
+                "message": serializers.CharField(),
+                "pending_cancel_note": serializers.CharField(),
+                "refund_supported": serializers.BooleanField(),
+                "refund_policy": serializers.CharField(),
+                "refund_message": serializers.CharField(),
+                "cancellation_effect": serializers.CharField(),
+            },
+        ),
+        400: inline_serializer(
+            name="PaymentCancelErrorResponse",
+            fields={
+                "error": serializers.CharField(),
+                "pending_cancel_note": serializers.CharField(required=False),
+                "refund_supported": serializers.BooleanField(),
+                "refund_policy": serializers.CharField(),
+                "refund_message": serializers.CharField(),
+                "cancellation_effect": serializers.CharField(),
+            },
+        ),
+        403: inline_serializer(
+            name="PaymentCancelForbiddenResponse",
+            fields={"error": serializers.CharField()},
+        ),
+        404: inline_serializer(
+            name="PaymentCancelNotFoundResponse",
+            fields={"error": serializers.CharField()},
+        ),
+    }
 )
 @api_view(['PUT'])
 @permission_classes([IsAuthenticated])
@@ -460,7 +517,13 @@ def cancel_payment(request, tx_ref):
         
         if payment_tx.status != PaymentTransaction.PaymentStatus.PENDING:
             return Response(
-                {"error": "Only pending transactions can be cancelled"},
+                _with_no_refund_policy(
+                    {
+                        "error": "Only pending transactions can be cancelled. Completed service payments are non-refundable.",
+                        "pending_cancel_note": PENDING_CANCEL_NOTE,
+                    },
+                    cancellation_effect="refund_not_available",
+                ),
                 status=status.HTTP_400_BAD_REQUEST
             )
         
@@ -470,10 +533,24 @@ def cancel_payment(request, tx_ref):
             payment_tx.status = PaymentTransaction.PaymentStatus.CANCELLED
             payment_tx.save()
             
-            return Response({"message": result["message"]})
+            return Response(
+                _with_no_refund_policy(
+                    {
+                        "message": result["message"],
+                        "pending_cancel_note": PENDING_CANCEL_NOTE,
+                    },
+                    cancellation_effect="pending_payment_cancelled_only",
+                )
+            )
         else:
             return Response(
-                {"error": result["error"]},
+                _with_no_refund_policy(
+                    {
+                        "error": result["error"],
+                        "pending_cancel_note": PENDING_CANCEL_NOTE,
+                    },
+                    cancellation_effect="pending_payment_not_cancelled",
+                ),
                 status=status.HTTP_400_BAD_REQUEST
             )
             

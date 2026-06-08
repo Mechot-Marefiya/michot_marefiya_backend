@@ -3,7 +3,7 @@
 # Flutter contract: yes
 # Last updated: 2026-06-01
 
-from apps.favorites.models import Favorite
+from apps.favorites.models import Favorite, GuestFavorite
 from django.contrib.contenttypes.models import ContentType
 from tests.conftest import HotelProfileFactory
 
@@ -65,6 +65,69 @@ def test_post_favorite_toggle_invalid_payload(auth_client):
     response = auth_client.post("/api/v1/favorites/toggle/", {}, format="json")
 
     assert response.status_code == 400
+
+
+def test_post_guest_favorite_create_success(api_client, hotel):
+    response = api_client.post(
+        "/api/v1/favorites/guest/",
+        {
+            "guest_phone": "+251911223344",
+            "content_type": "account.hotelprofile",
+            "object_id": str(hotel.id),
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["guest_phone"] == "0911223344"
+    assert data["object_id"] == str(hotel.id)
+    assert data["snapshot"]["id"] == str(hotel.id)
+    assert GuestFavorite.objects.filter(guest_phone="0911223344", object_id=str(hotel.id)).exists()
+
+
+def test_get_guest_favorites_list_success(api_client, hotel):
+    ct = ContentType.objects.get_for_model(hotel.__class__)
+    GuestFavorite.objects.create(
+        guest_phone="0911223344",
+        content_type=ct,
+        object_id=str(hotel.id),
+        snapshot={"id": str(hotel.id), "type": "account.hotelprofile"},
+    )
+
+    response = api_client.get("/api/v1/favorites/guest/", {"guest_phone": "0911223344"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["count"] == 1
+    assert data["results"][0]["guest_phone"] == "0911223344"
+    assert data["results"][0]["snapshot"]["id"] == str(hotel.id)
+
+
+def test_post_guest_favorite_toggle_creates_and_removes(api_client, hotel):
+    create_response = api_client.post(
+        "/api/v1/favorites/guest/toggle/",
+        {
+            "guest_phone": "0911223344",
+            "content_type": "account.hotelprofile",
+            "object_id": str(hotel.id),
+        },
+        format="json",
+    )
+    assert create_response.status_code == 201
+
+    remove_response = api_client.post(
+        "/api/v1/favorites/guest/toggle/",
+        {
+            "guest_phone": "0911223344",
+            "content_type": "account.hotelprofile",
+            "object_id": str(hotel.id),
+        },
+        format="json",
+    )
+
+    assert remove_response.status_code == 200
+    assert remove_response.json()["detail"] == "removed"
 
 
 def test_get_favorite_detail_success(auth_client, favorite):

@@ -4,7 +4,13 @@ from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 import logging
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
-from apps.account.services import ImageCreationService
+from apps.account.services import (
+    GuestBookingConversionError,
+    GuestBookingConversionService,
+    ImageCreationService,
+    OtpError,
+    OtpService,
+)
 from apps.account.enums import RoleCode
 from apps.account.models import (
     Address,
@@ -12,7 +18,9 @@ from apps.account.models import (
     HotelProfile,
     IndividualOwnerProfile,
     ListingImage,
+    OtpChallenge,
     Role,
+    normalize_phone_number,
 )
 from apps.notifications.services import NotificationService
 from apps.notifications.models import Notification
@@ -253,6 +261,12 @@ class UserSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("A user with this email already exists.")
         return value
 
+    def validate_phone(self, value):
+        normalized_phone = OtpService.normalize_phone(value)
+        if normalized_phone and User.objects.filter(phone=normalized_phone).exists():
+            raise serializers.ValidationError("A user with this phone already exists.")
+        return normalized_phone
+
     def validate(self, attrs):
         password = attrs.get("password")
         confirm_password = attrs.pop("confirm_password")
@@ -290,6 +304,21 @@ class UserSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
 
+        if user.phone:
+            try:
+                self.otp_challenge = OtpService.create_challenge(
+                    phone=user.phone,
+                    purpose=OtpChallenge.Purpose.SIGNUP,
+                )
+            except Exception as exc:
+                user.delete()
+                raise serializers.ValidationError(
+                    {"phone": "Could not send signup OTP. Please try again."}
+                ) from exc
+            return user
+        else:
+            self.otp_challenge = None
+
         try:
             uid = urlsafe_base64_encode(force_bytes(user.pk))
             token = default_token_generator.make_token(user)
@@ -308,19 +337,41 @@ class UserSerializer(serializers.ModelSerializer):
         return user
 
     def to_representation(self, instance):
-        return UserResponseSerializer(instance, self.context).to_representation(
-            instance
-        )
+        data = UserResponseSerializer(instance, self.context).to_representation(instance)
+        data["verification_required"] = "phone" if instance.phone else "email"
+        data["phone_verification_required"] = bool(instance.phone and not instance.phone_verified_at)
+        challenge = getattr(self, "otp_challenge", None)
+        if challenge:
+            data["otp_challenge_id"] = str(challenge.id)
+            data["otp_expires_at"] = challenge.expires_at
+            data["otp_purpose"] = challenge.purpose
+        else:
+            data["registration_warning"] = (
+                "Phone was not provided. This legacy signup path remains temporarily available during migration."
+            )
+        return data
 
 
 
 class UserResponseSerializer(serializers.ModelSerializer):
     role = RoleSerializer(read_only=True)
     workspace = serializers.SerializerMethodField()
+    phone_verified = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = User
-        fields = ["id", "email", "first_name", "last_name", "phone", "is_active", "role", "workspace"]
+        fields = [
+            "id",
+            "email",
+            "first_name",
+            "last_name",
+            "phone",
+            "phone_verified",
+            "phone_verified_at",
+            "is_active",
+            "role",
+            "workspace",
+        ]
 
 
     def get_workspace(self, instance):
@@ -369,6 +420,27 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             "last_name": {"required": False},
             "phone": {"required": False},
         }
+
+    def validate_phone(self, value):
+        normalized_phone = normalize_phone_number(value)
+
+        if not normalized_phone:
+            return normalized_phone
+
+        if self.instance and normalize_phone_number(self.instance.phone) == normalized_phone:
+            return normalized_phone
+
+        existing_queryset = User.objects.filter(phone=normalized_phone)
+        if self.instance:
+            existing_queryset = existing_queryset.exclude(pk=self.instance.pk)
+
+        if existing_queryset.exists():
+            raise serializers.ValidationError("A user with this phone already exists.")
+
+        if self.instance:
+            self.instance.can_change_phone(normalized_phone)
+
+        return normalized_phone
 
     def validate_email(self, value):
         if not value or not value.strip():
@@ -433,6 +505,8 @@ class UserUpdateSerializer(serializers.ModelSerializer):
 
 class ChangePasswordSerializer(serializers.Serializer):
     current_password = serializers.CharField(write_only=True, required=False, allow_blank=True)
+    otp_challenge_id = serializers.UUIDField(write_only=True, required=False)
+    otp_code = serializers.CharField(write_only=True, required=False, max_length=12, trim_whitespace=True)
     new_password = serializers.CharField(write_only=True, required=True)
     confirm_password = serializers.CharField(write_only=True, required=True)
 
@@ -455,6 +529,9 @@ class ChangePasswordSerializer(serializers.Serializer):
         new_password = attrs.get("new_password")
         confirm_password = attrs.get("confirm_password")
         current_password = attrs.get("current_password")
+        otp_challenge_id = attrs.get("otp_challenge_id")
+        otp_code = attrs.get("otp_code")
+        user = self.context.get("user")
 
         if new_password != confirm_password:
             raise serializers.ValidationError({"new_password": "New passwords do not match."})
@@ -479,6 +556,27 @@ class ChangePasswordSerializer(serializers.Serializer):
                 {"new_password": "Password must contain at least one letter."}
             )
 
+        if otp_challenge_id or otp_code:
+            if not otp_challenge_id or not otp_code:
+                raise serializers.ValidationError(
+                    {"otp_code": "Both otp_challenge_id and otp_code are required for OTP verification."}
+                )
+            try:
+                OtpService.verify_challenge(
+                    challenge_id=otp_challenge_id,
+                    code=otp_code,
+                    purpose=OtpChallenge.Purpose.PASSWORD_CHANGE,
+                    user=user,
+                )
+            except OtpError as exc:
+                raise serializers.ValidationError({"otp_code": str(exc)})
+            return attrs
+
+        if not current_password and not self.context.get("skip_current_password_check", False):
+            raise serializers.ValidationError(
+                {"current_password": "Current password or phone OTP verification is required."}
+            )
+
         return attrs
 
     def save(self):
@@ -498,7 +596,31 @@ class ChangePasswordSerializer(serializers.Serializer):
             pass
 
         return user
-        return user
+
+
+class GuestBookingConversionSerializer(serializers.Serializer):
+    otp_challenge_id = serializers.UUIDField(write_only=True, required=False)
+    otp_code = serializers.CharField(write_only=True, required=False, max_length=12, trim_whitespace=True)
+
+    def validate(self, attrs):
+        otp_challenge_id = attrs.get("otp_challenge_id")
+        otp_code = attrs.get("otp_code")
+        if bool(otp_challenge_id) != bool(otp_code):
+            raise serializers.ValidationError(
+                {"detail": "Both otp_challenge_id and otp_code are required together."}
+            )
+        return attrs
+
+    def save(self):
+        user = self.context["user"]
+        try:
+            return GuestBookingConversionService.convert_for_user(
+                user=user,
+                otp_challenge_id=self.validated_data.get("otp_challenge_id"),
+                otp_code=self.validated_data.get("otp_code"),
+            )
+        except (GuestBookingConversionError, OtpError) as exc:
+            raise serializers.ValidationError({"detail": str(exc)})
 
 
 class PasswordResetSerializer(serializers.Serializer):
@@ -838,12 +960,26 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     facilities = FacilityResponseSerializer(many=True)
     is_favorite = serializers.SerializerMethodField()
+    verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
 
     class Meta:
         model = HotelProfile
     class Meta:
         model = HotelProfile
-        fields = ["id", "company", "images", "logo", "stars", "featured","facilities", "is_favorite"]
+        fields = [
+            "id",
+            "company",
+            "images",
+            "logo",
+            "stars",
+            "featured",
+            "is_active",
+            "facilities",
+            "is_favorite",
+            "is_verified",
+            "verified_at",
+            "verified_by",
+        ]
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
@@ -1077,6 +1213,7 @@ class HotelProfileSerializer(serializers.ModelSerializer):
         address_data = validated_data.pop("address")
         facilities = validated_data.pop("facilities", [])
         images = validated_data.pop("images", [])
+        validated_data.setdefault("is_active", False)
         
         address = ListingService.get_or_create_address(address_data)
         
@@ -1126,3 +1263,59 @@ class HotelRoomAvailabilitySerializer(serializers.Serializer):
                 "Check-out date must be after check-in date."
             )
         return data
+
+
+class OtpRequestSerializer(serializers.Serializer):
+    phone = serializers.CharField(max_length=20)
+    purpose = serializers.ChoiceField(
+        choices=OtpChallenge.Purpose.choices,
+        default=OtpChallenge.Purpose.LOGIN,
+        required=False,
+    )
+
+    def validate(self, attrs):
+        purpose = attrs.get("purpose", OtpChallenge.Purpose.LOGIN)
+        if purpose not in {
+            OtpChallenge.Purpose.LOGIN,
+            OtpChallenge.Purpose.SIGNUP,
+            OtpChallenge.Purpose.PASSWORD_CHANGE,
+        }:
+            raise serializers.ValidationError({"purpose": "Unsupported OTP purpose."})
+        return attrs
+
+    def save(self):
+        try:
+            self.challenge = OtpService.create_challenge(
+                phone=self.validated_data["phone"],
+                purpose=self.validated_data.get("purpose", OtpChallenge.Purpose.LOGIN),
+            )
+        except OtpError as exc:
+            raise serializers.ValidationError({"detail": str(exc)})
+        return self.challenge
+
+
+class OtpVerifySerializer(serializers.Serializer):
+    challenge_id = serializers.UUIDField()
+    code = serializers.CharField(max_length=12, trim_whitespace=True)
+    purpose = serializers.ChoiceField(
+        choices=OtpChallenge.Purpose.choices,
+        default=OtpChallenge.Purpose.LOGIN,
+        required=False,
+    )
+
+    def validate(self, attrs):
+        purpose = attrs.get("purpose", OtpChallenge.Purpose.LOGIN)
+        issue_tokens = purpose in {
+            OtpChallenge.Purpose.LOGIN,
+            OtpChallenge.Purpose.SIGNUP,
+        }
+        try:
+            self.result = OtpService.verify_challenge(
+                challenge_id=attrs["challenge_id"],
+                code=attrs["code"],
+                purpose=purpose,
+                issue_tokens=issue_tokens,
+            )
+        except OtpError as exc:
+            raise serializers.ValidationError({"detail": str(exc)})
+        return attrs

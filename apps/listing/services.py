@@ -1,6 +1,10 @@
 import logging
+from dataclasses import dataclass
 from datetime import date, timedelta, datetime
+from uuid import uuid4
 from django.conf import settings
+from django.core.cache import cache
+from django.contrib.auth.hashers import check_password, make_password
 from django.db import transaction
 from django.db.models import Count, F, Min,Q
 from django.shortcuts import get_object_or_404
@@ -12,7 +16,7 @@ from typing import Dict, Optional, Tuple,Any,List
 from rest_framework.exceptions import ValidationError
 from decimal import Decimal
 from apps.account.models import CompanyProfile, HotelProfile
-from apps.account.services import ImageCreationService
+from apps.account.services import ImageCreationService, OtpService
 from apps.core.models import Address,Facility
 from apps.listing.exceptions import BookingConflict
 from apps.listing.models import (
@@ -42,16 +46,185 @@ from apps.core.utils import convert_currency
 from apps.core.services.email_service import BookingEmailService
 from apps.notifications.services import NotificationService
 from apps.notifications.models import Notification
+from services.sms import normalize_phone_number
 
 
 
 logger = logging.getLogger(__name__)
 
 
+class GuestBookingOtpError(Exception):
+    """Raised when guest booking OTP verification fails."""
+
+
+@dataclass(frozen=True)
+class GuestBookingOtpChallenge:
+    challenge_id: str
+    phone: str
+    booking_type: str
+    expires_at: object
+
+
+class GuestBookingOtpService:
+    PURPOSE = "guest_booking"
+    VALID_BOOKING_TYPES = {"hotel", "guesthouse", "eventspace", "car_rental"}
+
+    @classmethod
+    def _ttl_seconds(cls):
+        return int(getattr(settings, "OTP_TTL_SECONDS", OtpService.DEFAULT_TTL_SECONDS))
+
+    @classmethod
+    def _max_attempts(cls):
+        return int(getattr(settings, "OTP_MAX_ATTEMPTS", OtpService.DEFAULT_MAX_ATTEMPTS))
+
+    @staticmethod
+    def _challenge_key(challenge_id):
+        return f"guest_booking_otp:{challenge_id}"
+
+    @classmethod
+    def create_challenge(cls, *, phone: str, booking_type: str) -> GuestBookingOtpChallenge:
+        normalized_phone = OtpService.normalize_phone(phone)
+        if not normalized_phone:
+            raise GuestBookingOtpError("Phone number is required.")
+        if booking_type not in cls.VALID_BOOKING_TYPES:
+            raise GuestBookingOtpError("Invalid booking type.")
+
+        code = OtpService.generate_code()
+        challenge_id = str(uuid4())
+        expires_at = timezone.now() + timezone.timedelta(seconds=cls._ttl_seconds())
+        cache.set(
+            cls._challenge_key(challenge_id),
+            {
+                "phone": normalized_phone,
+                "booking_type": booking_type,
+                "code_hash": make_password(code),
+                "attempts": 0,
+                "max_attempts": cls._max_attempts(),
+                "expires_at": expires_at.isoformat(),
+            },
+            timeout=cls._ttl_seconds(),
+        )
+
+        message = f"Your Mechot Marefiya booking verification code is {code}. It expires in {cls._ttl_seconds() // 60} minutes."
+        try:
+            from services.sms import send_sms
+
+            send_sms(normalized_phone, message)
+        except Exception:
+            cache.delete(cls._challenge_key(challenge_id))
+            logger.exception("Failed to send guest booking OTP SMS to %s", normalized_phone)
+            raise
+
+        return GuestBookingOtpChallenge(
+            challenge_id=challenge_id,
+            phone=normalized_phone,
+            booking_type=booking_type,
+            expires_at=expires_at,
+        )
+
+    @classmethod
+    def verify_challenge(cls, *, challenge_id, code: str, phone: str, booking_type: str):
+        data = cache.get(cls._challenge_key(challenge_id))
+        if not data:
+            raise GuestBookingOtpError("Invalid or expired guest booking OTP challenge.")
+        if data["booking_type"] != booking_type:
+            raise GuestBookingOtpError("OTP challenge does not match this booking type.")
+
+        normalized_phone = OtpService.normalize_phone(phone)
+        if data["phone"] != normalized_phone:
+            raise GuestBookingOtpError("OTP challenge does not match the guest phone number.")
+        if data["attempts"] >= data["max_attempts"]:
+            cache.delete(cls._challenge_key(challenge_id))
+            raise GuestBookingOtpError("OTP attempt limit exceeded.")
+
+        data["attempts"] += 1
+        if not check_password(code, data["code_hash"]):
+            cache.set(cls._challenge_key(challenge_id), data, timeout=cls._ttl_seconds())
+            raise GuestBookingOtpError("Invalid OTP code.")
+
+        cache.delete(cls._challenge_key(challenge_id))
+        return True
+
+DEFAULT_PLATFORM_FEE_RATE = Decimal("0.05")
+BOOKING_PHONE_SOURCES = (
+    (Booking, "user", "guest_phone"),
+    (GuestHouseBooking, "renter", "guest_phone"),
+    (EventSpaceBooking, "user", "guest_phone"),
+    (CarRental, "renter", "guest_phone"),
+)
+
+
+def _phone_variants(phone: Optional[str]) -> List[str]:
+    if not phone:
+        return []
+
+    stripped = str(phone).strip().replace(" ", "").replace("-", "")
+    variants = {stripped}
+
+    normalized = normalize_phone_number(stripped)
+    if normalized:
+        variants.add(normalized)
+        if normalized.startswith("251"):
+            variants.add(f"+{normalized}")
+            variants.add(f"0{normalized[3:]}")
+
+    return [variant for variant in variants if variant]
+
+
+def _resolve_booking_phone_identity(booking=None, user=None, phone: Optional[str] = None) -> Optional[str]:
+    candidates = []
+
+    if phone:
+        candidates.append(phone)
+
+    if user is not None:
+        candidates.append(getattr(user, "phone", None))
+
+    if booking is not None:
+        candidates.append(getattr(booking, "guest_phone", None))
+        owner = getattr(booking, "user", None) or getattr(booking, "renter", None)
+        if owner is not None:
+            candidates.append(getattr(owner, "phone", None))
+
+    for candidate in candidates:
+        normalized = normalize_phone_number(candidate)
+        if normalized:
+            return normalized
+
+    return None
+
+
+def has_prior_booking_for_phone(phone: Optional[str], exclude_booking=None) -> bool:
+    variants = _phone_variants(phone)
+    if not variants:
+        return False
+
+    for model, owner_field, guest_field in BOOKING_PHONE_SOURCES:
+        query = Q(**{f"{guest_field}__in": variants}) | Q(**{f"{owner_field}__phone__in": variants})
+        if exclude_booking is not None and isinstance(exclude_booking, model):
+            query &= ~Q(pk=exclude_booking.pk)
+        if model.objects.filter(query).exists():
+            return True
+
+    return False
+
+
+def get_effective_platform_fee_rate(*, booking=None, user=None, phone: Optional[str] = None, exclude_booking=None):
+    phone_identity = _resolve_booking_phone_identity(booking=booking, user=user, phone=phone)
+    if phone_identity and not has_prior_booking_for_phone(phone_identity, exclude_booking=exclude_booking or booking):
+        return Decimal("0.00")
+
+    fee_rate = getattr(settings, "PLATFORM_FEE_RATE", DEFAULT_PLATFORM_FEE_RATE)
+    if not isinstance(fee_rate, Decimal):
+        fee_rate = Decimal(str(fee_rate))
+    return fee_rate
+
+
 class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_room_listing(validated_data: dict):
+        validated_data.setdefault("is_active", False)
         hotel_id = validated_data.pop("hotel_id")
         images = validated_data.pop("images")
         address_data = validated_data.pop("address", None)
@@ -90,6 +263,7 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_guest_house_listing(validated_data: dict):
+        validated_data.setdefault("is_active", False)
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
         amenity_ids = validated_data.pop("amenities", [])
@@ -133,6 +307,7 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_property_listing(validated_data: dict):
+        validated_data.setdefault("is_active", False)
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
         
@@ -160,6 +335,7 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_event_space_listing(validated_data: dict):
+        validated_data.setdefault("is_active", False)
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
         amenity_ids = validated_data.pop("amenities", [])
@@ -1025,11 +1201,12 @@ class PriceService:
 
 class PriceCalculationService:
     @staticmethod
-    def calculate_totals(item_subtotals):
+    def calculate_totals(item_subtotals, fee_rate=None):
         # Base math for calculating totals. Returns raw Decimals.
         items_subtotal = sum(Decimal(str(s)) for s in item_subtotals)
         
-        fee_rate = getattr(settings, 'PLATFORM_FEE_RATE', Decimal('0.05'))
+        if fee_rate is None:
+            fee_rate = getattr(settings, 'PLATFORM_FEE_RATE', DEFAULT_PLATFORM_FEE_RATE)
         if not isinstance(fee_rate, Decimal):
             fee_rate = Decimal(str(fee_rate))
             
@@ -1044,9 +1221,30 @@ class PriceCalculationService:
         }
 
     @staticmethod
-    def calculate_preview_totals(item_subtotals, currency="ETB", display_currency=None, items=None):
+    def calculate_totals_with_addons(base_subtotals, addon_subtotals=None, fee_rate=None):
+        base_subtotal = sum(Decimal(str(s)) for s in base_subtotals)
+        addon_subtotal = sum(Decimal(str(s)) for s in (addon_subtotals or []))
+
+        if fee_rate is None:
+            fee_rate = getattr(settings, 'PLATFORM_FEE_RATE', DEFAULT_PLATFORM_FEE_RATE)
+        if not isinstance(fee_rate, Decimal):
+            fee_rate = Decimal(str(fee_rate))
+
+        platform_fee = base_subtotal * fee_rate
+        grand_total = base_subtotal + addon_subtotal + platform_fee
+
+        return {
+            "items_subtotal": base_subtotal,
+            "addons_subtotal": addon_subtotal,
+            "platform_fee": platform_fee,
+            "platform_fee_percentage": fee_rate * 100,
+            "grand_total": grand_total,
+        }
+
+    @staticmethod
+    def calculate_preview_totals(item_subtotals, currency="ETB", display_currency=None, items=None, fee_rate=None):
         
-        base_res = PriceCalculationService.calculate_totals(item_subtotals)
+        base_res = PriceCalculationService.calculate_totals(item_subtotals, fee_rate=fee_rate)
         
         response = {
             "totals": {
@@ -1289,7 +1487,8 @@ class BookingService:
             )
 
         # Calculate total using the shared logic (Base + 5% Fee)
-        booking.total_price = BookingService.get_booking_total(booking)
+        fee_rate = get_effective_platform_fee_rate(booking=booking, user=user, exclude_booking=booking)
+        booking.total_price = BookingService.get_booking_total(booking, fee_rate=fee_rate)
         
         booking.save()
 
@@ -1344,9 +1543,8 @@ class BookingService:
                     "images": it.snapshot.get('images') if isinstance(it.snapshot, dict) else [],
                 })
 
-            base_subtotal = raw_rooms_subtotal + raw_addons_subtotal
-            platform_fee = base_subtotal * Decimal('0.05')
-            grand_total = base_subtotal + platform_fee
+            platform_fee = raw_rooms_subtotal * fee_rate
+            grand_total = raw_rooms_subtotal + raw_addons_subtotal + platform_fee
 
             booking_snapshot = {
                 "booking_id": str(booking.id),
@@ -1529,9 +1727,13 @@ class BookingService:
         return booking
     
     @staticmethod
-    def get_booking_total(booking):
+    def get_booking_total(booking, fee_rate=None):
+        if fee_rate is None:
+            fee_rate = get_effective_platform_fee_rate(booking=booking)
+
         use_seasonal = getattr(settings, 'FEATURE_SEASONAL_PRICING', False)
         item_subtotals = []
+        addon_subtotals = []
 
         if use_seasonal:
             for pip in BookingItemPrice.objects.filter(booking_item__booking=booking):
@@ -1544,9 +1746,13 @@ class BookingService:
         from apps.listing.models import BookingAddon
         for addon in BookingAddon.objects.filter(booking_item__booking=booking):
             addon_subtotal = Decimal(addon.price_per_unit) * Decimal(addon.quantity)
-            item_subtotals.append(addon_subtotal)
+            addon_subtotals.append(addon_subtotal)
         
-        calculation = PriceCalculationService.calculate_totals(item_subtotals)
+        calculation = PriceCalculationService.calculate_totals_with_addons(
+            item_subtotals,
+            addon_subtotals,
+            fee_rate=fee_rate,
+        )
         return calculation["grand_total"]
 class EventSpaceBookingService:
     @transaction.atomic()
@@ -1651,7 +1857,8 @@ class EventSpaceBookingService:
             increment=False, 
         )
 
-        booking.total_price = EventSpaceBookingService.get_booking_total(booking)
+        fee_rate = get_effective_platform_fee_rate(booking=booking, user=user, exclude_booking=booking)
+        booking.total_price = EventSpaceBookingService.get_booking_total(booking, fee_rate=fee_rate)
         
         try:
             duration = (booking.check_out_date - booking.check_in_date).days or 1
@@ -1673,7 +1880,7 @@ class EventSpaceBookingService:
                     "currency": booking.currency,
                 })
 
-            platform_fee = raw_base_subtotal * Decimal('0.05')
+            platform_fee = raw_base_subtotal * fee_rate
             grand_total = raw_base_subtotal + platform_fee
 
             booking.snapshot = {
@@ -1843,10 +2050,13 @@ class EventSpaceBookingService:
         return booking
     
     @staticmethod
-    def get_booking_total(booking: EventSpaceBooking):
+    def get_booking_total(booking: EventSpaceBooking, fee_rate=None):
+        if fee_rate is None:
+            fee_rate = get_effective_platform_fee_rate(booking=booking)
+
         # this calculates total price for the booking including platform fee from settings.
         item_subtotals = [item.subtotal() for item in booking.items.all()]
-        calculation = PriceCalculationService.calculate_totals(item_subtotals)
+        calculation = PriceCalculationService.calculate_totals(item_subtotals, fee_rate=fee_rate)
         return calculation["grand_total"]
 
 class PaymentService:
@@ -1972,6 +2182,41 @@ class CarAvailabilityService:
                     f"{car_listing} not enough units on {dt}, "
                     f"Available: {av.available_units}, Requested: {quantity}"
                 )
+
+    @staticmethod
+    def check_daily_availability(car_listing, start_date, end_date, quantity):
+        try:
+            CarAvailabilityService.validate_availability(
+                car_listing=car_listing,
+                quantity=quantity,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        except BookingConflict as exc:
+            return {"available": False, "reason": str(exc)}
+
+        return {"available": True, "reason": ""}
+
+    @staticmethod
+    def reserve_daily_units(car_listing, start_date, end_date, quantity):
+        CarAvailabilityService.update_availability(
+            car_listing=car_listing,
+            quantity=quantity,
+            start_date=start_date,
+            end_date=end_date,
+            increment=False,
+        )
+
+    @staticmethod
+    def release_daily_units(car_listing, start_date, end_date, quantity):
+        CarAvailabilityService.update_availability(
+            car_listing=car_listing,
+            quantity=quantity,
+            start_date=start_date,
+            end_date=end_date,
+            increment=True,
+        )
+
     @staticmethod
     def update_availability(car_listing, quantity, start_date, end_date, increment=False):
 
@@ -2676,8 +2921,8 @@ class GuestHouseBookingService:
             for item in booking.items.all():
                 grand_total += item.subtotal(nights=nights)
             
-            platform_fee_rate = Decimal(getattr(settings, 'PLATFORM_FEE_RATE', '0.05'))
-            platform_fee = grand_total * platform_fee_rate
+            fee_rate = get_effective_platform_fee_rate(booking=booking, user=user, exclude_booking=booking)
+            platform_fee = grand_total * fee_rate
             booking.currency = booking_currency
             booking.total_price = grand_total + platform_fee
             
@@ -2787,13 +3032,55 @@ class GuestHouseBookingService:
         return booking
 
     @staticmethod
-    def get_booking_total(booking: "GuestHouseBooking"):
+    def get_booking_total(booking: "GuestHouseBooking", fee_rate=None):
+        if fee_rate is None:
+            fee_rate = get_effective_platform_fee_rate(booking=booking)
+
         item_subtotals = [item.subtotal() for item in booking.items.all()]
-        calculation = PriceCalculationService.calculate_totals(item_subtotals)
+        calculation = PriceCalculationService.calculate_totals(item_subtotals, fee_rate=fee_rate)
         return calculation["grand_total"]
 
 
 class CarRentalService:
+    @staticmethod
+    def _build_snapshot(rental: "CarRental", *, fee_rate):
+        duration = (rental.end_date - rental.start_date).days or 1
+        items_snapshots = []
+        raw_rental_subtotal = Decimal("0.00")
+
+        for item in rental.rental_items.all():
+            item_total = item.subtotal(days=duration)
+            raw_rental_subtotal += item_total
+            items_snapshots.append(
+                {
+                    "car_listing": {
+                        "id": str(item.car_listing.id),
+                        "title": f"{item.car_listing.brand} {item.car_listing.model}",
+                    },
+                    "units_booked": item.units_rent,
+                    "nights": duration,
+                    "nightly_rate": f"{item.price_per_unit:.2f}",
+                    "stay_total": f"{item_total:.2f}",
+                    "currency": rental.currency,
+                }
+            )
+
+        platform_fee = raw_rental_subtotal * fee_rate
+        grand_total = raw_rental_subtotal + platform_fee
+        return {
+            "rental_id": str(rental.id),
+            "start_date": rental.start_date.isoformat(),
+            "end_date": rental.end_date.isoformat(),
+            "currency": rental.currency,
+            "billing": {
+                "subtotal_items": f"{raw_rental_subtotal:.2f}",
+                "platform_fee": f"{platform_fee:.2f}",
+                "grand_total": f"{grand_total:.2f}",
+            },
+            "audit_items": items_snapshots,
+            "snapshot_version": 3,
+        }
+
     @transaction.atomic()
     @staticmethod
     def create_booking(validated_data, user=None):
@@ -2830,8 +3117,9 @@ class CarRentalService:
                 raise
 
         # Calculate Total Price
+        rental_days = (validated_data["end_date"] - validated_data["start_date"]).days or 1
         total_price = sum(
-            item['units_rent'] * item['price_per_unit'] 
+            item['units_rent'] * item['price_per_unit'] * rental_days
             for item in rental_items_data
         )
         validated_data["total_price"] = total_price
@@ -2874,57 +3162,80 @@ class CarRentalService:
             )
 
         try:
-            duration = (rental.end_date - rental.start_date).days or 1
-            items_snapshots = []
-            raw_rental_subtotal = Decimal('0.00')
-
-            for it in rental.rental_items.all():
-                it_total = it.units_rent * it.price_per_unit
-                raw_rental_subtotal += it_total
-                items_snapshots.append({
-                    "car_listing": {
-                        "id": str(it.car_listing.id),
-                        "title": f"{it.car_listing.brand} {it.car_listing.model}",
-                    },
-                    "units_booked": it.units_rent,
-                    "nights": duration,
-                    "nightly_rate": f"{(it.price_per_unit / duration if duration > 0 else it.price_per_unit):.2f}",
-                    "stay_total": f"{it_total:.2f}",
-                    "currency": rental.currency,
-                })
-
-            platform_fee = raw_rental_subtotal * Decimal('0.05')
-            grand_total = raw_rental_subtotal + platform_fee
-
-            rental.snapshot = {
-                "rental_id": str(rental.id),
-                "start_date": rental.start_date.isoformat(),
-                "end_date": rental.end_date.isoformat(),
-                "currency": rental.currency,
-                "billing": {
-                    "subtotal_items": f"{raw_rental_subtotal:.2f}",
-                    "platform_fee": f"{platform_fee:.2f}",
-                    "grand_total": f"{grand_total:.2f}",
-                },
-                "audit_items": items_snapshots,
-                "snapshot_version": 3,
-            }
+            fee_rate = get_effective_platform_fee_rate(booking=rental, user=user, exclude_booking=rental)
+            rental.snapshot = CarRentalService._build_snapshot(rental, fee_rate=fee_rate)
         except Exception as e:
             logger.error(f"Snapshot creation failed for CarRental: {e}")
             
         rental.save(update_fields=['snapshot'])
 
         # Update Total Price (Includes 5% Platform Fee)
-        rental.total_price = CarRentalService.get_booking_total(rental)
+        fee_rate = get_effective_platform_fee_rate(booking=rental, user=user, exclude_booking=rental)
+        rental.total_price = CarRentalService.get_booking_total(rental, fee_rate=fee_rate)
         rental.save(update_fields=['total_price'])
 
         return rental
 
     @staticmethod
-    def get_booking_total(rental: "CarRental"):
-        item_subtotals = [item.subtotal() for item in rental.rental_items.all()]
-        calculation = PriceCalculationService.calculate_totals(item_subtotals)
+    def get_booking_total(rental: "CarRental", fee_rate=None):
+        if fee_rate is None:
+            fee_rate = get_effective_platform_fee_rate(booking=rental)
+
+        days = (rental.end_date - rental.start_date).days or 1
+        item_subtotals = [item.subtotal(days=days) for item in rental.rental_items.all()]
+        calculation = PriceCalculationService.calculate_totals(item_subtotals, fee_rate=fee_rate)
         return calculation["grand_total"]
+
+    @staticmethod
+    @transaction.atomic()
+    def reschedule_booking(rental: "CarRental", *, start_date, end_date):
+        if rental.status == CarRental.RentStatus.CANCELLED:
+            raise BookingConflict("Cancelled rentals cannot be rescheduled.")
+
+        if start_date >= end_date:
+            raise ValidationError({"end_date": "End date must be after start date."})
+
+        if start_date < date.today():
+            raise ValidationError({"start_date": "Start date cannot be in the past."})
+
+        original_start = rental.start_date
+        original_end = rental.end_date
+
+        for item in rental.rental_items.select_related("car_listing").all():
+            CarAvailabilityService.release_daily_units(
+                item.car_listing,
+                original_start,
+                original_end,
+                item.units_rent,
+            )
+
+        for item in rental.rental_items.select_related("car_listing").all():
+            result = CarAvailabilityService.check_daily_availability(
+                car_listing=item.car_listing,
+                start_date=start_date,
+                end_date=end_date,
+                quantity=item.units_rent,
+            )
+            if not result.get("available", False):
+                raise BookingConflict(
+                    f"{item.car_listing.title} is not available for the requested dates: {result.get('reason', 'unavailable')}"
+                )
+
+        for item in rental.rental_items.select_related("car_listing").all():
+            CarAvailabilityService.reserve_daily_units(
+                item.car_listing,
+                start_date,
+                end_date,
+                item.units_rent,
+            )
+
+        rental.start_date = start_date
+        rental.end_date = end_date
+        fee_rate = get_effective_platform_fee_rate(booking=rental)
+        rental.total_price = CarRentalService.get_booking_total(rental, fee_rate=fee_rate)
+        rental.snapshot = CarRentalService._build_snapshot(rental, fee_rate=fee_rate)
+        rental.save(update_fields=["start_date", "end_date", "total_price", "snapshot", "updated_at"])
+        return rental
 
     @staticmethod
     def confirm_booking(rental):

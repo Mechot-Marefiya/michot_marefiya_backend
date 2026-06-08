@@ -3,6 +3,7 @@
 # Flutter contract: yes
 # Last updated: 2026-06-01
 
+import json
 import pytest
 from datetime import date, timedelta
 from decimal import Decimal
@@ -11,9 +12,21 @@ from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 
 from apps.account.models import CompanyProfile
-from apps.listing.models import Booking, BookingItem, CarRental, CarRentalItem
+from apps.listing.models import Booking, BookingAddon, BookingItem, CarRental, CarRentalItem
+from apps.listing.services import get_effective_platform_fee_rate
 from apps.payment.models import PaymentTransaction
-from tests.conftest import CompanyProfileFactory
+from apps.payment.services import ChapaPaymentService
+from tests.conftest import (
+    CompanyProfileFactory,
+    BookingFactory,
+    BookingItemFactory,
+    CarRentalFactory,
+    CarRentalItemFactory,
+    EventSpaceBookingFactory,
+    EventSpaceBookingItemFactory,
+    GuestHouseBookingFactory,
+    GuestHouseBookingItemFactory,
+)
 
 pytestmark = pytest.mark.django_db
 
@@ -68,12 +81,48 @@ def _build_car_rental(renter, car_listing):
     return rental
 
 
+@pytest.mark.parametrize(
+    "booking_factory,item_factory,owner_attr",
+    [
+        (BookingFactory, BookingItemFactory, "user"),
+        (GuestHouseBookingFactory, GuestHouseBookingItemFactory, "renter"),
+        (EventSpaceBookingFactory, EventSpaceBookingItemFactory, "user"),
+        (CarRentalFactory, CarRentalItemFactory, "renter"),
+    ],
+)
+def test_first_and_repeat_booking_fee_rates_follow_phone_identity_across_flows(
+    booking_factory,
+    item_factory,
+    owner_attr,
+):
+    phone = "0911999111"
+
+    first_booking = booking_factory()
+    getattr(first_booking, owner_attr).phone = phone
+    getattr(first_booking, owner_attr).save(update_fields=["phone", "updated_at"])
+    if item_factory is CarRentalItemFactory:
+        item_factory(car_rental=first_booking)
+    else:
+        item_factory(booking=first_booking)
+    assert get_effective_platform_fee_rate(booking=first_booking) == Decimal("0.00")
+
+    second_booking = booking_factory()
+    getattr(second_booking, owner_attr).phone = phone
+    getattr(second_booking, owner_attr).save(update_fields=["phone", "updated_at"])
+    if item_factory is CarRentalItemFactory:
+        item_factory(car_rental=second_booking)
+    else:
+        item_factory(booking=second_booking)
+    assert get_effective_platform_fee_rate(booking=second_booking) == Decimal("0.05")
+
+
 def test_post_payment_initiate_success(auth_client, user, room, monkeypatch):
     booking = _build_booking(user, room)
+    captured = {}
 
     monkeypatch.setattr(
         "apps.payment.views.ChapaPaymentService.initialize_payment",
-        lambda **kwargs: {
+        lambda **kwargs: captured.update(kwargs) or {
             "success": True,
             "message": "Payment initialized",
             "checkout_url": "https://checkout.example.com",
@@ -94,6 +143,172 @@ def test_post_payment_initiate_success(auth_client, user, room, monkeypatch):
     assert data["tx_ref"] == "tx-123"
     assert "calculated_amount" in data
     assert "payment_currency" in data
+    assert data["calculated_amount"] == str(booking.total_price)
+    assert captured["amount"] == booking.total_price
+
+
+def test_post_payment_initiate_allows_walk_in_booking(auth_client, user, room, monkeypatch):
+    booking = _build_booking(user, room)
+    booking.status = Booking.BookingStatus.WALK_IN
+    booking.save(update_fields=["status"])
+    captured = {}
+
+    monkeypatch.setattr(
+        "apps.payment.views.ChapaPaymentService.initialize_payment",
+        lambda **kwargs: captured.update(kwargs) or {
+            "success": True,
+            "message": "Payment initialized",
+            "checkout_url": "https://checkout.example.com",
+            "tx_ref": "tx-walk-in",
+        },
+    )
+
+    response = auth_client.post(
+        "/api/v1/payment/initiate/",
+        {"booking_id": str(booking.id), "booking_type": "booking"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["tx_ref"] == "tx-walk-in"
+    assert captured["booking"].status == Booking.BookingStatus.WALK_IN
+
+
+def _mock_chapa_initialize(monkeypatch):
+    captured = {}
+
+    class DummyResponse:
+        def json(self):
+            return {
+                "status": "success",
+                "data": {"checkout_url": "https://checkout.example.com"},
+            }
+
+    def fake_post(url, headers=None, data=None, timeout=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["data"] = data
+        captured["timeout"] = timeout
+        return DummyResponse()
+
+    monkeypatch.setattr("apps.payment.services.requests.post", fake_post)
+    return captured
+
+
+def _enable_payment_settings(settings):
+    settings.CHAPA_CALLBACK_URL = "https://api.example.com/payment/callback"
+    settings.FRONTEND_URL = "https://app.example.com"
+    settings.CHAPA_SECRET_KEY = "test-secret"
+
+
+def _force_repeat_booking_fee(user, room):
+    prior = _build_booking(user, room)
+    prior.booking_reference = "H-PRIOR01"
+    prior.save(update_fields=["booking_reference"])
+    return prior
+
+
+def test_chapa_split_excludes_addons_from_platform_commission(settings, monkeypatch, user, room):
+    _enable_payment_settings(settings)
+    room.hotel.company.chapa_subaccount_id = "sub-hotel-123"
+    room.hotel.company.save(update_fields=["chapa_subaccount_id"])
+    _force_repeat_booking_fee(user, room)
+
+    booking = _build_booking(user, room)
+    item = booking.items.first()
+    BookingAddon.objects.create(
+        booking_item=item,
+        name="Breakfast",
+        description="Breakfast",
+        category=BookingAddon.AddonCategory.MEAL,
+        quantity=1,
+        price_per_unit=Decimal("100.00"),
+        currency="ETB",
+    )
+    booking.total_price = Decimal("2200.00")
+    booking.save(update_fields=["total_price"])
+    captured = _mock_chapa_initialize(monkeypatch)
+
+    result = ChapaPaymentService.initialize_payment(
+        booking=booking,
+        booking_type="booking",
+        amount=booking.total_price,
+        currency="ETB",
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+    )
+
+    assert result["success"] is True
+    payload = json.loads(captured["data"])
+    assert payload["split_value"] == 2100.0
+
+    payment_tx = PaymentTransaction.objects.get(tx_ref=result["tx_ref"])
+    assert payment_tx.commission_rate == Decimal("0.05")
+    assert payment_tx.commission_amount == Decimal("100.00")
+    assert payment_tx.vendor_payout_amount == Decimal("2100.00")
+
+
+def test_chapa_split_keeps_non_walk_in_base_booking_commission(settings, monkeypatch, user, room):
+    _enable_payment_settings(settings)
+    room.hotel.company.chapa_subaccount_id = "sub-hotel-456"
+    room.hotel.company.save(update_fields=["chapa_subaccount_id"])
+    _force_repeat_booking_fee(user, room)
+
+    booking = _build_booking(user, room)
+    booking.total_price = Decimal("2100.00")
+    booking.save(update_fields=["total_price"])
+    captured = _mock_chapa_initialize(monkeypatch)
+
+    result = ChapaPaymentService.initialize_payment(
+        booking=booking,
+        booking_type="booking",
+        amount=booking.total_price,
+        currency="ETB",
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+    )
+
+    assert result["success"] is True
+    payload = json.loads(captured["data"])
+    assert payload["split_value"] == 2000.0
+
+    payment_tx = PaymentTransaction.objects.get(tx_ref=result["tx_ref"])
+    assert payment_tx.commission_amount == Decimal("100.00")
+    assert payment_tx.vendor_payout_amount == Decimal("2000.00")
+
+
+def test_chapa_split_waives_platform_commission_for_walk_in_booking(settings, monkeypatch, user, room):
+    _enable_payment_settings(settings)
+    room.hotel.company.chapa_subaccount_id = "sub-hotel-789"
+    room.hotel.company.save(update_fields=["chapa_subaccount_id"])
+    _force_repeat_booking_fee(user, room)
+
+    booking = _build_booking(user, room)
+    booking.status = Booking.BookingStatus.WALK_IN
+    booking.total_price = Decimal("2000.00")
+    booking.save(update_fields=["status", "total_price"])
+    captured = _mock_chapa_initialize(monkeypatch)
+
+    result = ChapaPaymentService.initialize_payment(
+        booking=booking,
+        booking_type="booking",
+        amount=booking.total_price,
+        currency="ETB",
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+    )
+
+    assert result["success"] is True
+    payload = json.loads(captured["data"])
+    assert payload["split_value"] == 2000.0
+
+    payment_tx = PaymentTransaction.objects.get(tx_ref=result["tx_ref"])
+    assert payment_tx.commission_rate == Decimal("0.00")
+    assert payment_tx.commission_amount == Decimal("0.00")
+    assert payment_tx.vendor_payout_amount == Decimal("2000.00")
 
 
 def test_post_payment_initiate_unauthenticated_for_registered_booking(api_client, user, room, monkeypatch):
@@ -319,7 +534,14 @@ def test_put_payment_cancel_success(auth_client, user, room, monkeypatch):
     response = auth_client.put(f"/api/v1/payment/cancel/{payment_tx.tx_ref}/")
 
     assert response.status_code == 200
-    assert response.json()["message"] == "Cancelled"
+    data = response.json()
+    assert data["message"] == "Cancelled"
+    assert data["refund_supported"] is False
+    assert data["refund_policy"] == "no_refunds"
+    assert "No refunds are available" in data["refund_message"]
+    assert data["cancellation_effect"] == "pending_payment_cancelled_only"
+    payment_tx.refresh_from_db()
+    assert payment_tx.status == PaymentTransaction.PaymentStatus.CANCELLED
 
 
 def test_put_payment_cancel_forbidden_for_wrong_user(company_client, user, room, monkeypatch):
@@ -369,6 +591,11 @@ def test_put_payment_cancel_rejects_non_pending(auth_client, user, room):
     response = auth_client.put(f"/api/v1/payment/cancel/{payment_tx.tx_ref}/")
 
     assert response.status_code == 400
+    data = response.json()
+    assert data["refund_supported"] is False
+    assert data["refund_policy"] == "no_refunds"
+    assert "non-refundable" in data["error"]
+    assert data["cancellation_effect"] == "refund_not_available"
 
 
 def test_put_payment_cancel_carrental_owner_uses_generic_booking(auth_client, user, car_listing, monkeypatch):
@@ -392,7 +619,10 @@ def test_put_payment_cancel_carrental_owner_uses_generic_booking(auth_client, us
     response = auth_client.put(f"/api/v1/payment/cancel/{payment_tx.tx_ref}/")
 
     assert response.status_code == 200
-    assert response.json()["message"] == "Cancelled"
+    data = response.json()
+    assert data["message"] == "Cancelled"
+    assert data["refund_supported"] is False
+    assert data["refund_policy"] == "no_refunds"
 
 
 def test_post_payment_callback_public_success(api_client, monkeypatch):

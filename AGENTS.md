@@ -224,6 +224,14 @@ Main navigation files:
 - `apps/payment/views.py`
 - `apps/payment/services.py`
 
+### SMS
+
+- all SMS delivery must go through `services/sms.py`
+- do not import or call AfroMessage directly from views, serializers, models, or tasks
+- the working AfroMessage send contract uses the hardcoded send URL, `AFRO_MESSAGE_TOKEN`, `AFRO_MESSAGE_IDENTIFIER_ID`, Ethiopian phone normalization to `251...`, and an empty `sender` query parameter
+- do not restore `AFRO_MESSAGE_URL`; see `Agents/SMS_SERVICE.md` before changing SMS behavior
+- tests must mock `services.sms.send_sms` and must not hit the real provider
+
 ### Notifications
 
 - notifications are stored as first-class records

@@ -25,7 +25,71 @@ def _sum_decimal(value):
     return Decimal(value)
 
 
-def compute_company_overview(company_id, start_date: date, end_date: date) -> Dict:
+def _date_span(start_date: date, end_date: date):
+    current = start_date
+    while current <= end_date:
+        yield current
+        current += timedelta(days=1)
+
+
+def _overview_from_daily_metrics(company_id, start_date: date, end_date: date) -> Dict | None:
+    expected_dates = set(_date_span(start_date, end_date))
+    metrics = list(
+        CompanyDailyMetrics.objects.filter(
+            company_id=company_id,
+            date__gte=start_date,
+            date__lte=end_date,
+        ).order_by("date")
+    )
+    metric_dates = {metric.date for metric in metrics}
+
+    if metric_dates != expected_dates:
+        return None
+
+    total_revenue = sum((metric.revenue for metric in metrics), Decimal("0"))
+    total_bookings = sum(metric.bookings_count for metric in metrics)
+    confirmed_count = sum(metric.confirmed_count for metric in metrics)
+    cancelled_count = sum(metric.cancelled_count for metric in metrics)
+    avg_booking_value = Decimal("0")
+    if total_bookings:
+        avg_booking_value = (total_revenue / Decimal(total_bookings)).quantize(Decimal(".01"))
+
+    listing_totals = {}
+    for metric in metrics:
+        for listing in metric.top_listings or []:
+            listing_id = str(listing.get("listing_id") or "")
+            if not listing_id:
+                continue
+            current = listing_totals.setdefault(
+                listing_id,
+                {
+                    "listing_id": listing_id,
+                    "title": listing.get("title", ""),
+                    "revenue": 0.0,
+                    "bookings_count": 0,
+                    "type": listing.get("type", ""),
+                },
+            )
+            current["revenue"] += float(listing.get("revenue") or 0)
+            current["bookings_count"] += int(listing.get("bookings_count") or 0)
+
+    top_listings = sorted(
+        listing_totals.values(),
+        key=lambda item: item["revenue"],
+        reverse=True,
+    )[:10]
+
+    return {
+        "total_revenue": float(total_revenue),
+        "total_bookings": int(total_bookings),
+        "confirmed_bookings": int(confirmed_count),
+        "cancellations": int(cancelled_count),
+        "avg_booking_value": float(avg_booking_value),
+        "top_listings": top_listings,
+    }
+
+
+def compute_company_overview_live(company_id, start_date: date, end_date: date) -> Dict:
     """
     Compute basic KPIs for a company between start_date and end_date (inclusive).
     This aggregates confirmed bookings across ALL property types:
@@ -219,6 +283,34 @@ def compute_company_overview(company_id, start_date: date, end_date: date) -> Di
     }
 
 
+def compute_company_overview(company_id, start_date: date, end_date: date) -> Dict:
+    materialized = _overview_from_daily_metrics(company_id, start_date, end_date)
+    if materialized is not None:
+        return materialized
+    return compute_company_overview_live(company_id, start_date, end_date)
+
+
+def materialize_company_daily_metrics(company_id, metric_date: date) -> CompanyDailyMetrics:
+    metrics = compute_company_overview_live(str(company_id), metric_date, metric_date)
+    total_revenue = Decimal(str(metrics.get("total_revenue", 0) or 0))
+    total_bookings = int(metrics.get("total_bookings", 0) or 0)
+    avg_booking_value = Decimal(str(metrics.get("avg_booking_value", 0) or 0))
+
+    metric, _ = CompanyDailyMetrics.objects.update_or_create(
+        company_id=company_id,
+        date=metric_date,
+        defaults={
+            "revenue": total_revenue,
+            "bookings_count": total_bookings,
+            "confirmed_count": int(metrics.get("confirmed_bookings", 0) or 0),
+            "cancelled_count": int(metrics.get("cancellations", 0) or 0),
+            "avg_booking_value": avg_booking_value,
+            "top_listings": metrics.get("top_listings", []),
+        },
+    )
+    return metric
+
+
 def compute_individual_owner_overview(owner_id, start_date: date, end_date: date) -> Dict:
     
     next_day = end_date + timedelta(days=1)
@@ -352,6 +444,30 @@ def revenue_timeseries(company_id, start_date: date, end_date: date, granularity
     Aggregates revenue from all booking types: Hotels, Guesthouses, Event Spaces, Cars.
     granularity: day | week | month
     """
+    materialized = list(
+        CompanyDailyMetrics.objects.filter(
+            company_id=company_id,
+            date__gte=start_date,
+            date__lte=end_date,
+        ).order_by("date")
+    )
+    expected_dates = set(_date_span(start_date, end_date))
+    if {metric.date for metric in materialized} == expected_dates:
+        grouped = {}
+        for metric in materialized:
+            if granularity == "month":
+                key = metric.date.replace(day=1)
+            elif granularity == "week":
+                key = metric.date - timedelta(days=metric.date.weekday())
+            else:
+                key = metric.date
+            grouped[key] = grouped.get(key, Decimal("0")) + metric.revenue
+
+        return [
+            {"period": key.isoformat(), "revenue": float(grouped[key])}
+            for key in sorted(grouped.keys())
+        ]
+
     if granularity == "month":
         trunc = TruncMonth
     elif granularity == "week":

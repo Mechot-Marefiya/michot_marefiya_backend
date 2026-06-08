@@ -9,10 +9,11 @@ from rest_framework.permissions import AllowAny
 from rest_framework.throttling import ScopedRateThrottle
 from drf_spectacular.utils import extend_schema
 from apps.core.models import Facility
-from apps.core.serializers import FacilityResponseSerializer,ConversionInputSerializer, CurrencyRateSerializer
+from apps.core.serializers import FacilitySerializer, FacilityResponseSerializer,ConversionInputSerializer, CurrencyRateSerializer
 from apps.core.utils import convert_currency
 from apps.core.enums import CurrencyEnum
 from apps.core.models import CurrencyRate
+from apps.account.permissions import IsAdmin
 
 class AbstractModelViewSet(ModelViewSet):
     http_method_names = ["get", "post", "patch", "delete"]
@@ -20,10 +21,18 @@ class AbstractModelViewSet(ModelViewSet):
 
 @extend_schema(tags=["Accommodations"])
 class FacilityViewSet(AbstractModelViewSet):
-    http_method_names = ["get"]
-    permission_classes = [AllowAny]
     serializer_class = FacilityResponseSerializer
     queryset = Facility.objects.all()
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [AllowAny()]
+        return [IsAdmin()]
+
+    def get_serializer_class(self):
+        if self.action in ["create", "partial_update", "update"]:
+            return FacilitySerializer
+        return FacilityResponseSerializer
 
 
 @extend_schema(tags=["Debug & Utils"])

@@ -15,6 +15,7 @@ class Notification(AbstractBaseModel):
         
         PAYMENT_SUCCESS = 'payment_success', _('Payment Successful')
         PAYMENT_FAILED = 'payment_failed', _('Payment Failed')
+        LISTING_DELETED = 'listing_deleted', _('Listing Deleted')
         
         COMPANY_APPROVED = 'company_approved', _('Company Approved')
         COMPANY_REJECTED = 'company_rejected', _('Company Rejected')
@@ -53,8 +54,12 @@ class Notification(AbstractBaseModel):
     
     delivered_in_app = models.BooleanField(default=False, verbose_name=_('Delivered In-App'))
     delivered_email = models.BooleanField(default=False, verbose_name=_('Delivered Email'))
+    delivered_sms = models.BooleanField(default=False, verbose_name=_('Delivered SMS'))
+    delivered_push = models.BooleanField(default=False, verbose_name=_('Delivered Push'))
     
     email_sent_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Email Sent At'))
+    sms_sent_at = models.DateTimeField(null=True, blank=True, verbose_name=_('SMS Sent At'))
+    push_sent_at = models.DateTimeField(null=True, blank=True, verbose_name=_('Push Sent At'))
     
     priority = models.CharField(
         max_length=20,
@@ -98,10 +103,32 @@ class NotificationPreference(AbstractBaseModel):
         blank=True,
         verbose_name=_('In-App Preferences')
     )
+
+    sms_preferences = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_('SMS Preferences')
+    )
+
+    push_preferences = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_('Push Preferences')
+    )
     
     email_enabled = models.BooleanField(
         default=True,
         verbose_name=_('Enable Email Notifications')
+    )
+
+    sms_enabled = models.BooleanField(
+        default=False,
+        verbose_name=_('Enable SMS Notifications')
+    )
+
+    push_enabled = models.BooleanField(
+        default=True,
+        verbose_name=_('Enable Push Notifications')
     )
 
     class Meta:
@@ -134,6 +161,23 @@ class NotificationTemplate(AbstractBaseModel):
         null=True, 
         blank=True,
         verbose_name=_('Email Body Template (HTML)')
+    )
+
+    sms_template = models.CharField(
+        max_length=320,
+        blank=True,
+        verbose_name=_('SMS Template')
+    )
+
+    push_title_template = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_('Push Title Template')
+    )
+
+    push_body_template = models.TextField(
+        blank=True,
+        verbose_name=_('Push Body Template')
     )
     
     required_variables = models.JSONField(

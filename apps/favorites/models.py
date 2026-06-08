@@ -24,3 +24,31 @@ class Favorite(AbstractBaseModel):
 
     def __str__(self):
         return f"Favorite: {self.user} -> {self.content_type.app_label}.{self.content_type.model}({self.object_id})"
+
+
+class GuestFavorite(AbstractBaseModel):
+    guest_phone = models.CharField(max_length=20)
+    linked_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="linked_guest_favorites",
+        null=True,
+        blank=True,
+    )
+
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE)
+    object_id = models.CharField(max_length=255)
+    content_object = GenericForeignKey("content_type", "object_id")
+    snapshot = models.JSONField(null=True, blank=True, default=dict)
+    snapshot_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        verbose_name = "Guest Favorite"
+        verbose_name_plural = "Guest Favorites"
+        unique_together = ("guest_phone", "content_type", "object_id")
+
+    def __str__(self):
+        return (
+            f"GuestFavorite: {self.guest_phone} -> "
+            f"{self.content_type.app_label}.{self.content_type.model}({self.object_id})"
+        )

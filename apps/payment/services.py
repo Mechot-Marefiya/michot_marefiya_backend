@@ -9,7 +9,7 @@ from django.utils.crypto import constant_time_compare
 from django.db import transaction as db_transaction
 
 from apps.payment.models import PaymentTransaction
-from apps.listing.services import BookingService
+from apps.listing.services import BookingService, get_effective_platform_fee_rate
 from apps.notifications.services import NotificationService
 from apps.notifications.models import Notification
 
@@ -31,6 +31,75 @@ class ChapaPaymentService:
         return {
             "Authorization": f"Bearer {settings.CHAPA_SECRET_KEY}",
             "Content-Type": "application/json",
+        }
+
+    @staticmethod
+    def _is_walk_in_booking(booking):
+        return str(getattr(booking, "status", "")).lower() == "walk_in"
+
+    @staticmethod
+    def _booking_base_subtotal(booking):
+        total = Decimal("0.00")
+
+        if booking.__class__.__name__.lower() == "booking":
+            use_seasonal = getattr(settings, "FEATURE_SEASONAL_PRICING", False)
+            if use_seasonal:
+                from apps.listing.models import BookingItemPrice
+                for price in BookingItemPrice.objects.filter(booking_item__booking=booking):
+                    total += Decimal(price.price_per_unit) * Decimal(price.units)
+            else:
+                nights = (booking.check_out_date - booking.check_in_date).days
+                for item in booking.items.all():
+                    total += Decimal(item.price_per_unit) * Decimal(item.units_booked) * Decimal(nights)
+        elif hasattr(booking, "items"):
+            for item in booking.items.all():
+                if hasattr(item, "subtotal"):
+                    total += Decimal(item.subtotal())
+        elif hasattr(booking, "rental_items"):
+            days = (booking.end_date - booking.start_date).days or 1
+            for item in booking.rental_items.all():
+                total += Decimal(item.subtotal(days=days))
+
+        return total
+
+    @staticmethod
+    def _booking_addon_subtotal(booking):
+        if booking.__class__.__name__.lower() != "booking":
+            return Decimal("0.00")
+
+        from apps.listing.models import BookingAddon
+        return sum(
+            (Decimal(addon.price_per_unit) * Decimal(addon.quantity))
+            for addon in BookingAddon.objects.filter(booking_item__booking=booking)
+        )
+
+    @staticmethod
+    def _calculate_split_amounts(booking, amount):
+        total_dec = Decimal(str(amount))
+
+        if ChapaPaymentService._is_walk_in_booking(booking):
+            return {
+                "commission_rate": Decimal("0.00"),
+                "commission_amount": Decimal("0.00"),
+                "vendor_payout_amount": total_dec,
+                "commissionable_amount": Decimal("0.00"),
+                "addon_amount": ChapaPaymentService._booking_addon_subtotal(booking),
+                "walk_in": True,
+            }
+
+        fee_rate = get_effective_platform_fee_rate(booking=booking)
+        commissionable_amount = ChapaPaymentService._booking_base_subtotal(booking)
+        addon_amount = ChapaPaymentService._booking_addon_subtotal(booking)
+        commission_amount = commissionable_amount * fee_rate
+        vendor_payout_amount = total_dec - commission_amount
+
+        return {
+            "commission_rate": fee_rate,
+            "commission_amount": commission_amount,
+            "vendor_payout_amount": vendor_payout_amount,
+            "commissionable_amount": commissionable_amount,
+            "addon_amount": addon_amount,
+            "walk_in": False,
         }
 
     @staticmethod
@@ -104,9 +173,9 @@ class ChapaPaymentService:
                             vendor_obj = gh.company
                         elif gh.individual_owner:
                             vendor_obj = gh.individual_owner
-                
-                # 3. Car Rental
-                elif hasattr(first_item, 'car_listing') and first_item.car_listing:
+            elif hasattr(booking, 'rental_items') and booking.rental_items.exists():
+                first_item = booking.rental_items.first()
+                if hasattr(first_item, 'car_listing') and first_item.car_listing:
                     vendor_obj = first_item.car_listing.company
             
             if vendor_obj:
@@ -120,34 +189,24 @@ class ChapaPaymentService:
                     vendor_individual = vendor_obj
 
             if subaccount_id:
-                total_dec = Decimal(str(amount))
-                
-                # Calculate sharing using centralized rate
-                fee_rate = getattr(settings, 'PLATFORM_FEE_RATE', Decimal('0.05'))
-                if not isinstance(fee_rate, Decimal):
-                    fee_rate = Decimal(str(fee_rate))
-                
-                # total = base * (1 + rate) => base = total / (1 + rate)
-                divisor = Decimal('1') + fee_rate
-                vendor_share = total_dec / divisor
-                platform_share = total_dec - vendor_share
+                split = ChapaPaymentService._calculate_split_amounts(booking, amount)
                 
                 # Round to 2 decimal places
-                vendor_share_fixed = vendor_share.quantize(Decimal("0.01"))
-                platform_share_fixed = platform_share.quantize(Decimal("0.01"))
+                vendor_share_fixed = split["vendor_payout_amount"].quantize(Decimal("0.01"))
+                platform_share_fixed = split["commission_amount"].quantize(Decimal("0.01"))
                 
                 payload["subaccount_id"] = subaccount_id
                 payload["split_type"] = "flat"
                 payload["split_value"] = float(vendor_share_fixed)
                 
-                commission_rate = fee_rate
+                commission_rate = split["commission_rate"]
                 commission_amount = platform_share_fixed
                 vendor_payout_amount = vendor_share_fixed
                 payout_status = PaymentTransaction.PayoutStatus.PENDING
 
                 logger.info(
                     f"Split configured for {tx_ref}: Vendor receives {vendor_share_fixed} (Subaccount {subaccount_id}), "
-                    f"Platform keeps {platform_share_fixed} (Rate {fee_rate})"
+                    f"Platform keeps {platform_share_fixed} (Rate {commission_rate})"
                 )
             else:
                  # No subaccount found, so money stays in main account

@@ -4,7 +4,7 @@
 # Last updated: 2026-06-01
 
 import pytest
-from apps.notifications.models import Notification
+from apps.notifications.models import Notification, NotificationTemplate
 
 pytestmark = pytest.mark.django_db
 
@@ -29,6 +29,8 @@ def test_get_notifications_list_success(auth_client, notification):
     assert "priority_display" in data["results"][0]
     assert "delivered_in_app" in data["results"][0]
     assert "delivered_email" in data["results"][0]
+    assert "delivered_sms" in data["results"][0]
+    assert "delivered_push" in data["results"][0]
 
 
 def test_get_notification_detail_success(auth_client, notification):
@@ -249,13 +251,25 @@ def test_get_notification_preferences_success(auth_client, notification_preferen
     assert "data" in data
     assert "email_preferences" in data["data"]
     assert "in_app_preferences" in data["data"]
+    assert "sms_preferences" in data["data"]
+    assert "push_preferences" in data["data"]
     assert "email_enabled" in data["data"]
+    assert "sms_enabled" in data["data"]
+    assert "push_enabled" in data["data"]
 
 
 def test_put_notification_preferences_success(auth_client, notification_preference):
     response = auth_client.put(
         "/api/v1/notifications/preferences/",
-        {"email_preferences": {"booking_created": True}, "in_app_preferences": {"booking_created": True}, "email_enabled": False},
+        {
+            "email_preferences": {"booking_created": True},
+            "in_app_preferences": {"booking_created": True},
+            "sms_preferences": {"booking_created": True},
+            "push_preferences": {"booking_created": False},
+            "email_enabled": False,
+            "sms_enabled": True,
+            "push_enabled": False,
+        },
         format="json",
     )
 
@@ -263,6 +277,10 @@ def test_put_notification_preferences_success(auth_client, notification_preferen
     data = response.json()
     assert data["success"] is True
     assert data["data"]["email_enabled"] is False
+    assert data["data"]["sms_enabled"] is True
+    assert data["data"]["push_enabled"] is False
+    assert data["data"]["sms_preferences"]["booking_created"] is True
+    assert data["data"]["push_preferences"]["booking_created"] is False
 
 
 def test_put_notification_preferences_preserves_existing_keys_on_merge(auth_client, notification_preference):
@@ -274,13 +292,28 @@ def test_put_notification_preferences_preserves_existing_keys_on_merge(auth_clie
         "booking_created": True,
         "payment_success": False,
     }
-    notification_preference.save(update_fields=["email_preferences", "in_app_preferences"])
+    notification_preference.sms_preferences = {
+        "booking_created": False,
+        "payment_success": True,
+    }
+    notification_preference.push_preferences = {
+        "booking_created": True,
+        "payment_success": False,
+    }
+    notification_preference.save(
+        update_fields=[
+            "email_preferences", "in_app_preferences",
+            "sms_preferences", "push_preferences",
+        ]
+    )
 
     response = auth_client.put(
         "/api/v1/notifications/preferences/",
         {
             "email_preferences": {"booking_created": True},
             "in_app_preferences": {"payment_success": True},
+            "sms_preferences": {"payment_success": False},
+            "push_preferences": {"booking_created": False},
         },
         format="json",
     )
@@ -291,6 +324,10 @@ def test_put_notification_preferences_preserves_existing_keys_on_merge(auth_clie
     assert data["data"]["email_preferences"]["payment_success"] is True
     assert data["data"]["in_app_preferences"]["booking_created"] is True
     assert data["data"]["in_app_preferences"]["payment_success"] is True
+    assert data["data"]["sms_preferences"]["booking_created"] is False
+    assert data["data"]["sms_preferences"]["payment_success"] is False
+    assert data["data"]["push_preferences"]["booking_created"] is False
+    assert data["data"]["push_preferences"]["payment_success"] is False
 
 
 @pytest.mark.parametrize(
@@ -314,3 +351,57 @@ def test_notifications_endpoints_require_authentication(api_client, method, path
     response = getattr(api_client, method)(path, payload, format="json")
 
     assert response.status_code == 401
+
+
+def test_get_notification_templates_admin_list_success(admin_client, notification_template):
+    response = admin_client.get("/api/v1/notifications/templates/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "count" in data
+    assert "results" in data
+    assert data["results"][0]["notification_type"] == notification_template.notification_type
+
+
+def test_post_notification_template_admin_create_success(admin_client):
+    response = admin_client.post(
+        "/api/v1/notifications/templates/",
+        {
+            "notification_type": "saved_listing_deleted",
+            "title_template": "Saved listing removed",
+            "message_template": "A listing you saved is no longer available.",
+            "email_subject_template": "Saved listing removed",
+            "email_body_template": "A listing you saved is no longer available.",
+            "required_variables": ["listing_title"],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["notification_type"] == "saved_listing_deleted"
+
+
+def test_patch_notification_template_admin_update_success(admin_client, notification_template):
+    response = admin_client.patch(
+        f"/api/v1/notifications/templates/{notification_template.id}/",
+        {"title_template": "Updated title"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    notification_template.refresh_from_db()
+    assert notification_template.title_template == "Updated title"
+
+
+def test_delete_notification_template_admin_delete_success(admin_client, notification_template):
+    response = admin_client.delete(f"/api/v1/notifications/templates/{notification_template.id}/")
+
+    assert response.status_code == 204
+    assert NotificationTemplate.objects.filter(id=notification_template.id).exists() is False
+
+
+def test_notification_templates_non_admin_forbidden(auth_client):
+    response = auth_client.get("/api/v1/notifications/templates/")
+
+    assert response.status_code == 403

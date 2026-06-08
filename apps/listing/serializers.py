@@ -26,6 +26,8 @@ from apps.account.enums import RoleCode
 from apps.core.models import Address, Facility
 from apps.listing.services import (
     BookingService,
+    GuestBookingOtpError,
+    GuestBookingOtpService,
     ListingService,
     EventSpaceAvailabilityService,
     GuestHouseAvailabilityService,
@@ -140,6 +142,9 @@ class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
         
         display_currency = get_display_currency(request)
         source_currency = getattr(obj, 'currency', 'ETB')
+        guest_phone = request.query_params.get("guest_phone")
+        user_phone = getattr(request.user, "phone", None) if getattr(request, "user", None) and request.user.is_authenticated else None
+        phone_identity = guest_phone or user_phone
         
         try:
             if hasattr(PriceService, 'resolve_price_details_batch'):
@@ -189,7 +194,8 @@ class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
             })
         
         # Centralized platform fee from settings
-        fee_rate = Decimal(str(getattr(settings, 'PLATFORM_FEE_RATE', '0.05')))
+        from apps.listing.services import get_effective_platform_fee_rate
+        fee_rate = get_effective_platform_fee_rate(phone=phone_identity)
         platform_fee = subtotal * fee_rate
         total = subtotal + platform_fee
         
@@ -216,7 +222,31 @@ class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
         }
 
 
+class ForwardBookingWindowMixin:
+    booking_window_error = "exceeds the maximum allowed booking window for this listing."
+
+    def get_booking_window_days(self, listing):
+        max_days = getattr(listing, "booking_forward_window_days", None)
+        if max_days is None:
+            return getattr(settings, "BOOKING_FORWARD_WINDOW_DAYS", 5)
+        return max_days
+
+    def validate_forward_booking_window(self, booking_date, *, field_name, label, listings=None):
+        if booking_date is None or not listings:
+            return
+
+        for listing in listings:
+            max_days = self.get_booking_window_days(listing)
+            latest_allowed_date = date.today() + timedelta(days=max_days)
+
+            if booking_date > latest_allowed_date:
+                raise serializers.ValidationError({
+                    field_name: f"{label} {self.booking_window_error}",
+                })
+
+
 class SanitizeGuestDetailsMixin:
+    guest_booking_type = None
 
     def validate_guest_first_name(self, value):
         return strip_tags(value) if value else value
@@ -229,6 +259,55 @@ class SanitizeGuestDetailsMixin:
 
     def validate_guest_phone(self, value):
         return strip_tags(value) if value else value
+
+    def _is_guest_booking_request(self):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        return not user or not user.is_authenticated
+
+    def validate_guest_booking_otp(self, data):
+        if not self.guest_booking_type or not self._is_guest_booking_request():
+            return
+        if self.context.get("is_walk_in", False):
+            return
+
+        challenge_id = data.get("otp_challenge_id")
+        code = data.get("otp_code")
+        requires_otp = getattr(settings, "REQUIRE_GUEST_BOOKING_OTP", False)
+
+        if challenge_id or code:
+            if not challenge_id or not code:
+                raise serializers.ValidationError(
+                    {"otp_code": "Both otp_challenge_id and otp_code are required for guest booking OTP verification."}
+                )
+            try:
+                GuestBookingOtpService.verify_challenge(
+                    challenge_id=challenge_id,
+                    code=code,
+                    phone=data.get("guest_phone"),
+                    booking_type=self.guest_booking_type,
+                )
+            except GuestBookingOtpError as exc:
+                raise serializers.ValidationError({"otp_code": str(exc)})
+        elif requires_otp:
+            raise serializers.ValidationError(
+                {"otp_code": "Guest booking phone OTP verification is required."}
+            )
+
+    def remove_guest_booking_otp_fields(self, validated_data):
+        validated_data.pop("otp_challenge_id", None)
+        validated_data.pop("otp_code", None)
+        return validated_data
+
+
+class GuestBookingOtpRequestSerializer(serializers.Serializer):
+    guest_phone = serializers.CharField(max_length=20)
+
+    def create(self, validated_data):
+        return GuestBookingOtpService.create_challenge(
+            phone=validated_data["guest_phone"],
+            booking_type=self.context["booking_type"],
+        )
 
 
 class TermsAndConditionsSerializer(serializers.ModelSerializer):
@@ -263,6 +342,7 @@ class RoomListingResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin, se
             "description",
             "base_price",
             "currency",
+            "booking_forward_window_days",
             "amenities",
             "number_of_guests",
             "total_units",
@@ -310,6 +390,7 @@ class RoomListingSerializer(serializers.ModelSerializer):
             "description",
             "base_price",
             "currency",
+            "booking_forward_window_days",
             "address",
             "amenities",
             "number_of_guests",
@@ -385,6 +466,7 @@ class GuestHouseRoomResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin,
             "images",
             "base_price",
             "currency",
+            "booking_forward_window_days",
             "amenities",
             "number_of_guests",
             "total_units",
@@ -408,6 +490,7 @@ class GuestHouseProfileResponseSerializer(serializers.ModelSerializer):
     facility = serializers.SerializerMethodField()
     is_favorite = serializers.SerializerMethodField()
     rooms = GuestHouseRoomResponseSerializer(many=True, read_only=True)
+    verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
     
     class Meta:
         model = GuestHouseProfile
@@ -428,6 +511,9 @@ class GuestHouseProfileResponseSerializer(serializers.ModelSerializer):
             "website",
             "license",
             "logo",
+            "is_verified",
+            "verified_at",
+            "verified_by",
         ]
 
     def get_is_favorite(self, obj):
@@ -463,6 +549,7 @@ class GuestHouseRoomSerializer(serializers.ModelSerializer):
             "images",
             "base_price",
             "currency",
+            "booking_forward_window_days",
             "amenities",
             "number_of_guests",
             "total_units",
@@ -487,6 +574,7 @@ class GuestHouseRoomSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
          images = validated_data.pop("images", [])
          amenities = validated_data.pop("amenities", [])
+         validated_data.setdefault("is_active", False)
          
          guest_house_id = validated_data.pop("guest_house_id")
          validated_data["guest_house"] = GuestHouseProfile.objects.get(id=guest_house_id)
@@ -595,6 +683,7 @@ class GuestHouseProfileSerializer(serializers.ModelSerializer):
         
         if 'facility' in validated_data:
             validated_data['facilities'] = validated_data.pop('facility')
+        validated_data.setdefault("is_active", False)
             
             
         return ListingService.create_guest_house_listing(validated_data)
@@ -634,7 +723,8 @@ class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
 
     def get_subtotal(self, obj):
         return self.get_stay_total(obj)
-class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, serializers.ModelSerializer):
+class GuestHouseBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, CurrencyConversionMixin, serializers.ModelSerializer):
+    guest_booking_type = "guesthouse"
     items = GuestHouseBookingItemSerializer(many=True, write_only=True)
     
     terms_accepted = serializers.BooleanField(required=False, write_only=True)
@@ -645,6 +735,8 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
     guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
     guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
     special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests for the guesthouse stay")
+    otp_challenge_id = serializers.UUIDField(required=False, write_only=True)
+    otp_code = serializers.CharField(required=False, write_only=True, max_length=12, trim_whitespace=True)
     
     payment_currency = serializers.ChoiceField(
         choices=["USD", "ETB"],
@@ -681,6 +773,7 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
             "is_legacy",
             "stay_total",
             "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency", "is_walk_in",
+            "otp_challenge_id", "otp_code",
         ]
 
         read_only_fields = ["id", "status", "renter", "total_price", "created_at", "updated_at", "booking_reference", "currency"]
@@ -729,6 +822,14 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
         if start < datetime.now().date():
             raise serializers.ValidationError("Start date cannot be in the past.")
 
+        room_listings = [item["room"] for item in items]
+        self.validate_forward_booking_window(
+            start,
+            field_name="start_date",
+            label="Start date",
+            listings=room_listings,
+        )
+
         if not items:
             raise serializers.ValidationError("At least one room booking item is required.")
 
@@ -736,6 +837,7 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
         guest_email = data.get('guest_email')
         if (not user or not user.is_authenticated) and not guest_email:
              raise serializers.ValidationError("Either log in or provide guest email.")
+        self.validate_guest_booking_otp(data)
 
         room_infos = [
             {"guesthouse_room": item["room"], "quantity": item["units_booked"]}
@@ -791,6 +893,7 @@ class GuestHouseBookingSerializer(SanitizeGuestDetailsMixin, CurrencyConversionM
 
     @transaction.atomic
     def create(self, validated_data):
+        self.remove_guest_booking_otp_fields(validated_data)
         user = self.context["request"].user
         if not user.is_authenticated:
             user = None
@@ -954,6 +1057,7 @@ class CarListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, ser
     images = ListingImageSerializer(many=True, read_only=True)
     availabilities = CarAvailabilitySerializer(many=True, read_only=True)
     current_availability = serializers.SerializerMethodField()
+    verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
     
     class Meta:
         model = CarListing
@@ -963,6 +1067,7 @@ class CarListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, ser
             "description",
             "images",
             "base_price",
+            "booking_forward_window_days",
             "is_active",
             "brand",
             "model",
@@ -972,17 +1077,24 @@ class CarListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, ser
             "transmission",
             "condition",
             "listing_type",
+            "rental_mode",
             "car_class",
             "quantity",
             "company",
             "seats",
             "individual_owner",
+            "requires_code_3",
+            "requires_business_license",
+            "pre_rental_requirements",
             "availabilities",
             "current_availability",
             "created_at",
             "updated_at",
             "conversion",
             "price_quote",
+            "is_verified",
+            "verified_at",
+            "verified_by",
         ]
     
     def get_current_availability(self, obj):
@@ -1017,6 +1129,7 @@ class CarListingSerializer(serializers.ModelSerializer):
             "images",
             "base_price",
             "currency",
+            "booking_forward_window_days",
             "individual_owner",
             "company",
             "brand",
@@ -1028,8 +1141,12 @@ class CarListingSerializer(serializers.ModelSerializer):
             "condition",
             "seats",
             "listing_type",
+            "rental_mode",
             "car_class",
-            "quantity"
+            "quantity",
+            "requires_code_3",
+            "requires_business_license",
+            "pre_rental_requirements",
         ]
 
     def validate_currency(self, value):
@@ -1067,6 +1184,35 @@ class CarListingSerializer(serializers.ModelSerializer):
         
         if listing_type == CarListing.ListingTypeChoices.RENT and quantity < 1:
             raise serializers.ValidationError("Quantity must be at least 1 for rental listings.")
+
+        rental_mode = data.get(
+            "rental_mode",
+            getattr(self.instance, "rental_mode", CarListing.RentalModeChoices.WITH_DRIVER),
+        )
+        requires_code_3 = data.get(
+            "requires_code_3",
+            getattr(self.instance, "requires_code_3", False),
+        )
+        requires_business_license = data.get(
+            "requires_business_license",
+            getattr(self.instance, "requires_business_license", False),
+        )
+
+        if listing_type != CarListing.ListingTypeChoices.RENT and (
+            rental_mode != CarListing.RentalModeChoices.WITH_DRIVER
+            or requires_code_3
+            or requires_business_license
+        ):
+            raise serializers.ValidationError(
+                "Rental compliance fields can only be configured for car listings available for rent."
+            )
+
+        if rental_mode == CarListing.RentalModeChoices.WITH_DRIVER and (
+            requires_code_3 or requires_business_license
+        ):
+            raise serializers.ValidationError({
+                "rental_mode": "Code 3 and business license requirements only apply to without-driver rentals."
+            })
         
         base_price = data.get("base_price", getattr(self.instance, "base_price", None))
         if base_price and base_price <= 0:
@@ -1082,6 +1228,7 @@ class CarListingSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         images = validated_data.pop("images", [])
+        validated_data.setdefault("is_active", False)
         
         car_listing_instance = CarListing.objects.create(**validated_data)
         
@@ -1105,7 +1252,7 @@ class CarRentalItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = CarRentalItem
         fields = [
-            'id', 'car_listing', 'car_listing_details', 'units_rent', 
+            'id', 'car_listing', 'car_listing_details', 'units_rent', 'price_per_unit',
             'nightly_rate', 'stay_total', 'subtotal', 'created_at'
         ]
         read_only_fields = ['id', 'stay_total', 'subtotal', 'created_at']
@@ -1131,7 +1278,8 @@ class CarRentalItemSerializer(serializers.ModelSerializer):
         }
 
 
-class CarRentalSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, serializers.ModelSerializer):
+class CarRentalSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, CurrencyConversionMixin, serializers.ModelSerializer):
+    guest_booking_type = "car_rental"
     rental_items = CarRentalItemSerializer(many=True, write_only=True)
     items_details = CarRentalItemSerializer(
         source='rental_items', many=True, read_only=True
@@ -1148,6 +1296,26 @@ class CarRentalSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, se
     guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
     guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
     special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests for the rental")
+    otp_challenge_id = serializers.UUIDField(required=False, write_only=True)
+    otp_code = serializers.CharField(required=False, write_only=True, max_length=12, trim_whitespace=True)
+    renter_driver_license_number = serializers.CharField(
+        max_length=64,
+        required=False,
+        allow_blank=True,
+        help_text="Required for without-driver rentals."
+    )
+    renter_code_3_license_number = serializers.CharField(
+        max_length=64,
+        required=False,
+        allow_blank=True,
+        help_text="Required when the selected self-drive car enforces a Code 3 rule."
+    )
+    renter_business_license_number = serializers.CharField(
+        max_length=64,
+        required=False,
+        allow_blank=True,
+        help_text="Required when the selected self-drive car enforces a business-license rule."
+    )
     
     payment_currency = serializers.ChoiceField(
         choices=["USD", "ETB"],
@@ -1166,7 +1334,10 @@ class CarRentalSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, se
             'terms_accepted', 'terms_version', 'terms_accepted_at', 'terms_content_snapshot', 'terms_url',
             'is_legacy',
             'stay_total',
-            'guest_first_name', 'guest_last_name', 'guest_email', 'guest_phone', 'special_requests', 'payment_currency',
+            'guest_first_name', 'guest_last_name', 'guest_email', 'guest_phone', 'special_requests',
+            'otp_challenge_id', 'otp_code',
+            'renter_driver_license_number', 'renter_code_3_license_number', 'renter_business_license_number',
+            'payment_currency',
         ]
 
         read_only_fields = ['id', 'status', 'created_at', 'updated_at', 'booking_reference']
@@ -1231,6 +1402,14 @@ class CarRentalSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, se
                 "start_date": "Start date cannot be in the past."
             })
 
+        car_listings = [item["car_listing"] for item in rental_items]
+        self.validate_forward_booking_window(
+            start_date,
+            field_name="start_date",
+            label="Start date",
+            listings=car_listings,
+        )
+
         if not rental_items:
             raise serializers.ValidationError({
                 "rental_items": "At least one rental item is required."
@@ -1240,6 +1419,17 @@ class CarRentalSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, se
         guest_email = data.get('guest_email')
         if (not user or not user.is_authenticated) and not guest_email:
              raise serializers.ValidationError("Either log in or provide guest email.")
+        self.validate_guest_booking_otp(data)
+
+        currencies = {
+            item["car_listing"].currency
+            for item in rental_items
+            if getattr(item["car_listing"], "currency", None)
+        }
+        if len(currencies) > 1:
+            raise serializers.ValidationError({
+                "rental_items": f"All cars must have the same currency. Found: {', '.join(sorted(currencies))}"
+            })
 
         # ========== DAILY AVAILABILITY CHECK ==========
         for item in rental_items:
@@ -1261,6 +1451,37 @@ class CarRentalSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, se
             if item.get("price_per_unit", 0) <= 0:
                 raise serializers.ValidationError({
                     "rental_items": "Price per unit must be greater than 0."
+                })
+
+        without_driver_listings = [
+            item["car_listing"]
+            for item in rental_items
+            if item["car_listing"].rental_mode == CarListing.RentalModeChoices.WITHOUT_DRIVER
+        ]
+        if without_driver_listings:
+            if not data.get("renter_driver_license_number"):
+                raise serializers.ValidationError({
+                    "renter_driver_license_number": (
+                        "Driver license number is required for without-driver rentals."
+                    )
+                })
+
+            if any(listing.requires_code_3 for listing in without_driver_listings) and not data.get(
+                "renter_code_3_license_number"
+            ):
+                raise serializers.ValidationError({
+                    "renter_code_3_license_number": (
+                        "Code 3 license number is required for at least one selected without-driver car."
+                    )
+                })
+
+            if any(
+                listing.requires_business_license for listing in without_driver_listings
+            ) and not data.get("renter_business_license_number"):
+                raise serializers.ValidationError({
+                    "renter_business_license_number": (
+                        "Business license number is required for at least one selected without-driver car."
+                    )
                 })
         
         # Validate T&C version for car rental company
@@ -1289,6 +1510,7 @@ class CarRentalSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, se
     
     @transaction.atomic
     def create(self, validated_data):
+        self.remove_guest_booking_otp_fields(validated_data)
         user = self.context["request"].user
         if not user.is_authenticated:
             user = None
@@ -1314,6 +1536,27 @@ class CarRentalSerializer(SanitizeGuestDetailsMixin, CurrencyConversionMixin, se
                 )
 
         return super().update(instance, validated_data)
+
+
+class CarRentalRescheduleSerializer(serializers.Serializer):
+    start_date = serializers.DateField(required=True)
+    end_date = serializers.DateField(required=True)
+
+    def validate(self, data):
+        start_date = data["start_date"]
+        end_date = data["end_date"]
+
+        if start_date >= end_date:
+            raise serializers.ValidationError(
+                {"end_date": "End date must be after start date."}
+            )
+
+        if start_date < date.today():
+            raise serializers.ValidationError(
+                {"start_date": "Start date cannot be in the past."}
+            )
+
+        return data
 
 
 class AvailabilityCheckSerializer(serializers.Serializer):
@@ -1392,6 +1635,7 @@ class CarAvailabilityUpdateSerializer(serializers.Serializer):
 class PropertyListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     address = AddressSerializer()
+    verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
 
     class Meta:
         model = PropertyListing
@@ -1402,6 +1646,7 @@ class PropertyListingResponseSerializer(CurrencyConversionMixin, serializers.Mod
             "images",
             "base_price",
             "currency",
+            "booking_forward_window_days",
             "address",
             "property_type",
             "bedrooms",
@@ -1409,6 +1654,9 @@ class PropertyListingResponseSerializer(CurrencyConversionMixin, serializers.Mod
             "square_meters",
             "is_furnished",
             "conversion",
+            "is_verified",
+            "verified_at",
+            "verified_by",
         ]
 
 
@@ -1479,6 +1727,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
                 validated_data["company"] = request_company
             elif request_individual_owner:
                 validated_data["individual_owner"] = request_individual_owner
+        validated_data.setdefault("is_active", False)
 
         return ListingService.create_property_listing(validated_data)
 
@@ -1781,7 +2030,8 @@ class BookingItemSerializer(serializers.ModelSerializer):
         return addons_data
 
 
-class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
+class BookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, serializers.ModelSerializer):
+    guest_booking_type = "hotel"
     items = BookingItemSerializer(many=True, help_text="List of rooms and quantities to book.")
     
     # T&C fields (write_only, required for booking creation)
@@ -1802,6 +2052,8 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
     guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
     guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
     special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests (e.g., late check-in, room preferences)")
+    otp_challenge_id = serializers.UUIDField(required=False, write_only=True)
+    otp_code = serializers.CharField(required=False, write_only=True, max_length=12, trim_whitespace=True)
 
     payment_currency = serializers.ChoiceField(
         choices=["USD", "ETB"],
@@ -1815,7 +2067,8 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
         model = Booking
         fields = ["items", "check_in_date", "check_out_date", "currency", "status", 
                    "terms_accepted", "terms_version",
-                  "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency"]
+                  "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency",
+                  "otp_challenge_id", "otp_code"]
         read_only_fields = ["status", "currency"]
         
 
@@ -1823,14 +2076,22 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
     def validate(self, data):
         check_in = data.get("check_in_date")
         check_out = data.get("check_out_date")
+        items = data.get("items", [])
         
         if check_in and check_out:
             if check_out <= check_in:
                 raise serializers.ValidationError(
                     {"check_out_date": "Check-out date must be after check-in date."}
                 )
+
+        room_listings = [item["room"] for item in items]
+        self.validate_forward_booking_window(
+            check_in,
+            field_name="check_in_date",
+            label="Check-in date",
+            listings=room_listings,
+        )
         
-        items = data.get("items", [])
         if not items:
             raise serializers.ValidationError(
                 {"items": "At least one booking item is required."}
@@ -1840,6 +2101,7 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
         guest_email = data.get('guest_email')
         if (not user or not user.is_authenticated) and not guest_email:
              raise serializers.ValidationError("Either log in or provide guest email.")
+        self.validate_guest_booking_otp(data)
         
         is_privileged = False
         if user and user.is_authenticated:
@@ -1886,6 +2148,7 @@ class BookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
         return data
 
     def create(self, validated_data):
+        self.remove_guest_booking_otp_fields(validated_data)
         # 1. Determine the user
         user = validated_data.pop("user", None)
         request = self.context.get("request")
@@ -1960,6 +2223,7 @@ class StayAvailabilityUpdateSerializer(serializers.ModelSerializer):
 class EventSpaceListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     amenities = AmenityResponseSSerializer(many=True)
+    verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
 
     class Meta:
         model = EventSpaceListing
@@ -1971,6 +2235,7 @@ class EventSpaceListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMix
             "number_of_guests",
             "base_price",
             "currency",
+            "booking_forward_window_days",
             "amenities",
             "number_of_guests",
             "total_units",
@@ -1978,6 +2243,9 @@ class EventSpaceListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMix
             "floor_area_sqm",
             "conversion",
             "price_quote",
+            "is_verified",
+            "verified_at",
+            "verified_by",
         ]
 class EventSpaceListingSerializer(serializers.ModelSerializer):
     """Serializer used for POST/PUT operations, relying on the service layer."""
@@ -1997,6 +2265,7 @@ class EventSpaceListingSerializer(serializers.ModelSerializer):
             "description",
             "base_price",
             "currency",
+            "booking_forward_window_days",
             "address",
             "amenities",
             "number_of_guests",
@@ -2038,6 +2307,7 @@ class EventSpaceListingSerializer(serializers.ModelSerializer):
         Delegates the complex creation process (including availability) 
         to the service layer.
         """
+        validated_data.setdefault("is_active", False)
         return ListingService.create_event_space_listing(validated_data)
 
     @transaction.atomic()
@@ -2164,8 +2434,9 @@ class EventSpaceBookingItemSerializer(serializers.ModelSerializer):
         fields = ["event_space", "units_booked", "price_per_unit"] 
 
 
-class EventSpaceBookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSerializer):
+class EventSpaceBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, serializers.ModelSerializer):
     """Main serializer for creating a new Event Space Booking."""
+    guest_booking_type = "eventspace"
     items = EventSpaceBookingItemSerializer(many=True) 
     
     terms_accepted = serializers.BooleanField(required=True, write_only=True)
@@ -2177,6 +2448,8 @@ class EventSpaceBookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSe
     guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
     guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
     special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests for the event")
+    otp_challenge_id = serializers.UUIDField(required=False, write_only=True)
+    otp_code = serializers.CharField(required=False, write_only=True, max_length=12, trim_whitespace=True)
 
     payment_currency = serializers.ChoiceField(
         choices=["USD", "ETB"],
@@ -2190,7 +2463,8 @@ class EventSpaceBookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSe
         model = EventSpaceBooking # Mapped to the dedicated model
         fields = ["items", "check_in_date", "check_out_date", "currency", "event_type",
                   "terms_accepted", "terms_version",
-                  "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency"]
+                  "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency",
+                  "otp_challenge_id", "otp_code"]
         read_only_fields = ["status", "currency"]
 
     def validate_terms_accepted(self, value):
@@ -2203,14 +2477,22 @@ class EventSpaceBookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSe
     def validate(self, data):
         check_in = data.get("check_in_date")
         check_out = data.get("check_out_date")
+        items = data.get("items", [])
         
         if check_in and check_out:
             if check_out <= check_in:
                 raise serializers.ValidationError(
                     {"check_out_date": "Check-out date must be after check-in date."}
                 )
+
+        event_spaces = [item["event_space"] for item in items]
+        self.validate_forward_booking_window(
+            check_in,
+            field_name="check_in_date",
+            label="Check-in date",
+            listings=event_spaces,
+        )
         
-        items = data.get("items", [])
         if not items:
             raise serializers.ValidationError(
                 {"items": "At least one booking item is required."}
@@ -2220,6 +2502,7 @@ class EventSpaceBookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSe
         guest_email = data.get('guest_email')
         if (not user or not user.is_authenticated) and not guest_email:
              raise serializers.ValidationError("Either log in or provide guest email.")
+        self.validate_guest_booking_otp(data)
         
         terms_version = data.get("terms_version")
         if terms_version and items:
@@ -2262,6 +2545,7 @@ class EventSpaceBookingSerializer(SanitizeGuestDetailsMixin, serializers.ModelSe
         return data
 
     def create(self, validated_data):
+        self.remove_guest_booking_otp_fields(validated_data)
         # Determine the user and status logic (copied from your original)
         user = validated_data.pop("user", None)
         request = self.context.get("request")
@@ -2311,50 +2595,77 @@ class PricePreviewResponseSerializer(serializers.Serializer):
     )
 
 
-class BookingPreviewSerializer(serializers.Serializer):
-    check_in_date = serializers.DateField(help_text="First night of stay")
+class BookingPreviewSerializer(ForwardBookingWindowMixin, serializers.Serializer):
+    check_in_date = serializers.DateField(help_text="First night of stay. Must be within the configured forward booking window.")
     check_out_date = serializers.DateField(help_text="Day of departure (non-inclusive for hotel stays)")
     items = BookingItemSerializer(many=True, help_text="List of rooms and quantities selected")
+    guest_phone = serializers.CharField(required=False, allow_blank=True, help_text="Optional phone number used to determine the first-booking fee waiver.")
 
     def validate(self, data):
         check_in = data.get("check_in_date")
         check_out = data.get("check_out_date")
+        items = data.get("items", [])
         if check_in and check_out and check_out <= check_in:
             raise serializers.ValidationError("Check-out date must be after check-in date.")
+
+        room_listings = [item["room"] for item in items]
+        self.validate_forward_booking_window(
+            check_in,
+            field_name="check_in_date",
+            label="Check-in date",
+            listings=room_listings,
+        )
         
-        items = data.get("items", [])
         if not items:
             raise serializers.ValidationError("At least one booking item is required.")
         return data
 
-class GuestHouseBookingPreviewSerializer(serializers.Serializer):
-    start_date = serializers.DateField(help_text="Arrival date")
+class GuestHouseBookingPreviewSerializer(ForwardBookingWindowMixin, serializers.Serializer):
+    start_date = serializers.DateField(help_text="Arrival date. Must be within the configured forward booking window.")
     end_date = serializers.DateField(help_text="Departure date")
     items = GuestHouseBookingItemSerializer(many=True, help_text="List of guesthouse rooms and quantities selected")
+    guest_phone = serializers.CharField(required=False, allow_blank=True, help_text="Optional phone number used to determine the first-booking fee waiver.")
 
     def validate(self, data):
         start = data.get("start_date")
         end = data.get("end_date")
+        items = data.get("items", [])
         if start and end and end <= start:
             raise serializers.ValidationError("End date must be after start date.")
+
+        room_listings = [item["room"] for item in items]
+        self.validate_forward_booking_window(
+            start,
+            field_name="start_date",
+            label="Start date",
+            listings=room_listings,
+        )
         
-        items = data.get("items", [])
         if not items:
             raise serializers.ValidationError("At least one booking item is required.")
         return data
 
-class EventSpaceBookingPreviewSerializer(serializers.Serializer):
-    check_in_date = serializers.DateField(help_text="Event start date")
+class EventSpaceBookingPreviewSerializer(ForwardBookingWindowMixin, serializers.Serializer):
+    check_in_date = serializers.DateField(help_text="Event start date. Must be within the configured forward booking window.")
     check_out_date = serializers.DateField(help_text="Event end date")
     items = EventSpaceBookingItemSerializer(many=True, help_text="List of spaces and quantities selected")
+    guest_phone = serializers.CharField(required=False, allow_blank=True, help_text="Optional phone number used to determine the first-booking fee waiver.")
 
     def validate(self, data):
         check_in = data.get("check_in_date")
         check_out = data.get("check_out_date")
+        items = data.get("items", [])
         if check_in and check_out and check_out <= check_in:
             raise serializers.ValidationError("Check-out date must be after check-in date.")
+
+        event_spaces = [item["event_space"] for item in items]
+        self.validate_forward_booking_window(
+            check_in,
+            field_name="check_in_date",
+            label="Check-in date",
+            listings=event_spaces,
+        )
         
-        items = data.get("items", [])
         if not items:
             raise serializers.ValidationError("At least one booking item is required.")
         return data

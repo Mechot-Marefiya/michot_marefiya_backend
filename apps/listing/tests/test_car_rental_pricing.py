@@ -3,8 +3,12 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
-from apps.listing.models import CarListing, CarRental, CarRentalItem
-from apps.account.models import CompanyProfile, Role, RoleCode
+from django.contrib.contenttypes.models import ContentType
+from apps.listing.models import CarListing, CarRental, CarRentalItem, TermsAndConditions
+from apps.account.enums import RoleCode
+from apps.account.models import CompanyProfile, Role
+from apps.core.models import Address
+from apps.listing.services import CarAvailabilityService
 from decimal import Decimal
 from datetime import date, timedelta
 import uuid
@@ -34,6 +38,11 @@ class CarRentalPricingTests(TestCase):
         self.company_profile = CompanyProfile.objects.create(
             user=self.company_user,
             name="Eco Ride",
+            address=Address.objects.create(
+                street_line1="Bole Road",
+                city="Addis Ababa",
+                country="Ethiopia",
+            ),
             status=CompanyProfile.StatusChoice.APPROVED
         )
 
@@ -51,25 +60,56 @@ class CarRentalPricingTests(TestCase):
         self.car_etb = CarListing.objects.create(
             title="Toyota Corolla",
             company=self.company_profile,
+            brand=CarListing.CarBrandChoices.TOYOTA,
+            model="Corolla",
+            year=2022,
+            mileage=10000,
+            fuel_type=CarListing.FuelTypeChoices.PETROL,
+            transmission=CarListing.TransmissionChoices.AUTOMATIC,
             base_price=Decimal("1500.00"),
             currency="ETB",
             listing_type=CarListing.ListingTypeChoices.RENT,
+            rental_mode=CarListing.RentalModeChoices.WITH_DRIVER,
+            car_class=CarListing.CarClassChoices.NORMAL,
+            condition=CarListing.ConditionChoices.USED,
             quantity=5,
+            seats=4,
             is_active=True
         )
         self.car_usd = CarListing.objects.create(
             title="Tesla Model 3",
             company=self.company_profile,
+            brand=CarListing.CarBrandChoices.TOYOTA,
+            model="Model 3",
+            year=2023,
+            mileage=5000,
+            fuel_type=CarListing.FuelTypeChoices.ELECTRIC,
+            transmission=CarListing.TransmissionChoices.AUTOMATIC,
             base_price=Decimal("100.00"),
             currency="USD",
             listing_type=CarListing.ListingTypeChoices.RENT,
+            rental_mode=CarListing.RentalModeChoices.WITH_DRIVER,
+            car_class=CarListing.CarClassChoices.LUXURY,
+            condition=CarListing.ConditionChoices.USED,
             quantity=2,
+            seats=4,
             is_active=True
+        )
+        CarAvailabilityService.create_availability(self.car_etb)
+        CarAvailabilityService.create_availability(self.car_usd)
+        TermsAndConditions.objects.create(
+            content_type=ContentType.objects.get_for_model(self.company_profile),
+            object_id=self.company_profile.id,
+            version="1.0",
+            title="Terms",
+            content="Standard terms",
+            effective_date=date.today(),
+            is_active=True,
         )
 
     def test_car_listing_includes_price_quote(self):
         """Verify car detail includes price_quote field when dates provided."""
-        url = reverse('carlisting-detail', kwargs={'pk': self.car_etb.id})
+        url = reverse('cars-detail', kwargs={'pk': self.car_etb.id})
         check_in = date.today() + timedelta(days=5)
         check_out = check_in + timedelta(days=3)
         
@@ -130,7 +170,7 @@ class CarRentalPricingTests(TestCase):
             )
             response = self.client.post(url, data, format='json')
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
         rental_id = response.data['id']
         rental = CarRental.objects.get(id=rental_id)
         
@@ -159,3 +199,61 @@ class CarRentalPricingTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("rental_items", response.data)
         self.assertIn("same currency", str(response.data["rental_items"]))
+
+    def test_without_driver_requires_code_3_and_business_license(self):
+        """Verify self-drive rentals enforce Code 3 and business-license requirements when configured."""
+        self.car_etb.rental_mode = CarListing.RentalModeChoices.WITHOUT_DRIVER
+        self.car_etb.requires_code_3 = True
+        self.car_etb.requires_business_license = True
+        self.car_etb.pre_rental_requirements = "Provide Code 3 and business license."
+        self.car_etb.save(
+            update_fields=[
+                "rental_mode",
+                "requires_code_3",
+                "requires_business_license",
+                "pre_rental_requirements",
+                "updated_at",
+            ]
+        )
+
+        url = reverse('carrental-list')
+        start_date = date.today() + timedelta(days=1)
+        end_date = start_date + timedelta(days=2)
+
+        base_payload = {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "rental_items": [
+                {
+                    "car_listing": self.car_etb.id,
+                    "units_rent": 1,
+                    "price_per_unit": 1500.00,
+                }
+            ],
+            "terms_accepted": True,
+            "terms_version": "1.0",
+            "renter_driver_license_number": "DL-12345",
+        }
+
+        response = self.client.post(url, base_payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("renter_code_3_license_number", response.data)
+
+        payload_with_code_3 = {
+            **base_payload,
+            "renter_code_3_license_number": "C3-12345",
+        }
+        response = self.client.post(url, payload_with_code_3, format='json')
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("renter_business_license_number", response.data)
+
+        valid_payload = {
+            **payload_with_code_3,
+            "renter_business_license_number": "BL-12345",
+        }
+        response = self.client.post(url, valid_payload, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED, response.data)
+        rental = CarRental.objects.get(id=response.data["id"])
+        self.assertEqual(rental.renter_driver_license_number, "DL-12345")
+        self.assertEqual(rental.renter_code_3_license_number, "C3-12345")
+        self.assertEqual(rental.renter_business_license_number, "BL-12345")

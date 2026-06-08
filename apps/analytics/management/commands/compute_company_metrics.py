@@ -1,18 +1,10 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
 from datetime import date, timedelta
-from decimal import Decimal
 
 from apps.account.models import CompanyProfile
-from apps.analytics.models import CompanyDailyMetrics, AnalyticsDirtyDate
+from apps.analytics.models import AnalyticsDirtyDate, CompanyDailyMetrics
 from apps.analytics import services
-
-
-def _to_decimal(val):
-    try:
-        return Decimal(str(val))
-    except Exception:
-        return Decimal("0")
 
 
 class Command(BaseCommand):
@@ -66,26 +58,15 @@ class Command(BaseCommand):
             for dirty in dirty_qs.order_by("company_id", "date"):
                 comp_id = dirty.company_id
                 dt = dirty.date
-                metrics = services.compute_company_overview(str(comp_id), dt, dt)
-
-                defaults = {
-                    "revenue": _to_decimal(metrics.get("total_revenue", 0)),
-                    "bookings_count": int(metrics.get("total_bookings", 0) or 0),
-                    "confirmed_count": int(metrics.get("confirmed_bookings", 0) or 0),
-                    "cancelled_count": int(metrics.get("cancellations", 0) or 0),
-                    "avg_booking_value": _to_decimal(metrics.get("avg_booking_value", 0)),
-                    "top_listings": metrics.get("top_listings", []),
-                }
 
                 with transaction.atomic():
-                    obj, created_flag = CompanyDailyMetrics.objects.update_or_create(
+                    created_flag = not CompanyDailyMetrics.objects.filter(
                         company_id=comp_id,
                         date=dt,
-                        defaults=defaults,
-                    )
-                    # mark dirty processed
+                    ).exists()
+                    services.materialize_company_daily_metrics(comp_id, dt)
                     dirty.processed = True
-                    dirty.save()
+                    dirty.save(update_fields=["processed", "updated_at"])
 
                 if created_flag:
                     created += 1
@@ -113,23 +94,12 @@ class Command(BaseCommand):
         current = start
         while current <= end:
             for comp in companies:
-                metrics = services.compute_company_overview(str(comp.id), current, current)
-
-                defaults = {
-                    "revenue": _to_decimal(metrics.get("total_revenue", 0)),
-                    "bookings_count": int(metrics.get("total_bookings", 0) or 0),
-                    "confirmed_count": int(metrics.get("confirmed_bookings", 0) or 0),
-                    "cancelled_count": int(metrics.get("cancellations", 0) or 0),
-                    "avg_booking_value": _to_decimal(metrics.get("avg_booking_value", 0)),
-                    "top_listings": metrics.get("top_listings", []),
-                }
-
                 with transaction.atomic():
-                    obj, created_flag = CompanyDailyMetrics.objects.update_or_create(
+                    created_flag = not CompanyDailyMetrics.objects.filter(
                         company_id=comp.id,
                         date=current,
-                        defaults=defaults,
-                    )
+                    ).exists()
+                    services.materialize_company_daily_metrics(comp.id, current)
 
                 if created_flag:
                     created += 1

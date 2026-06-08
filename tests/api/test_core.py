@@ -32,6 +32,52 @@ def test_get_facilities_detail_not_found(api_client):
     assert response.status_code == 404
 
 
+def test_post_facility_admin_create_success(admin_client):
+    response = admin_client.post(
+        "/api/v1/core/facilities/",
+        {"name": "Spa", "icon": "spa"},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["name"] == "Spa"
+    assert data["icon"] == "spa"
+
+
+def test_patch_facility_admin_update_success(admin_client):
+    facility = Facility.objects.create(name="Pool", icon="pool")
+
+    response = admin_client.patch(
+        f"/api/v1/core/facilities/{facility.id}/",
+        {"icon": "pool-updated"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    facility.refresh_from_db()
+    assert facility.icon == "pool-updated"
+
+
+def test_delete_facility_admin_delete_success(admin_client):
+    facility = Facility.objects.create(name="Gym", icon="gym")
+
+    response = admin_client.delete(f"/api/v1/core/facilities/{facility.id}/")
+
+    assert response.status_code == 204
+    assert Facility.objects.filter(id=facility.id).exists() is False
+
+
+def test_post_facility_non_admin_forbidden(auth_client):
+    response = auth_client.post(
+        "/api/v1/core/facilities/",
+        {"name": "Spa", "icon": "spa"},
+        format="json",
+    )
+
+    assert response.status_code == 403
+
+
 def test_get_currencies_public_contract(api_client):
     response = api_client.get("/api/v1/core/currencies/")
 

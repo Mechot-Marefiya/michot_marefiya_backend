@@ -36,6 +36,8 @@ SECRET_KEY = env("SECRET_KEY", cast=str)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env("DEBUG", default=True, cast=bool)
+REQUIRE_GUEST_BOOKING_OTP = env("REQUIRE_GUEST_BOOKING_OTP", default=True, cast=bool)
+BOOKING_FORWARD_WINDOW_DAYS = env("BOOKING_FORWARD_WINDOW_DAYS", default=5, cast=int)
 
 
 # ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
@@ -196,6 +198,8 @@ REST_FRAMEWORK = {
         "anon": "60/min",          # Base limit for unauthenticated users
         "user": "5000/hour",       # Base limit for authenticated users
         "auth_login": "5/min",     # Strict limit for login attempts (Brute-force protection)
+        "otp_request": "5/min",
+        "otp_verify": "10/min",
         "auth_register": "10/hour",# Prevent mass account creation
         "password_reset": "3/hour",# Prevent email spam/cost abuse
         "verify_email": "5/hour",  # Prevent verification token guessing
@@ -312,6 +316,11 @@ CELERY_BEAT_SCHEDULE = {
     "cleanup-expired-bookings-every-5-minutes": {
         "task": "apps.listing.tasks.cancel_all_expired_bookings",
         "schedule": 60.0 * 5,  # Every 5 minutes
+        "args": (),
+    },
+    "process-dirty-analytics-dates-every-10-minutes": {
+        "task": "apps.analytics.tasks.process_dirty_analytics_dates",
+        "schedule": 60.0 * 10,  # Every 10 minutes
         "args": (),
     },
 }

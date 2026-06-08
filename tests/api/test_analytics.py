@@ -7,6 +7,7 @@ import pytest
 from datetime import date, timedelta
 from decimal import Decimal
 
+from apps.analytics.models import CompanyDailyMetrics
 from apps.listing.models import Booking, BookingItem
 from tests.conftest import CompanyProfileFactory, HotelProfileFactory
 
@@ -36,6 +37,41 @@ def test_get_company_overview_success(company_client):
     assert "cancellations" in data
     assert "avg_booking_value" in data
     assert "top_listings" in data
+
+
+def test_get_company_overview_reads_materialized_metrics(company_client, company):
+    metrics_date = date.today()
+    CompanyDailyMetrics.objects.create(
+        company_id=company.id,
+        date=metrics_date,
+        revenue=Decimal("4321.00"),
+        bookings_count=3,
+        confirmed_count=2,
+        cancelled_count=1,
+        avg_booking_value=Decimal("1440.33"),
+        top_listings=[
+            {
+                "listing_id": "room-1",
+                "title": "Precomputed Room",
+                "revenue": 4321.0,
+                "bookings_count": 3,
+                "type": "hotel_room",
+            }
+        ],
+    )
+
+    response = company_client.get(
+        "/api/v1/analytics/company/overview/",
+        {"start_date": metrics_date.isoformat(), "end_date": metrics_date.isoformat()},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["total_revenue"] == 4321.0
+    assert data["total_bookings"] == 3
+    assert data["confirmed_bookings"] == 2
+    assert data["cancellations"] == 1
+    assert data["top_listings"][0]["title"] == "Precomputed Room"
 
 
 def test_get_company_overview_invalid_date_payload(company_client):
@@ -124,6 +160,27 @@ def test_get_company_revenue_contains_timeseries_item(company_client, company, u
     if data:
         assert "period" in data[0]
         assert "revenue" in data[0]
+
+
+def test_get_company_revenue_reads_materialized_metrics(company_client, company):
+    metrics_date = date.today()
+    CompanyDailyMetrics.objects.create(
+        company_id=company.id,
+        date=metrics_date,
+        revenue=Decimal("987.65"),
+        bookings_count=1,
+        confirmed_count=1,
+        cancelled_count=0,
+        avg_booking_value=Decimal("987.65"),
+    )
+
+    response = company_client.get(
+        "/api/v1/analytics/company/revenue/",
+        {"start_date": metrics_date.isoformat(), "end_date": metrics_date.isoformat()},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == [{"period": metrics_date.isoformat(), "revenue": 987.65}]
 
 
 def test_get_company_activity_success(company_client):

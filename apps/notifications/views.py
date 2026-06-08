@@ -13,14 +13,16 @@ from django.core.cache import cache
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 
-from .models import Notification, NotificationPreference
+from .models import Notification, NotificationPreference, NotificationTemplate
 from .serializers import (
     NotificationSerializer, 
     NotificationPreferenceSerializer,
+    NotificationTemplateSerializer,
     BulkDeleteSerializer,
     BatchMarkReadSerializer
 )
 from .services import NotificationService
+from apps.account.permissions import IsAdmin
 
 
 class NotificationPagination(PageNumberPagination):
@@ -387,3 +389,10 @@ class NotificationPreferenceView(APIView):
             'message': 'Invalid input',
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(tags=['Notifications'])
+class NotificationTemplateViewSet(viewsets.ModelViewSet):
+    serializer_class = NotificationTemplateSerializer
+    queryset = NotificationTemplate.objects.all().order_by("notification_type")
+    permission_classes = [IsAdmin]

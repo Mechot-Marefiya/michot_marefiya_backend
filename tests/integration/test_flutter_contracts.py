@@ -6,15 +6,26 @@
 import pytest
 from datetime import date, timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.contenttypes.models import ContentType
+from django.contrib.auth.hashers import make_password
+from django.utils import timezone
 
+from apps.account.enums import RoleCode
 from apps.account.models import HotelProfile
+from apps.account.models import OtpChallenge, Role
 from apps.core.models import CurrencyRate
 from apps.listing.models import Booking, BookingItem, TermsAndConditions
 from apps.payment.models import PaymentTransaction
 
 pytestmark = pytest.mark.django_db
+
+
+def _assert_verification_fields(payload):
+    assert "is_verified" in payload
+    assert "verified_at" in payload
+    assert "verified_by" in payload
 
 
 def test_flutter_contract_auth_me(auth_client, user):
@@ -23,6 +34,114 @@ def test_flutter_contract_auth_me(auth_client, user):
     assert response.status_code == 200
     data = response.json()
     for key in ["id", "email", "first_name", "last_name", "phone", "is_active", "role", "workspace"]:
+        assert key in data
+
+
+@patch("apps.account.services.OtpService.generate_code", return_value="123456")
+@patch("services.sms.send_sms", return_value=True)
+def test_flutter_contract_auth_otp_request(mock_send_sms, mock_generate_code, api_client, user):
+    response = api_client.post(
+        "/api/v1/auth/otp/request/",
+        {"phone": user.phone},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    for key in ["success", "challenge_id", "purpose", "expires_at", "phone"]:
+        assert key in data
+
+
+def test_flutter_contract_auth_otp_verify(api_client, user):
+    challenge = OtpChallenge.objects.create(
+        user=user,
+        phone=user.phone,
+        purpose=OtpChallenge.Purpose.LOGIN,
+        code_hash=make_password("123456"),
+        expires_at=timezone.now() + timezone.timedelta(minutes=5),
+        sent_at=timezone.now(),
+    )
+
+    response = api_client.post(
+        "/api/v1/auth/otp/verify/",
+        {"challenge_id": str(challenge.id), "code": "123456"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    for key in ["success", "purpose", "user", "access", "refresh", "role"]:
+        assert key in data
+    for key in ["id", "email", "first_name", "last_name", "phone", "is_active", "role", "workspace"]:
+        assert key in data["user"]
+
+
+@patch("apps.account.services.OtpService.generate_code", return_value="123456")
+@patch("services.sms.send_sms", return_value=True)
+def test_flutter_contract_phone_first_signup(mock_send_sms, mock_generate_code, api_client):
+    Role.objects.get_or_create(name="User", code=RoleCode.USER.value)
+
+    response = api_client.post(
+        "/api/v1/account/users/",
+        {
+            "email": "flutter-signup@example.com",
+            "password": "pass1234",
+            "confirm_password": "pass1234",
+            "first_name": "Flutter",
+            "last_name": "Signup",
+            "phone": "0911000201",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    for key in [
+        "id",
+        "email",
+        "first_name",
+        "last_name",
+        "phone",
+        "phone_verified",
+        "phone_verified_at",
+        "is_active",
+        "role",
+        "workspace",
+        "verification_required",
+        "phone_verification_required",
+        "otp_challenge_id",
+        "otp_expires_at",
+        "otp_purpose",
+    ]:
+        assert key in data
+    assert data["verification_required"] == "phone"
+    assert data["phone_verification_required"] is True
+    assert data["otp_purpose"] == "signup"
+
+
+def test_flutter_contract_convert_guest_bookings(auth_client, user):
+    user.phone = "0911444333"
+    user.save(update_fields=["phone", "updated_at"])
+    user.phone_verified_at = timezone.now()
+    user.save(update_fields=["phone_verified_at", "updated_at"])
+
+    response = auth_client.post(
+        "/api/v1/account/users/me/convert-guest-bookings/",
+        {},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    for key in [
+        "success",
+        "phone",
+        "verified_via",
+        "linked_counts",
+        "already_linked_counts",
+        "linked_total",
+        "already_linked_total",
+    ]:
         assert key in data
 
 
@@ -69,6 +188,27 @@ def test_flutter_contract_account_hotels(api_client, hotel):
     data = response.json()
     assert "count" in data and "results" in data
     assert isinstance(data["results"], list)
+    _assert_verification_fields(data["results"][0])
+
+
+def test_flutter_contract_listing_verification_fields(
+    api_client,
+    guest_house,
+    car_listing,
+    property_listing,
+    event_space,
+):
+    endpoints = [
+        f"/api/v1/listing/guest-houses/{guest_house.id}/",
+        f"/api/v1/listing/cars/{car_listing.id}/",
+        f"/api/v1/listing/properties/{property_listing.id}/",
+        f"/api/v1/listing/event-spaces/{event_space.id}/",
+    ]
+
+    for endpoint in endpoints:
+        response = api_client.get(endpoint)
+        assert response.status_code == 200
+        _assert_verification_fields(response.json())
 
 
 def test_flutter_contract_listing_room_detail(api_client, room):
@@ -166,6 +306,28 @@ def test_flutter_contract_favorites_list(auth_client, favorite):
     assert "snapshot" in data["results"][0]
 
 
+def test_flutter_contract_guest_favorites_list(api_client, hotel):
+    response = api_client.post(
+        "/api/v1/favorites/guest/",
+        {
+            "guest_phone": "0911223344",
+            "content_type": "account.hotelprofile",
+            "object_id": str(hotel.id),
+        },
+        format="json",
+    )
+    assert response.status_code == 201
+
+    response = api_client.get("/api/v1/favorites/guest/", {"guest_phone": "0911223344"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "count" in data
+    assert "results" in data
+    for key in ["id", "guest_phone", "object_id", "content_type_display", "snapshot", "object", "created_at"]:
+        assert key in data["results"][0]
+
+
 def test_flutter_contract_notifications_list(auth_client, notification):
     response = auth_client.get("/api/v1/notifications/")
 
@@ -189,7 +351,11 @@ def test_flutter_contract_notifications_list(auth_client, notification):
         "created_at",
         "delivered_in_app",
         "delivered_email",
+        "delivered_sms",
+        "delivered_push",
         "email_sent_at",
+        "sms_sent_at",
+        "push_sent_at",
     ]:
         assert key in item
 
@@ -201,7 +367,15 @@ def test_flutter_contract_notification_preferences(auth_client, notification_pre
     data = response.json()
     assert data["success"] is True
     assert "data" in data
-    for key in ["email_preferences", "in_app_preferences", "email_enabled"]:
+    for key in [
+        "email_preferences",
+        "in_app_preferences",
+        "sms_preferences",
+        "push_preferences",
+        "email_enabled",
+        "sms_enabled",
+        "push_enabled",
+    ]:
         assert key in data["data"]
 
 

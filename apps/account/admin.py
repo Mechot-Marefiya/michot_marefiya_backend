@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.contrib.contenttypes.admin import GenericTabularInline
+from django.utils import timezone
 from apps.account.models import (
     ListingImage,
     Role,
@@ -7,6 +8,7 @@ from apps.account.models import (
     HotelProfile,
     CompanyProfile,
     IndividualOwnerProfile,
+    OtpChallenge,
 )
 
 
@@ -16,9 +18,21 @@ class ListingImageInline(GenericTabularInline):
     fields = ("image", "alt_text", "is_primary")
 
 
+def activate_hotels(modeladmin, request, queryset):
+    updated = queryset.update(is_active=True, updated_at=timezone.now())
+    modeladmin.message_user(request, f"Activated {updated} hotel(s).")
+
+
+def deactivate_hotels(modeladmin, request, queryset):
+    updated = queryset.update(is_active=False, updated_at=timezone.now())
+    modeladmin.message_user(request, f"Deactivated {updated} hotel(s).")
+
+
 @admin.register(HotelProfile)
 class HotelProfileModelAdmin(admin.ModelAdmin):
-    list_display = ["stars", "company"]
+    list_display = ["company", "stars", "featured", "is_active"]
+    list_filter = ["featured", "is_active"]
+    actions = [activate_hotels, deactivate_hotels]
     inlines = [ListingImageInline]
 
 
@@ -59,6 +73,26 @@ class CompanyProfileAdmin(admin.ModelAdmin):
 
 admin.site.register(IndividualOwnerProfile)
 admin.site.register(User)
+
+
+@admin.register(OtpChallenge)
+class OtpChallengeAdmin(admin.ModelAdmin):
+    list_display = ("phone", "purpose", "user", "expires_at", "consumed_at", "attempts", "sent_at")
+    list_filter = ("purpose", "consumed_at")
+    search_fields = ("phone", "user__email")
+    readonly_fields = (
+        "user",
+        "phone",
+        "purpose",
+        "code_hash",
+        "expires_at",
+        "consumed_at",
+        "attempts",
+        "max_attempts",
+        "sent_at",
+        "created_at",
+        "updated_at",
+    )
 
 
 @admin.register(ListingImage)

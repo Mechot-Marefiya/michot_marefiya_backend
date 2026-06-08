@@ -9,6 +9,7 @@ router.register("companies", views.CompanyProfileViewSet, basename="companies")
 router.register("hotels", views.HotelProfileViewSet, basename="hotels")
 router.register("individual-owners", views.IndividualOwnerProfileViewSet, basename="individual_owners")
 router.register("staff", views.StaffViewSet, basename="staff")
+router.register("roles", views.RoleViewSet, basename="roles")
 
 
 urlpatterns = [
