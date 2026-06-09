@@ -969,6 +969,8 @@ paths:
         name: id
         schema:
           type: string
+          format: uuid
+        description: A UUID string identifying this user.
         required: true
       tags:
       - Account Management
@@ -988,6 +990,8 @@ paths:
         name: id
         schema:
           type: string
+          format: uuid
+        description: A UUID string identifying this user.
         required: true
       tags:
       - Account Management
@@ -1472,7 +1476,7 @@ paths:
           description: ''
   /api/v1/analytics/frontdesk/availability/:
     get:
-      operationId: v1_analytics_frontdesk_availability_retrieve
+      operationId: v1_analytics_frontdesk_availability_list
       parameters:
       - in: query
         name: end_date
@@ -1502,7 +1506,13 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FrontDeskAvailabilityRow'
+          description: ''
   /api/v1/analytics/frontdesk/stats/:
     get:
       operationId: v1_analytics_frontdesk_stats_retrieve
@@ -1690,7 +1700,7 @@ paths:
           description: ''
   /api/v1/core/currencies/:
     get:
-      operationId: v1_core_currencies_retrieve
+      operationId: v1_core_currencies_list
       tags:
       - Debug & Utils
       security:
@@ -1698,7 +1708,13 @@ paths:
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CurrencyListItem'
+          description: ''
   /api/v1/core/currencies/rates/:
     get:
       operationId: v1_core_currencies_rates_retrieve
@@ -1710,7 +1726,19 @@ paths:
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/core/currency/convert/:
     post:
       operationId: v1_core_currency_convert_create
@@ -1718,12 +1746,49 @@ paths:
         rates.
       tags:
       - Debug & Utils
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConversionInputRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ConversionInputRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ConversionInputRequest'
+        required: true
       security:
       - jwtAuth: []
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrencyConversionResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '500':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/core/facilities/:
     get:
       operationId: v1_core_facilities_list
@@ -1909,6 +1974,8 @@ paths:
         name: id
         schema:
           type: string
+          format: uuid
+        description: A UUID string identifying this Favorite.
         required: true
       tags:
       - Favorites
@@ -1928,6 +1995,8 @@ paths:
         name: id
         schema:
           type: string
+          format: uuid
+        description: A UUID string identifying this Favorite.
         required: true
       tags:
       - Favorites
@@ -1959,6 +2028,8 @@ paths:
         name: id
         schema:
           type: string
+          format: uuid
+        description: A UUID string identifying this Favorite.
         required: true
       tags:
       - Favorites
@@ -1989,6 +2060,8 @@ paths:
         name: id
         schema:
           type: string
+          format: uuid
+        description: A UUID string identifying this Favorite.
         required: true
       tags:
       - Favorites
@@ -3008,11 +3081,47 @@ paths:
         required: true
       tags:
       - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCarAvailabilityUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedCarAvailabilityUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCarAvailabilityUpdateRequest'
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarAvailabilityUpdate'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/listing/car-availabilities/by-car-and-date/:
     get:
       operationId: v1_listing_car_availabilities_by_car_and_date_retrieve
@@ -3024,7 +3133,11 @@ paths:
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarAvailabilityByCarAndDateResponse'
+          description: ''
   /api/v1/listing/car-availabilities/by-dates/:
     get:
       operationId: v1_listing_car_availabilities_by_dates_retrieve
@@ -3036,7 +3149,11 @@ paths:
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarAvailabilityByDateRangeResponse'
+          description: ''
   /api/v1/listing/car-rentals/:
     get:
       operationId: v1_listing_car_rentals_list
@@ -7659,7 +7776,7 @@ components:
           readOnly: true
           description: Metadata about currency conversion if requested
         is_resumable:
-          type: string
+          type: boolean
           readOnly: true
         terms_accepted:
           type: boolean
@@ -7791,6 +7908,107 @@ components:
       required:
       - date
       - id
+    CarAvailabilityByCarAndDateCarListing:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        brand:
+          type: string
+        model:
+          type: string
+        base_price:
+          type: string
+      required:
+      - base_price
+      - brand
+      - id
+      - model
+      - title
+    CarAvailabilityByCarAndDateResponse:
+      type: object
+      properties:
+        car_listing:
+          $ref: '#/components/schemas/CarAvailabilityByCarAndDateCarListing'
+        search_period:
+          $ref: '#/components/schemas/CarAvailabilityByCarAndDateSearchPeriod'
+        quantity_requested:
+          type: integer
+        availability:
+          nullable: true
+      required:
+      - availability
+      - car_listing
+      - quantity_requested
+      - search_period
+    CarAvailabilityByCarAndDateSearchPeriod:
+      type: object
+      properties:
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+      required:
+      - end_date
+      - start_date
+    CarAvailabilityByDateRangeCar:
+      type: object
+      properties:
+        car_listing_id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        brand:
+          type: string
+        model:
+          type: string
+        base_price:
+          type: string
+        availability:
+          nullable: true
+      required:
+      - availability
+      - base_price
+      - brand
+      - car_listing_id
+      - model
+      - title
+    CarAvailabilityByDateRangeResponse:
+      type: object
+      properties:
+        search_period:
+          $ref: '#/components/schemas/CarAvailabilityByDateRangeSearchPeriod'
+        quantity_requested:
+          type: integer
+        available_cars_count:
+          type: integer
+        available_cars:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarAvailabilityByDateRangeCar'
+      required:
+      - available_cars
+      - available_cars_count
+      - quantity_requested
+      - search_period
+    CarAvailabilityByDateRangeSearchPeriod:
+      type: object
+      properties:
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+      required:
+      - end_date
+      - start_date
     CarAvailabilityRequest:
       type: object
       properties:
@@ -7803,6 +8021,29 @@ components:
           minimum: 0
       required:
       - date
+    CarAvailabilityUpdate:
+      type: object
+      properties:
+        is_available:
+          type: boolean
+        available_from:
+          type: string
+          format: date-time
+          nullable: true
+        available_to:
+          type: string
+          format: date-time
+          nullable: true
+        quantity_available:
+          type: integer
+          minimum: 0
+        available_units:
+          type: integer
+          minimum: 0
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
     CarClassEnum:
       enum:
       - luxury
@@ -8561,7 +8802,8 @@ components:
           type: string
           format: uuid
         car_listing_details:
-          type: string
+          allOf:
+          - $ref: '#/components/schemas/CarRentalItemCarListingDetails'
           readOnly: true
         units_rent:
           type: integer
@@ -8595,6 +8837,32 @@ components:
       - price_per_unit
       - stay_total
       - subtotal
+    CarRentalItemCarListingDetails:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        brand:
+          type: string
+        model:
+          type: string
+        year:
+          type: integer
+          nullable: true
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - base_price
+      - brand
+      - id
+      - model
+      - title
+      - year
     CarRentalItemRequest:
       type: object
       properties:
@@ -8817,7 +9085,7 @@ components:
           title: Company Name
           maxLength: 100
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
         phone:
           type: string
           minLength: 1
@@ -8959,7 +9227,7 @@ components:
           nullable: true
           maxLength: 50
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
       required:
       - address
       - category
@@ -8978,6 +9246,34 @@ components:
       description: |-
         * `new` - Brand New
         * `used` - Used
+    ConversionInputRequest:
+      type: object
+      description: Serializer for validating currency conversion input.
+      properties:
+        date:
+          type: string
+          format: date
+          description: The date for which the exchange rate should be used (YYYY-MM-DD).
+        base:
+          type: string
+          minLength: 1
+          description: The source (base) currency code (e.g., 'USD').
+          maxLength: 3
+        target:
+          type: string
+          minLength: 1
+          description: The destination (target) currency code (e.g., 'ETB').
+          maxLength: 3
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+          description: The amount to be converted.
+      required:
+      - amount
+      - base
+      - date
+      - target
     CurrencyConversionMetadata:
       type: object
       properties:
@@ -9003,6 +9299,48 @@ components:
       - rate
       - to
       - total
+    CurrencyConversionResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        input_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+        base:
+          type: string
+        target:
+          type: string
+        converted_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,16}(?:\.\d{0,2})?$
+        rate_date:
+          type: string
+          format: date
+        rate_used:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,12}(?:\.\d{0,6})?$
+      required:
+      - base
+      - converted_amount
+      - input_amount
+      - rate_date
+      - rate_used
+      - status
+      - target
+    CurrencyListItem:
+      type: object
+      properties:
+        code:
+          type: string
+        name:
+          type: string
+      required:
+      - code
+      - name
     CustomTokenObtainPairRequest:
       type: object
       properties:
@@ -9369,9 +9707,10 @@ components:
           minimum: 0
           description: Maximum number of days ahead a booking can start for this listing.
         address:
-          type: string
+          $ref: '#/components/schemas/Address'
         amenities:
-          type: string
+          type: object
+          additionalProperties: {}
         number_of_guests:
           type: integer
           maximum: 2147483647
@@ -9432,9 +9771,10 @@ components:
           minimum: 0
           description: Maximum number of days ahead a booking can start for this listing.
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
         amenities:
-          type: string
+          type: object
+          additionalProperties: {}
         number_of_guests:
           type: integer
           maximum: 2147483647
@@ -9621,10 +9961,12 @@ components:
           type: string
           readOnly: true
         snapshot:
-          type: string
+          type: object
+          additionalProperties: {}
           readOnly: true
         object:
-          type: string
+          type: object
+          additionalProperties: {}
           readOnly: true
         created_at:
           type: string
@@ -9650,6 +9992,42 @@ components:
       required:
       - content_type
       - object_id
+    FrontDeskAvailabilityDay:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        available:
+          type: integer
+        status:
+          type: string
+        booked:
+          type: integer
+      required:
+      - available
+      - booked
+      - date
+      - status
+    FrontDeskAvailabilityRow:
+      type: object
+      properties:
+        room_id:
+          type: string
+          format: uuid
+        room_name:
+          type: string
+        total_units:
+          type: integer
+        availability:
+          type: array
+          items:
+            $ref: '#/components/schemas/FrontDeskAvailabilityDay'
+      required:
+      - availability
+      - room_id
+      - room_name
+      - total_units
     FrontDeskStats:
       type: object
       properties:
@@ -9731,10 +10109,12 @@ components:
           type: string
           readOnly: true
         snapshot:
-          type: string
+          type: object
+          additionalProperties: {}
           readOnly: true
         object:
-          type: string
+          type: object
+          additionalProperties: {}
           readOnly: true
         created_at:
           type: string
@@ -10032,9 +10412,10 @@ components:
           type: string
           description: Detailed description of the listing.
         amenities:
-          type: string
+          type: object
+          additionalProperties: {}
         address:
-          type: string
+          $ref: '#/components/schemas/Address'
         facility:
           type: array
           items:
@@ -10094,9 +10475,10 @@ components:
           type: string
           description: Detailed description of the listing.
         amenities:
-          type: string
+          type: object
+          additionalProperties: {}
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
         facility:
           type: array
           items:
@@ -10466,7 +10848,7 @@ components:
           nullable: true
           maxLength: 200
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
         license:
           type: string
           format: binary
@@ -10482,7 +10864,8 @@ components:
           type: boolean
           nullable: true
         facilities:
-          type: string
+          type: object
+          additionalProperties: {}
         images:
           type: array
           items:
@@ -12021,6 +12404,29 @@ components:
         icon:
           type: string
           maxLength: 100
+    PatchedCarAvailabilityUpdateRequest:
+      type: object
+      properties:
+        is_available:
+          type: boolean
+        available_from:
+          type: string
+          format: date-time
+          nullable: true
+        available_to:
+          type: string
+          format: date-time
+          nullable: true
+        quantity_available:
+          type: integer
+          minimum: 0
+        available_units:
+          type: integer
+          minimum: 0
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
     PatchedCarListingRequest:
       type: object
       properties:
@@ -12258,7 +12664,7 @@ components:
           title: Company Name
           maxLength: 100
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
         phone:
           type: string
           minLength: 1
@@ -12319,9 +12725,10 @@ components:
           minimum: 0
           description: Maximum number of days ahead a booking can start for this listing.
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
         amenities:
-          type: string
+          type: object
+          additionalProperties: {}
         number_of_guests:
           type: integer
           maximum: 2147483647
@@ -12453,9 +12860,10 @@ components:
           type: string
           description: Detailed description of the listing.
         amenities:
-          type: string
+          type: object
+          additionalProperties: {}
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
         facility:
           type: array
           items:
@@ -12558,7 +12966,7 @@ components:
           nullable: true
           maxLength: 200
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
         license:
           type: string
           format: binary
@@ -12574,7 +12982,8 @@ components:
           type: boolean
           nullable: true
         facilities:
-          type: string
+          type: object
+          additionalProperties: {}
         images:
           type: array
           items:
@@ -12691,7 +13100,7 @@ components:
           nullable: true
           description: The company that owns this listing.
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
         property_type:
           $ref: '#/components/schemas/PropertyTypeEnum'
         bedrooms:
@@ -12756,7 +13165,7 @@ components:
           minimum: 0
           description: Maximum number of days ahead a booking can start for this listing.
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
         amenities:
           type: array
           items:
@@ -13184,7 +13593,7 @@ components:
           nullable: true
           description: The company that owns this listing.
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
         property_type:
           $ref: '#/components/schemas/PropertyTypeEnum'
         bedrooms:
@@ -13394,7 +13803,7 @@ components:
           minimum: 0
           description: Maximum number of days ahead a booking can start for this listing.
         address:
-          type: string
+          $ref: '#/components/schemas/Address'
         amenities:
           type: array
           items:
@@ -13467,7 +13876,7 @@ components:
           minimum: 0
           description: Maximum number of days ahead a booking can start for this listing.
         address:
-          type: string
+          $ref: '#/components/schemas/AddressRequest'
         amenities:
           type: array
           items:
@@ -13860,7 +14269,8 @@ components:
         role:
           type: string
         workspace:
-          type: string
+          allOf:
+          - $ref: '#/components/schemas/WorkspaceInfo'
           readOnly: true
         created_at:
           type: string
@@ -14058,7 +14468,8 @@ components:
           - $ref: '#/components/schemas/Role'
           readOnly: true
         workspace:
-          type: string
+          allOf:
+          - $ref: '#/components/schemas/WorkspaceInfo'
           readOnly: true
       required:
       - email
@@ -14138,6 +14549,20 @@ components:
       required:
       - token
       - uid
+    WorkspaceInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        workspace_type:
+          type: string
+          nullable: true
+      required:
+      - id
+      - name
+      - workspace_type
     WorkspaceTypeEnum:
       enum:
       - hotel

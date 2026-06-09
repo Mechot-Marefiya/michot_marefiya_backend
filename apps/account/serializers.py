@@ -41,9 +41,19 @@ from apps.core.serializers import (
     FlexibleAddressField,
     JsonSerializerField,
 )
+from drf_spectacular.utils import extend_schema_field, inline_serializer
 
 
 User = get_user_model()
+
+WORKSPACE_INFO_SCHEMA = inline_serializer(
+    name="WorkspaceInfo",
+    fields={
+        "id": serializers.CharField(),
+        "name": serializers.CharField(),
+        "workspace_type": serializers.CharField(allow_null=True),
+    },
+)
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -110,6 +120,7 @@ class StaffResponseSerializer(serializers.ModelSerializer):
         model = User
         fields = ["id", "email", "first_name", "last_name", "role", "workspace", "created_at"]
 
+    @extend_schema_field(WORKSPACE_INFO_SCHEMA)
     def get_workspace(self, instance):
         if not instance.workspace:
             return None
@@ -374,6 +385,7 @@ class UserResponseSerializer(serializers.ModelSerializer):
         ]
 
 
+    @extend_schema_field(WORKSPACE_INFO_SCHEMA)
     def get_workspace(self, instance):
         """Return workspace data for front desk users."""
         if not instance.workspace:

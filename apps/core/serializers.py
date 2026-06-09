@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field, OpenApiTypes
 from apps.core.models import Address, Facility, CurrencyRate
 from decimal import Decimal
 import json
@@ -177,6 +178,7 @@ class FacilitySerializer(serializers.ModelSerializer):
             "name",
             
         ]
+@extend_schema_field(AddressSerializer)
 class FlexibleAddressField(serializers.Field):
 
     def to_internal_value(self, data):
@@ -215,6 +217,7 @@ class FlexibleAddressField(serializers.Field):
         return value
 
 
+@extend_schema_field(OpenApiTypes.OBJECT)
 class JsonSerializerField(serializers.Field):
 
     def to_internal_value(self, data):
@@ -267,3 +270,18 @@ class CurrencyRateSerializer(serializers.ModelSerializer):
     class Meta:
         model = CurrencyRate
         fields = ["target", "rate"]
+
+
+class CurrencyListItemSerializer(serializers.Serializer):
+    code = serializers.CharField()
+    name = serializers.CharField()
+
+
+class CurrencyConversionResponseSerializer(serializers.Serializer):
+    status = serializers.CharField()
+    input_amount = serializers.DecimalField(max_digits=18, decimal_places=2)
+    base = serializers.CharField()
+    target = serializers.CharField()
+    converted_amount = serializers.DecimalField(max_digits=18, decimal_places=2)
+    rate_date = serializers.DateField()
+    rate_used = serializers.DecimalField(max_digits=18, decimal_places=6)

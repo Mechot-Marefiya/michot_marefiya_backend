@@ -222,10 +222,16 @@ class StaffViewSet(viewsets.ModelViewSet):
     throttle_scope = 'token_blacklist'
 
     def get_queryset(self):
-        user = self.request.user
         qs = User.objects.filter(role__code=RoleCode.FRONT_DESK.value).select_related(
             'role', 'company', 'individual_owner', 'workspace_content_type'
         )
+
+        if getattr(self, "swagger_fake_view", False):
+            return qs.none()
+
+        user = self.request.user
+        if not getattr(user, "is_authenticated", False):
+            return qs.none()
         
         if user.company:
             return qs.filter(company=user.company)

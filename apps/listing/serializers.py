@@ -715,7 +715,8 @@ class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
             "subtotal",
         ]
 
-    def get_nightly_rate(self, obj):
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_nightly_rate(self, obj) -> str:
         return f"{obj.price_per_unit:.2f}"
 
     def get_stay_total(self, obj):
@@ -1257,16 +1258,30 @@ class CarRentalItemSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'stay_total', 'subtotal', 'created_at']
 
-    def get_nightly_rate(self, obj):
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_nightly_rate(self, obj) -> str:
         return f"{obj.price_per_unit:.2f}"
 
-    def get_stay_total(self, obj):
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_stay_total(self, obj) -> str:
         total = obj.units_rent * obj.price_per_unit
         return f"{total:.2f}"
 
-    def get_subtotal(self, obj):
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_subtotal(self, obj) -> str:
         return self.get_stay_total(obj)
     
+    @extend_schema_field(inline_serializer(
+        name='CarRentalItemCarListingDetails',
+        fields={
+            'id': serializers.UUIDField(),
+            'title': serializers.CharField(),
+            'brand': serializers.CharField(),
+            'model': serializers.CharField(),
+            'year': serializers.IntegerField(allow_null=True),
+            'base_price': serializers.DecimalField(max_digits=10, decimal_places=2),
+        }
+    ))
     def get_car_listing_details(self, obj):
         return {
             'id': obj.car_listing.id,
@@ -1969,6 +1984,7 @@ class BookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerial
     terms_content_snapshot = serializers.CharField(read_only=True, help_text="Full text of the T&C at the time of booking")
     is_legacy = serializers.BooleanField(read_only=True, help_text="Indicates if this booking was created before the T&C/Guest details update")
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_resumable(self, obj):
         from django.conf import settings
         from django.utils.timezone import now
@@ -2352,12 +2368,15 @@ class EventSpaceBookingItemResponseSerializer(serializers.ModelSerializer):
             "subtotal",
         ]
 
-    def get_nightly_rate(self, obj):
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_nightly_rate(self, obj) -> str:
         return f"{obj.price_per_unit:.2f}"
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_stay_total(self, obj):
         return f"{obj.subtotal():.2f}"
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_subtotal(self, obj):
         return self.get_stay_total(obj)
 

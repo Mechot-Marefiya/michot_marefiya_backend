@@ -1,5 +1,6 @@
 from django.contrib.contenttypes.models import ContentType
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field, OpenApiTypes
 from apps.account.models import normalize_phone_number
 from .models import Favorite, GuestFavorite
 from django.db import IntegrityError
@@ -121,9 +122,11 @@ class FavoriteSerializer(serializers.ModelSerializer):
         instance.save(update_fields=["snapshot", "snapshot_at"])
         return instance
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_content_type_display(self, obj):
         return f"{obj.content_type.app_label}.{obj.content_type.model}"
 
+    @extend_schema_field(OpenApiTypes.OBJECT)
     def get_snapshot(self, obj):
         if obj.snapshot:
             result = dict(obj.snapshot)
@@ -132,6 +135,7 @@ class FavoriteSerializer(serializers.ModelSerializer):
             return result
         return _build_snapshot_for_favorite(obj)
 
+    @extend_schema_field(OpenApiTypes.OBJECT)
     def get_object(self, obj):
         return self.get_snapshot(obj)
 
@@ -206,9 +210,11 @@ class GuestFavoriteSerializer(serializers.ModelSerializer):
                 object_id=str(object_id),
             ).first()
 
+    @extend_schema_field(OpenApiTypes.STR)
     def get_content_type_display(self, obj):
         return f"{obj.content_type.app_label}.{obj.content_type.model}"
 
+    @extend_schema_field(OpenApiTypes.OBJECT)
     def get_snapshot(self, obj):
         if obj.snapshot:
             result = dict(obj.snapshot)
@@ -217,5 +223,6 @@ class GuestFavoriteSerializer(serializers.ModelSerializer):
             return result
         return _build_snapshot_for_favorite(obj)
 
+    @extend_schema_field(OpenApiTypes.OBJECT)
     def get_object(self, obj):
         return self.get_snapshot(obj)

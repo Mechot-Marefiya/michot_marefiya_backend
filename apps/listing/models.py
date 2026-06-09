@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from drf_spectacular.utils import extend_schema_field, OpenApiTypes
 from django.utils.timezone import now
 from django.db.models import Q, F
 from django.contrib.contenttypes.fields import GenericRelation
@@ -1481,6 +1482,7 @@ class BookingAddon(AbstractBaseModel):
         verbose_name_plural = _("Booking Addons")
         db_table = "booking_addons"
     
+    @extend_schema_field(OpenApiTypes.STR)
     def subtotal(self):
         return self.quantity * self.price_per_unit
     

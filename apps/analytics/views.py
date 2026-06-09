@@ -12,7 +12,12 @@ from apps.account.permissions import (
     ORPermission
 )
 from apps.analytics import services
-from apps.analytics.serializers import OverviewSerializer, TimeseriesItemSerializer, FrontDeskStatsSerializer
+from apps.analytics.serializers import (
+    OverviewSerializer,
+    TimeseriesItemSerializer,
+    FrontDeskStatsSerializer,
+    FrontDeskAvailabilityRowSerializer,
+)
 from apps.account.enums import RoleCode
 from apps.account.models import HotelProfile
 from apps.listing.models import GuestHouseProfile
@@ -233,7 +238,8 @@ class FrontDeskAvailabilityView(APIView):
             OpenApiParameter("workspace_type", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
             OpenApiParameter("start_date", OpenApiTypes.DATE, location=OpenApiParameter.QUERY, required=True),
             OpenApiParameter("end_date", OpenApiTypes.DATE, location=OpenApiParameter.QUERY, required=True),
-        ]
+        ],
+        responses={200: FrontDeskAvailabilityRowSerializer(many=True)},
     )
     def get(self, request):
         user = request.user

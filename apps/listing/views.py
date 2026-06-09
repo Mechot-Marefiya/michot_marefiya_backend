@@ -17,7 +17,7 @@ from rest_framework.response import Response
 from django.db import transaction
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.throttling import ScopedRateThrottle
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer
 from apps.account.serializers import HotelProfileResponseSerializer, ListingImageSerializer
 from apps.core.serializers import FacilityResponseSerializer
 from django.contrib.contenttypes.models import ContentType
@@ -1580,7 +1580,35 @@ class CarAvailabilityByDateRangeView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'availability_check'
 
-    @extend_schema(summary="Search all available cars in a date range")
+    @extend_schema(
+        summary="Search all available cars in a date range",
+        responses=inline_serializer(
+            name="CarAvailabilityByDateRangeResponse",
+            fields={
+                "search_period": inline_serializer(
+                    name="CarAvailabilityByDateRangeSearchPeriod",
+                    fields={
+                        "start_date": serializers.DateField(),
+                        "end_date": serializers.DateField(),
+                    },
+                ),
+                "quantity_requested": serializers.IntegerField(),
+                "available_cars_count": serializers.IntegerField(),
+                "available_cars": inline_serializer(
+                    name="CarAvailabilityByDateRangeCar",
+                    fields={
+                        "car_listing_id": serializers.UUIDField(),
+                        "title": serializers.CharField(),
+                        "brand": serializers.CharField(),
+                        "model": serializers.CharField(),
+                        "base_price": serializers.CharField(),
+                        "availability": serializers.JSONField(allow_null=True),
+                    },
+                    many=True,
+                ),
+            },
+        ),
+    )
     def get(self, request):
         _, start_date, end_date, quantity_or_resp = ParseDatesAndQuantity.parse_dates_and_quantity(request)
         if isinstance(quantity_or_resp, Response):
@@ -1610,7 +1638,33 @@ class CarAvailabilityByCarAndDateView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'availability_check'
 
-    @extend_schema(summary="Get availability for a specific car listing within a date range")
+    @extend_schema(
+        summary="Get availability for a specific car listing within a date range",
+        responses=inline_serializer(
+            name="CarAvailabilityByCarAndDateResponse",
+            fields={
+                "car_listing": inline_serializer(
+                    name="CarAvailabilityByCarAndDateCarListing",
+                    fields={
+                        "id": serializers.UUIDField(),
+                        "title": serializers.CharField(),
+                        "brand": serializers.CharField(),
+                        "model": serializers.CharField(),
+                        "base_price": serializers.CharField(),
+                    },
+                ),
+                "search_period": inline_serializer(
+                    name="CarAvailabilityByCarAndDateSearchPeriod",
+                    fields={
+                        "start_date": serializers.DateField(),
+                        "end_date": serializers.DateField(),
+                    },
+                ),
+                "quantity_requested": serializers.IntegerField(),
+                "availability": serializers.JSONField(allow_null=True),
+            },
+        ),
+    )
     def get(self, request):
         car_listing_id, start_date, end_date, quantity_or_resp = ParseDatesAndQuantity.parse_dates_and_quantity(request, require_car=True)
         if isinstance(quantity_or_resp, Response):
@@ -2260,6 +2314,7 @@ class StayAvailabilityUpdateView(APIView):
         )
 class CarAvailabilityUpdateAPIView(APIView):
     permission_classes = [IsAuthenticated]
+    serializer_class = CarAvailabilityUpdateSerializer
 
     def _can_update_availability(self, user, availability):
         if user.is_superuser or (
@@ -2283,6 +2338,15 @@ class CarAvailabilityUpdateAPIView(APIView):
 
         return False
 
+    @extend_schema(
+        request=CarAvailabilityUpdateSerializer,
+        responses={
+            200: CarAvailabilityUpdateSerializer,
+            400: OpenApiTypes.OBJECT,
+            403: OpenApiTypes.OBJECT,
+            404: OpenApiTypes.OBJECT,
+        },
+    )
     def patch(self, request, pk, format=None):
         """Update a CarAvailability instance (partial update)."""
         availability = get_object_or_404(

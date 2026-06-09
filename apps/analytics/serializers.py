@@ -23,3 +23,17 @@ class FrontDeskStatsSerializer(serializers.Serializer):
     total_rooms = serializers.IntegerField()
     occupied_rooms = serializers.IntegerField()
 
+
+class FrontDeskAvailabilityDaySerializer(serializers.Serializer):
+    date = serializers.DateField()
+    available = serializers.IntegerField()
+    status = serializers.CharField()
+    booked = serializers.IntegerField()
+
+
+class FrontDeskAvailabilityRowSerializer(serializers.Serializer):
+    room_id = serializers.UUIDField()
+    room_name = serializers.CharField()
+    total_units = serializers.IntegerField()
+    availability = FrontDeskAvailabilityDaySerializer(many=True)
+

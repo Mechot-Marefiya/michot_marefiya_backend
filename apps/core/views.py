@@ -7,9 +7,16 @@ from rest_framework import status
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny
 from rest_framework.throttling import ScopedRateThrottle
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import extend_schema, OpenApiTypes
 from apps.core.models import Facility
-from apps.core.serializers import FacilitySerializer, FacilityResponseSerializer,ConversionInputSerializer, CurrencyRateSerializer
+from apps.core.serializers import (
+    FacilitySerializer,
+    FacilityResponseSerializer,
+    ConversionInputSerializer,
+    CurrencyRateSerializer,
+    CurrencyListItemSerializer,
+    CurrencyConversionResponseSerializer,
+)
 from apps.core.utils import convert_currency
 from apps.core.enums import CurrencyEnum
 from apps.core.models import CurrencyRate
@@ -40,11 +47,13 @@ class CurrencyViewSet(ViewSet):
     permission_classes = [AllowAny]
     pagination_class = None
 
+    @extend_schema(responses={200: CurrencyListItemSerializer(many=True)})
     def list(self, request):
         res = [{"code": c.name, "name": c.value} for c in CurrencyEnum]
 
         return Response(data=res, status=status.HTTP_200_OK)
 
+    @extend_schema(responses={200: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT})
     @action(detail=False, methods=["get"])
     @throttle_classes([ScopedRateThrottle])
     def rates(self, request):
@@ -71,6 +80,15 @@ class CurrencyConvertAPIView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'currency_convert'
 
+    @extend_schema(
+        request=ConversionInputSerializer,
+        responses={
+            200: CurrencyConversionResponseSerializer,
+            400: OpenApiTypes.OBJECT,
+            404: OpenApiTypes.OBJECT,
+            500: OpenApiTypes.OBJECT,
+        },
+    )
     def post(self, request, *args, **kwargs):
         serializer = ConversionInputSerializer(data=request.data)
         if not serializer.is_valid():

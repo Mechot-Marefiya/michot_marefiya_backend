@@ -15,8 +15,11 @@ from .serializers import FavoriteSerializer, GuestFavoriteSerializer
 class FavoriteViewSet(viewsets.ModelViewSet):
     serializer_class = FavoriteSerializer
     permission_classes = [IsAuthenticated]
+    queryset = Favorite.objects.select_related("content_type").all()
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Favorite.objects.none()
         return Favorite.objects.filter(user=self.request.user).select_related("content_type").order_by("-created_at")
 
     def perform_create(self, serializer):

@@ -1,0 +1,206 @@
+﻿docker : /usr/src/app/apps/account/serializers.py:356: Warning [CompanyProfileViewSet > 
+CompanyProfileResponseSerializer > UserResponseSerializer]: unable to resolve type hint for function "get_workspace". 
+Consider using a type hint or @extend_schema_field. Defaulting to string.
+At line:2 char:1
++ docker compose exec api python manage.py spectacular --file schema.ya ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (/usr/src/app/ap...ting to string.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+/usr/src/app/apps/account/serializers.py:1008: Warning [CompanyProfileViewSet > CompanyRegistrationSerializer]: could 
+not resolve serializer field "FlexibleAddressField()". Defaulting to "string"
+/usr/src/app/apps/account/serializers.py:796: Warning [CompanyProfileViewSet > CompanyProfileSerializer]: could not 
+resolve serializer field "FlexibleAddressField()". Defaulting to "string"
+/usr/src/app/apps/account/serializers.py:1173: Warning [HotelProfileViewSet > HotelProfileSerializer]: could not 
+resolve serializer field "FlexibleAddressField()". Defaulting to "string"
+/usr/src/app/apps/account/serializers.py:1173: Warning [HotelProfileViewSet > HotelProfileSerializer]: could not 
+resolve serializer field "JsonSerializerField()". Defaulting to "string"
+/usr/src/app/apps/account/serializers.py:105: Warning [StaffViewSet > StaffResponseSerializer]: unable to resolve type 
+hint for function "get_workspace". Consider using a type hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/account/views.py:217: Warning [StaffViewSet]: could not derive type of path parameter "id" because 
+it is untyped and obtaining queryset from the viewset failed. Consider adding a type to the path (e.g. <int:id>) or 
+annotating the parameter type with @extend_schema. Defaulting to "string".
+/usr/src/app/apps/account/serializers.py:356: Warning [UserViewSet > UserResponseSerializer]: unable to resolve type 
+hint for function "get_workspace". Consider using a type hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/analytics/views.py:226: Error [FrontDeskAvailabilityView]: unable to guess serializer. This is 
+graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your 
+control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+/usr/src/app/apps/core/views.py:38: Error [CurrencyViewSet]: unable to guess serializer. This is graceful fallback 
+handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. Either way you 
+may want to add a serializer_class (or method). Ignoring view for now.
+/usr/src/app/apps/core/views.py:67: Error [CurrencyConvertAPIView]: unable to guess serializer. This is graceful 
+fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. 
+Either way you may want to add a serializer_class (or method). Ignoring view for now.
+/usr/src/app/apps/favorites/serializers.py:59: Warning [FavoriteViewSet > FavoriteSerializer]: unable to resolve type 
+hint for function "get_content_type_display". Consider using a type hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/favorites/serializers.py:59: Warning [FavoriteViewSet > FavoriteSerializer]: unable to resolve type 
+hint for function "get_snapshot". Consider using a type hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/favorites/serializers.py:59: Warning [FavoriteViewSet > FavoriteSerializer]: unable to resolve type 
+hint for function "get_object". Consider using a type hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/favorites/views.py:14: Warning [FavoriteViewSet]: could not derive type of path parameter "id" 
+because it is untyped and obtaining queryset from the viewset failed. Consider adding a type to the path (e.g. 
+<int:id>) or annotating the parameter type with @extend_schema. Defaulting to "string".
+/usr/src/app/apps/favorites/serializers.py:139: Warning [GuestFavoriteCollectionView > GuestFavoriteSerializer]: 
+unable to resolve type hint for function "get_content_type_display". Consider using a type hint or 
+@extend_schema_field. Defaulting to string.
+/usr/src/app/apps/favorites/serializers.py:139: Warning [GuestFavoriteCollectionView > GuestFavoriteSerializer]: 
+unable to resolve type hint for function "get_snapshot". Consider using a type hint or @extend_schema_field. 
+Defaulting to string.
+/usr/src/app/apps/favorites/serializers.py:139: Warning [GuestFavoriteCollectionView > GuestFavoriteSerializer]: 
+unable to resolve type hint for function "get_object". Consider using a type hint or @extend_schema_field. Defaulting 
+to string.
+/usr/src/app/apps/listing/serializers.py:1827: Warning [BookingViewSet > BookingResponseSerializer > 
+BookingItemResponseSerializer > BookingAddonSerializer]: unable to resolve type hint for function "subtotal". Consider 
+using a type hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:1899: Warning [BookingViewSet > BookingResponseSerializer]: unable to resolve 
+type hint for function "get_is_resumable". Consider using a type hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:2334: Warning [EventSpaceBookingViewSet > EventSpaceBookingResponseSerializer 
+> EventSpaceBookingItemResponseSerializer]: unable to resolve type hint for function "get_nightly_rate". Consider 
+using a type hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:2334: Warning [EventSpaceBookingViewSet > EventSpaceBookingResponseSerializer 
+> EventSpaceBookingItemResponseSerializer]: unable to resolve type hint for function "get_stay_total". Consider using 
+a type hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:2334: Warning [EventSpaceBookingViewSet > EventSpaceBookingResponseSerializer 
+> EventSpaceBookingItemResponseSerializer]: unable to resolve type hint for function "get_subtotal". Consider using a 
+type hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/views.py:2261: Error [CarAvailabilityUpdateAPIView]: unable to guess serializer. This is 
+graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your 
+control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+/usr/src/app/apps/listing/views.py:1608: Error [CarAvailabilityByCarAndDateView]: unable to guess serializer. This is 
+graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your 
+control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+/usr/src/app/apps/listing/views.py:1578: Error [CarAvailabilityByDateRangeView]: unable to guess serializer. This is 
+graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your 
+control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+/usr/src/app/apps/listing/serializers.py:1246: Warning [CarRentalViewSet > CarRentalSerializer > 
+CarRentalItemSerializer]: unable to resolve type hint for function "get_car_listing_details". Consider using a type 
+hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:1246: Warning [CarRentalViewSet > CarRentalSerializer > 
+CarRentalItemSerializer]: unable to resolve type hint for function "get_nightly_rate". Consider using a type hint or 
+@extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:1246: Warning [CarRentalViewSet > CarRentalSerializer > 
+CarRentalItemSerializer]: unable to resolve type hint for function "get_stay_total". Consider using a type hint or 
+@extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:1246: Warning [CarRentalViewSet > CarRentalSerializer > 
+CarRentalItemSerializer]: unable to resolve type hint for function "get_subtotal". Consider using a type hint or 
+@extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:1056: Warning [CarListingViewSet > CarListingResponseSerializer]: unable to 
+resolve type hint for function "get_current_availability". Consider using a type hint or @extend_schema_field. 
+Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:1056: Warning [CarListingViewSet > CarListingResponseSerializer]: unable to 
+resolve type hint for function "get_price_quote". Consider using a type hint or @extend_schema_field. Defaulting to 
+string.
+/usr/src/app/apps/listing/serializers.py:2223: Warning [EventSpaceListingViewSet > 
+EventSpaceListingResponseSerializer]: unable to resolve type hint for function "get_price_quote". Consider using a 
+type hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:2250: Warning [EventSpaceListingViewSet > EventSpaceListingSerializer]: could 
+not resolve serializer field "FlexibleAddressField(required=False)". Defaulting to "string"
+/usr/src/app/apps/listing/serializers.py:2250: Warning [EventSpaceListingViewSet > EventSpaceListingSerializer]: could 
+not resolve serializer field "JsonSerializerField(required=False)". Defaulting to "string"
+/usr/src/app/apps/listing/serializers.py:456: Warning [GuestHouseRoomViewSet > GuestHouseRoomResponseSerializer]: 
+unable to resolve type hint for function "get_available_units". Consider using a type hint or @extend_schema_field. 
+Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:456: Warning [GuestHouseRoomViewSet > GuestHouseRoomResponseSerializer]: 
+unable to resolve type hint for function "get_price_quote". Consider using a type hint or @extend_schema_field. 
+Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:486: Warning [GuestHouseProfileViewSet > 
+GuestHouseProfileResponseSerializer]: unable to resolve type hint for function "get_facility". Consider using a type 
+hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:486: Warning [GuestHouseProfileViewSet > 
+GuestHouseProfileResponseSerializer]: unable to resolve type hint for function "get_is_favorite". Consider using a 
+type hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:604: Warning [GuestHouseProfileViewSet > GuestHouseProfileSerializer]: could 
+not resolve serializer field "JsonSerializerField()". Defaulting to "string"
+/usr/src/app/apps/listing/serializers.py:604: Warning [GuestHouseProfileViewSet > GuestHouseProfileSerializer]: could 
+not resolve serializer field "FlexibleAddressField()". Defaulting to "string"
+/usr/src/app/apps/listing/serializers.py:702: Warning [GuestHouseBookingViewSet > GuestHouseBookingSerializer > 
+GuestHouseBookingItemSerializer]: unable to resolve type hint for function "get_nightly_rate". Consider using a type 
+hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:702: Warning [GuestHouseBookingViewSet > GuestHouseBookingSerializer > 
+GuestHouseBookingItemSerializer]: unable to resolve type hint for function "get_stay_total". Consider using a type 
+hint or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/serializers.py:702: Warning [GuestHouseBookingViewSet > GuestHouseBookingSerializer > 
+GuestHouseBookingItemSerializer]: unable to resolve type hint for function "get_subtotal". Consider using a type hint 
+or @extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/views.py:3015: Error [InventoryGridView]: unable to guess serializer. This is graceful 
+fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your control. 
+Either way you may want to add a serializer_class (or method). Ignoring view for now.
+/usr/src/app/apps/listing/serializers.py:1663: Warning [PropertyListingViewSet > PropertyListingSerializer]: could not 
+resolve serializer field "FlexibleAddressField()". Defaulting to "string"
+/usr/src/app/apps/listing/serializers.py:374: Warning [RoomListingViewSet > RoomListingSerializer]: could not resolve 
+serializer field "FlexibleAddressField(required=False)". Defaulting to "string"
+/usr/src/app/apps/listing/serializers.py:2710: Warning [SeasonalRateViewSet > SeasonalRateSerializer]: unable to 
+resolve type hint for function "get_target_name". Consider using a type hint or @extend_schema_field. Defaulting to 
+string.
+/usr/src/app/apps/listing/views.py:2207: Error [StayAvailabilityUpdateView]: unable to guess serializer. This is 
+graceful fallback handling for APIViews. Consider using GenericAPIView as view base class, if view is under your 
+control. Either way you may want to add a serializer_class (or method). Ignoring view for now.
+/usr/src/app/apps/listing/serializers.py:2194: Warning [StaySearchView > PaginatedStaySearchResponse > 
+SearchResultSerializer]: unable to resolve type hint for function "get_is_favorite". Consider using a type hint or 
+@extend_schema_field. Defaulting to string.
+/usr/src/app/apps/listing/views.py:2773: Warning [TermsAndConditionsViewSet]: could not derive type of path parameter 
+"company_id" because model "apps.listing.models.TermsAndConditions" contained no such field. Consider annotating 
+parameter with @extend_schema. Defaulting to "string".
+/usr/src/app/apps/listing/views.py:2773: Warning [TermsAndConditionsViewSet]: could not derive type of path parameter 
+"gh_id" because model "apps.listing.models.TermsAndConditions" contained no such field. Consider annotating parameter 
+with @extend_schema. Defaulting to "string".
+/usr/src/app/apps/listing/views.py:2773: Warning [TermsAndConditionsViewSet]: could not derive type of path parameter 
+"hotel_id" because model "apps.listing.models.TermsAndConditions" contained no such field. Consider annotating 
+parameter with @extend_schema. Defaulting to "string".
+/usr/src/app/apps/notifications/views.py:47: Warning [NotificationViewSet]: Failed to obtain model through view's 
+queryset due to raised exception. Prevent this either by setting "queryset = Model.objects.none()" on the view, 
+checking for "getattr(self, "swagger_fake_view", False)" in get_queryset() or by simply using @extend_schema. 
+(Exception: ['“AnonymousUser” is not a valid UUID.'])
+/usr/src/app/apps/notifications/views.py:47: Warning [NotificationViewSet]: could not derive type of path parameter 
+"id" because it is untyped and obtaining queryset from the viewset failed. Consider adding a type to the path (e.g. 
+<int:id>) or annotating the parameter type with @extend_schema. Defaulting to "string".
+/usr/src/app/apps/notifications/views.py:47: Warning [NotificationViewSet]: could not resolve 
+"<drf_spectacular.utils.OpenApiExample object at 0x7bdfb36d8d60>" for PATCH /api/v1/notifications/{id}/mark-read/. 
+Expected either a serializer or some supported override mechanism. Defaulting to generic free-form object.
+/usr/src/app/apps/notifications/views.py:47: Warning [NotificationViewSet]: could not resolve 
+"<drf_spectacular.utils.OpenApiExample object at 0x7bdfb36dc5f0>" for DELETE /api/v1/notifications/bulk-delete/. 
+Expected either a serializer or some supported override mechanism. Defaulting to generic free-form object.
+/usr/src/app/apps/notifications/views.py:47: Warning [NotificationViewSet]: could not resolve 
+"<drf_spectacular.utils.OpenApiExample object at 0x7bdfb36cc5a0>" for DELETE /api/v1/notifications/bulk-delete/. 
+Expected either a serializer or some supported override mechanism. Defaulting to generic free-form object.
+/usr/src/app/apps/notifications/views.py:47: Warning [NotificationViewSet]: could not resolve 
+"<drf_spectacular.utils.OpenApiExample object at 0x7bdfb36d8e90>" for POST /api/v1/notifications/mark-all-read/. 
+Expected either a serializer or some supported override mechanism. Defaulting to generic free-form object.
+/usr/src/app/apps/notifications/views.py:47: Warning [NotificationViewSet]: could not resolve 
+"<drf_spectacular.utils.OpenApiExample object at 0x7bdfb3502050>" for POST /api/v1/notifications/mark-read-batch/. 
+Expected either a serializer or some supported override mechanism. Defaulting to generic free-form object.
+/usr/src/app/apps/notifications/views.py:339: Warning [NotificationPreferenceView]: could not resolve 
+"<drf_spectacular.utils.OpenApiExample object at 0x7bdfb370cd70>" for PUT /api/v1/notifications/preferences/. Expected 
+either a serializer or some supported override mechanism. Defaulting to generic free-form object.
+/usr/src/app/apps/notifications/views.py:47: Warning [NotificationViewSet]: could not resolve 
+"<drf_spectacular.utils.OpenApiExample object at 0x7bdfb3502150>" for GET /api/v1/notifications/summary/. Expected 
+either a serializer or some supported override mechanism. Defaulting to generic free-form object.
+/usr/src/app/apps/notifications/views.py:47: Warning [NotificationViewSet]: could not resolve 
+"<drf_spectacular.utils.OpenApiExample object at 0x7bdfb36cc6b0>" for GET /api/v1/notifications/unread-count/. 
+Expected either a serializer or some supported override mechanism. Defaulting to generic free-form object.
+/usr/src/app/apps/payment/serializers.py:121: Warning [OwnerPaymentViewSet > OwnerPaymentTransactionSerializer]: 
+unable to resolve type hint for function "get_booking_reference". Consider using a type hint or @extend_schema_field. 
+Defaulting to string.
+/usr/src/app/apps/payment/serializers.py:121: Warning [OwnerPaymentViewSet > OwnerPaymentTransactionSerializer]: 
+unable to resolve type hint for function "get_listing_title". Consider using a type hint or @extend_schema_field. 
+Defaulting to string.
+/usr/src/app/apps/payment/serializers.py:121: Warning [OwnerPaymentViewSet > OwnerPaymentTransactionSerializer]: 
+unable to resolve type hint for function "get_customer_name". Consider using a type hint or @extend_schema_field. 
+Defaulting to string.
+/usr/src/app/apps/payment/serializers.py:121: Warning [OwnerPaymentViewSet > OwnerPaymentTransactionSerializer]: 
+unable to resolve type hint for function "get_booking_dates". Consider using a type hint or @extend_schema_field. 
+Defaulting to string.
+Warning: enum naming encountered a non-optimally resolvable collision for fields named "category". The same name has 
+been used for multiple choice sets in multiple components. The collision was resolved with "Category6daEnum". add an 
+entry to ENUM_NAME_OVERRIDES to fix the naming.
+Warning: enum naming encountered a non-optimally resolvable collision for fields named "category". The same name has 
+been used for multiple choice sets in multiple components. The collision was resolved with "Category70bEnum". add an 
+entry to ENUM_NAME_OVERRIDES to fix the naming.
+Warning: enum naming encountered a non-optimally resolvable collision for fields named "status". The same name has 
+been used for multiple choice sets in multiple components. The collision was resolved with "Status01bEnum". add an 
+entry to ENUM_NAME_OVERRIDES to fix the naming.
+
+Schema generation summary:
+Warnings: 102 (62 unique)
+Errors:   36 (8 unique)
+
