@@ -17,7 +17,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django_filters.rest_framework import DjangoFilterBackend
 from drf_spectacular.utils import extend_schema, OpenApiTypes, OpenApiExample
 from apps.listing.models import Booking, RoomListing, AddonOffering
-from apps.listing.services import StayAvailabilityService
+from apps.listing.services import StayAvailabilityService, verify_listing, unverify_listing
 from apps.account.docs.schemas import HotelProfileDocSerializer
 from apps.account.filters import HotelFilter
 from apps.core.views import AbstractModelViewSet
@@ -26,6 +26,7 @@ from apps.account.models import (
     CompanyProfile,
     HotelProfile,
     IndividualOwnerProfile,
+    OwnerComplianceAgreement,
     User,
 )
 from apps.notifications.services import NotificationService
@@ -60,10 +61,16 @@ from apps.account.serializers import (
     CompanyRegistrationSerializer,
     IndividualOwnerRegistrationSerializer,
     OtpRequestSerializer,
+    OtpResponseSerializer,
     OtpVerifySerializer,
+    OwnerComplianceAgreementCreateSerializer,
+    OwnerComplianceAgreementPatchSerializer,
+    OwnerComplianceAgreementReadSerializer,
+    OwnerComplianceAgreementRevokeSerializer,
+    OwnerComplianceAgreementSerializer,
     RoleSerializer,
 )
-from apps.listing.serializers import AddonOfferingListSerializer
+from apps.listing.serializers import AddonOfferingListSerializer, VerifyActionSerializer
 from apps.account.enums import RoleCode
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -74,15 +81,12 @@ from apps.account.permissions import (
     IsCompanyOwner,
     IsPublicReadOnly,
 )
-
-
-def _set_listing_verification(instance, *, verified, actor):
-    instance.is_verified = verified
-    instance.verified_at = timezone.now() if verified else None
-    instance.verified_by = actor if verified else None
-    instance.save(update_fields=["is_verified", "verified_at", "verified_by", "updated_at"])
-
-
+from apps.account.services import (
+    create_agreement,
+    get_latest_agreement,
+    revoke_agreement,
+    sign_agreement,
+)
 def _set_listing_activation(instance, *, active):
     instance.is_active = active
     instance.save(update_fields=["is_active", "updated_at"])
@@ -136,7 +140,7 @@ class OtpRequestView(APIView):
         summary="Request phone OTP",
         description="Send a phone OTP for login or password-change verification.",
         request=OtpRequestSerializer,
-        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+        responses={200: OtpResponseSerializer, 400: OpenApiTypes.OBJECT},
     )
     def post(self, request):
         serializer = OtpRequestSerializer(data=request.data)
@@ -146,8 +150,10 @@ class OtpRequestView(APIView):
             {
                 "success": True,
                 "challenge_id": str(challenge.id),
+                "challenge_token": str(challenge.id),
                 "purpose": challenge.purpose,
                 "expires_at": challenge.expires_at,
+                "cooldown_seconds": int(getattr(settings, "OTP_COOLDOWN_SECONDS", 60)),
                 "phone": challenge.phone,
             },
             status=status.HTTP_200_OK,
@@ -638,6 +644,10 @@ class IndividualOwnerProfileViewSet(AbstractModelViewSet):
     def get_permissions(self):
         if self.action == 'create':
             return [IsAdmin()]
+        elif self.action in ["agreement", "sign_agreement", "revoke_agreement"]:
+            if self.request.method == "GET":
+                return [IsAuthenticated()]
+            return [IsAdmin()]
         elif self.action in ['list', 'retrieve']:
             return [AllowAny()]
         else:
@@ -650,6 +660,104 @@ class IndividualOwnerProfileViewSet(AbstractModelViewSet):
 
     def get_queryset(self):
         return super().get_queryset()
+
+    def _can_view_owner_agreement(self, request, owner):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser or (hasattr(user, "role") and user.role and user.role.code == RoleCode.ADMIN.value):
+            return True
+        return getattr(user, "individual_owner_id", None) == owner.id
+
+    @extend_schema(
+        request=OwnerComplianceAgreementCreateSerializer,
+        responses={200: OwnerComplianceAgreementSerializer, 201: OwnerComplianceAgreementSerializer},
+    )
+    @action(detail=True, methods=["get", "post", "patch"], url_path="agreement")
+    def agreement(self, request, pk=None):
+        owner = self.get_object()
+        agreement = get_latest_agreement(owner)
+
+        if request.method == "GET":
+            if not self._can_view_owner_agreement(request, owner):
+                return Response({"detail": "You do not have permission to view this agreement."}, status=status.HTTP_403_FORBIDDEN)
+            if not agreement:
+                return Response({"detail": "Compliance agreement not found."}, status=status.HTTP_404_NOT_FOUND)
+            serializer_class = (
+                OwnerComplianceAgreementSerializer
+                if (request.user.is_superuser or (hasattr(request.user, "role") and request.user.role and request.user.role.code == RoleCode.ADMIN.value))
+                else OwnerComplianceAgreementReadSerializer
+            )
+            return Response(serializer_class(agreement).data, status=status.HTTP_200_OK)
+
+        if request.method == "POST":
+            serializer = OwnerComplianceAgreementCreateSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            agreement = create_agreement(
+                owner,
+                request.user,
+                serializer.validated_data["agreement_version"],
+                note=serializer.validated_data.get("note"),
+            )
+            return Response(OwnerComplianceAgreementSerializer(agreement).data, status=status.HTTP_201_CREATED)
+
+        if not agreement:
+            return Response({"detail": "Compliance agreement not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = OwnerComplianceAgreementPatchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        changed_fields = []
+        if "agreement_version" in serializer.validated_data:
+            agreement.agreement_version = serializer.validated_data["agreement_version"]
+            changed_fields.append("agreement_version")
+        if "note" in serializer.validated_data:
+            agreement.note = serializer.validated_data["note"]
+            changed_fields.append("note")
+        if changed_fields:
+            changed_fields.append("updated_at")
+            agreement.save(update_fields=changed_fields)
+        return Response(OwnerComplianceAgreementSerializer(agreement).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        responses={200: OwnerComplianceAgreementSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="agreement/sign", permission_classes=[IsAdmin])
+    def sign_agreement(self, request, pk=None):
+        owner = self.get_object()
+        agreement = get_latest_agreement(owner)
+        if not agreement:
+            return Response({"detail": "Compliance agreement not found."}, status=status.HTTP_404_NOT_FOUND)
+        agreement = sign_agreement(agreement, request.user)
+        return Response(OwnerComplianceAgreementSerializer(agreement).data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=OwnerComplianceAgreementRevokeSerializer,
+        responses={200: OwnerComplianceAgreementSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="agreement/revoke", permission_classes=[IsAdmin])
+    def revoke_agreement(self, request, pk=None):
+        owner = self.get_object()
+        agreement = get_latest_agreement(owner)
+        if not agreement:
+            return Response({"detail": "Compliance agreement not found."}, status=status.HTTP_404_NOT_FOUND)
+        serializer = OwnerComplianceAgreementRevokeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        agreement = revoke_agreement(agreement, request.user, note=serializer.validated_data.get("note"))
+        return Response(OwnerComplianceAgreementSerializer(agreement).data, status=status.HTTP_200_OK)
+
+
+@extend_schema(tags=["Identity & Auth"])
+class OwnerProfileAgreementView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(responses={200: OwnerComplianceAgreementReadSerializer, 404: OpenApiTypes.OBJECT})
+    def get(self, request):
+        owner = getattr(request.user, "individual_owner", None)
+        if owner is None:
+            return Response({"detail": "No associated individual owner profile found."}, status=status.HTTP_404_NOT_FOUND)
+        agreement = get_latest_agreement(owner)
+        if not agreement:
+            return Response({"detail": "Compliance agreement not found."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(OwnerComplianceAgreementReadSerializer(agreement).data, status=status.HTTP_200_OK)
 
 
 @extend_schema(responses=HotelProfileDocSerializer)
@@ -807,17 +915,33 @@ class HotelProfileViewSet(AbstractModelViewSet):
         serializer = self.get_serializer(featured_hotels, many=True)
         return Response(serializer.data)
 
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: HotelProfileSerializer},
+    )
     @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
     def verify(self, request, pk=None):
         hotel = self.get_object()
-        _set_listing_verification(hotel, verified=True, actor=request.user)
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        verify_listing(
+            hotel,
+            request.user,
+            verification_note=action_serializer.validated_data.get("verification_note"),
+        )
         serializer = self.get_serializer(hotel)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: HotelProfileSerializer},
+    )
     @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
     def unverify(self, request, pk=None):
         hotel = self.get_object()
-        _set_listing_verification(hotel, verified=False, actor=request.user)
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        unverify_listing(hotel, request.user)
         serializer = self.get_serializer(hotel)
         return Response(serializer.data, status=status.HTTP_200_OK)
 

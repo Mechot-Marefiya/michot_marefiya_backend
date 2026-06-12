@@ -3,7 +3,7 @@ import uuid
 from decimal import Decimal
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from rest_framework.decorators import api_view, permission_classes, throttle_classes
+from rest_framework.decorators import action, api_view, permission_classes, throttle_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status, serializers
@@ -13,24 +13,33 @@ from django.utils import timezone
 from apps.listing.models import Booking
 from apps.account.enums import RoleCode
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, OpenApiExample, inline_serializer
-from .models import PaymentTransaction
-from .services import ChapaPaymentService
 from rest_framework import viewsets, filters
 from rest_framework.throttling import ScopedRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Sum
-from apps.account.permissions import IsCompanyOwner
+from apps.account.permissions import IsAdmin, IsCompanyOwner
 from .serializers import (
     PaymentInitializeSerializer, 
     PaymentTransactionSerializer, 
     PaymentInitializeResponseSerializer,
     ChapaCallbackSerializer,
     ChapaWebhookSerializer,
-    OwnerPaymentTransactionSerializer
+    OwnerPaymentTransactionSerializer,
+    TransactionMonitorListSerializer,
+    TransactionMonitorDetailSerializer,
+    DisputeActionSerializer,
+    DisputeStatusSerializer,
 )
 from apps.core.utils import convert_currency
 from .models import PaymentTransaction
-from .services import ChapaPaymentService
+from .services import (
+    ChapaPaymentService,
+    get_payment_tax_breakdown,
+    get_transaction_monitor_list,
+    open_dispute,
+    update_dispute,
+    resolve_dispute,
+)
 
 
 NO_REFUND_POLICY_CODE = "no_refunds"
@@ -110,7 +119,7 @@ class InitiatePaymentView(APIView):
     def post(self, request):
         """
         Initiate payment for a booking.
-        Supports multiple booking types: 'booking', 'guesthouse', 'eventspace', 'carrental'.
+        Supports multiple booking types: 'booking', 'guesthouse', 'eventspace', 'carrental', 'propertyrental'.
         Users can only initiate payment for their own bookings.
         Companies can initiate payment for bookings they own (as customers).
         Admin can initiate payment for any booking.
@@ -127,6 +136,7 @@ class InitiatePaymentView(APIView):
             'guesthouse': ('listing', 'GuestHouseBooking', 'renter'),
             'eventspace': ('listing', 'EventSpaceBooking', 'user'),
             'carrental': ('listing', 'CarRental', 'renter'),
+            'propertyrental': ('listing', 'PropertyRentalBooking', 'renter'),
         }
         
         if booking_type not in BOOKING_MODELS:
@@ -206,6 +216,12 @@ class InitiatePaymentView(APIView):
                     {"error": "Rental is already processed"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+        elif booking_type == 'propertyrental':
+            if booking_status != 'pending':
+                return Response(
+                    {"error": "Booking is already processed"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         if booking.is_legacy:
             return Response(
@@ -233,6 +249,8 @@ class InitiatePaymentView(APIView):
             first_item = booking.rental_items.first()
             if hasattr(first_item, 'car_listing') and first_item.car_listing:
                 content_object = first_item.car_listing
+        elif hasattr(booking, 'property_listing') and booking.property_listing:
+            content_object = booking.property_listing
         
         if content_object:
             active_tc = TermsService.get_active_terms(content_object)
@@ -254,12 +272,16 @@ class InitiatePaymentView(APIView):
         # PRICE GUARD & RATE LOCK: Calculate and lock the correct amount on the server
         try:
             # Only convert if the payment currency differs from booking currency
+            source_amount = booking.total_price
+            if booking_type == 'propertyrental':
+                source_amount = get_payment_tax_breakdown(booking)["grand_total"]
+
             if booking.currency == payment_currency:
-                expected_amount = booking.total_price
+                expected_amount = source_amount
                 exchange_rate = Decimal("1.0")
             else:
                 expected_amount, exchange_rate = convert_currency(
-                    amount=booking.total_price,
+                    amount=source_amount,
                     source_currency=booking.currency or 'ETB',
                     target_currency=payment_currency,
                     return_rate=True
@@ -267,7 +289,7 @@ class InitiatePaymentView(APIView):
             
             # Locked metadata for audit trail
             locked_metadata = {
-                "original_amount": str(booking.total_price),
+                "original_amount": str(source_amount),
                 "original_currency": booking.currency or 'ETB',
                 "exchange_rate_locked": str(exchange_rate),
                 "locked_at": timezone.now().isoformat(),
@@ -313,7 +335,7 @@ class InitiatePaymentView(APIView):
             result["calculated_amount"] = str(expected_amount)
             result["payment_currency"] = payment_currency
             result["exchange_rate"] = str(exchange_rate)
-            result["original_amount"] = str(booking.total_price)
+            result["original_amount"] = str(source_amount)
             result["original_currency"] = booking.currency or 'ETB'
             return Response(result, status=status.HTTP_200_OK)
         else:
@@ -640,3 +662,78 @@ class OwnerPaymentViewSet(viewsets.ReadOnlyModelViewSet):
             "results": serializer.data,
             "summary": summary_data
         })
+
+
+@extend_schema(tags=["Admin Payments"])
+class AdminTransactionMonitorViewSet(viewsets.ReadOnlyModelViewSet):
+    permission_classes = [IsAdmin]
+
+    def get_serializer_class(self):
+        if self.action == "retrieve":
+            return TransactionMonitorDetailSerializer
+        if self.action in {"open_dispute", "update_dispute", "resolve_dispute"}:
+            return DisputeStatusSerializer
+        return TransactionMonitorListSerializer
+
+    def get_queryset(self):
+        return get_transaction_monitor_list(self.request.query_params)
+
+    def get_object(self):
+        obj = super().get_object()
+        self.check_object_permissions(self.request, obj)
+        return obj
+
+    @extend_schema(
+        summary="Open a payment transaction dispute",
+        request=DisputeActionSerializer,
+        responses={200: DisputeStatusSerializer, 400: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=["post"], url_path="dispute/open")
+    def open_dispute(self, request, pk=None):
+        serializer = DisputeActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transaction = open_dispute(
+            self.get_object(),
+            request.user,
+            note=serializer.validated_data.get("note"),
+        )
+        return Response(DisputeStatusSerializer(transaction).data)
+
+    @extend_schema(
+        summary="Update a payment transaction dispute",
+        request=DisputeActionSerializer,
+        responses={200: DisputeStatusSerializer, 400: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=["patch"], url_path="dispute")
+    def update_dispute(self, request, pk=None):
+        serializer = DisputeActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        dispute_status = serializer.validated_data.get("status")
+        if not dispute_status:
+            return Response(
+                {"status": ["This field is required."]},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        transaction = update_dispute(
+            self.get_object(),
+            request.user,
+            dispute_status,
+            note=serializer.validated_data.get("note"),
+        )
+        return Response(DisputeStatusSerializer(transaction).data)
+
+    @extend_schema(
+        summary="Resolve a payment transaction dispute",
+        request=DisputeActionSerializer,
+        responses={200: DisputeStatusSerializer, 400: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=["post"], url_path="dispute/resolve")
+    def resolve_dispute(self, request, pk=None):
+        serializer = DisputeActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        transaction = resolve_dispute(
+            self.get_object(),
+            request.user,
+            note=serializer.validated_data.get("note"),
+        )
+        return Response(DisputeStatusSerializer(transaction).data)

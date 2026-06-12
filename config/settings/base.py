@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from datetime import timedelta
+from decimal import Decimal
 import os
 from pathlib import Path
 import dj_database_url
@@ -38,6 +39,12 @@ SECRET_KEY = env("SECRET_KEY", cast=str)
 DEBUG = env("DEBUG", default=True, cast=bool)
 REQUIRE_GUEST_BOOKING_OTP = env("REQUIRE_GUEST_BOOKING_OTP", default=True, cast=bool)
 BOOKING_FORWARD_WINDOW_DAYS = env("BOOKING_FORWARD_WINDOW_DAYS", default=5, cast=int)
+OTP_CODE_LENGTH = env("OTP_CODE_LENGTH", default=6, cast=int)
+OTP_EXPIRY_SECONDS = env("OTP_EXPIRY_SECONDS", default=300, cast=int)
+OTP_TTL_SECONDS = OTP_EXPIRY_SECONDS
+OTP_MAX_ATTEMPTS = env("OTP_MAX_ATTEMPTS", default=5, cast=int)
+OTP_COOLDOWN_SECONDS = env("OTP_COOLDOWN_SECONDS", default=60, cast=int)
+OTP_REDIS_KEY_PREFIX = env("OTP_REDIS_KEY_PREFIX", default="otp")
 
 
 # ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
@@ -86,6 +93,7 @@ CUSTOM_APPS = [
     "apps.analytics",
     "apps.favorites",
     "apps.notifications",
+    "apps.promotions",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + CUSTOM_APPS
@@ -248,6 +256,81 @@ Obtain your token from `/api/v1/auth/token/`.
         {"name": "Favorites", "description": "User saved lists and preferences."},
         {"name": "Debug & Utils", "description": "Testing and utility endpoints (Internal use)."},
     ],
+    "ENUM_NAME_OVERRIDES": {
+        "CompanyCategoryEnum": [
+            ("hotel", "Hotel"),
+            ("pension", "Pension"),
+            ("house", "House"),
+            ("vehicle", "Vehicle"),
+        ],
+        "AddonCategoryEnum": [
+            ("meal", "Meal/Food"),
+            ("transport", "Transportation"),
+            ("service", "Service"),
+            ("amenity", "Amenity/Equipment"),
+        ],
+        "BookingStatusEnum": [
+            ("pending", "Pending"),
+            ("confirmed", "Confirmed"),
+            ("cancelled", "Cancelled"),
+            ("walk_in", "Walk-In"),
+        ],
+        "PromotionCampaignStatusEnum": [
+            ("draft", "Draft"),
+            ("scheduled", "Scheduled"),
+            ("active", "Active"),
+            ("paused", "Paused"),
+            ("expired", "Expired"),
+        ],
+        "PromotionTrackingEventTypeEnum": [
+            ("impression", "Impression"),
+            ("click", "Click"),
+        ],
+        "CarRentalStatusEnum": [
+            ("pending", "Pending"),
+            ("confirmed", "Confirmed"),
+            ("cancelled", "Cancelled"),
+        ],
+        "PropertyListingTypeEnum": [
+            ("apartment", "Apartment"),
+            ("condo", "Condo"),
+            ("villa", "Villa"),
+        ],
+        "PropertySaleListingTypeEnum": [
+            ("apartment", "Apartment"),
+            ("condo", "Condo"),
+            ("villa", "Villa"),
+            ("house", "House"),
+            ("land", "Land"),
+            ("commercial", "Commercial"),
+            ("other", "Other"),
+        ],
+        "OwnerComplianceAgreementStatusEnum": [
+            ("pending", "Pending"),
+            ("signed", "Signed"),
+            ("revoked", "Revoked"),
+        ],
+        "PaymentTransactionStatusEnum": [
+            ("pending", "Pending"),
+            ("success", "Success"),
+            ("failed", "Failed"),
+            ("cancelled", "Cancelled"),
+        ],
+        "PaymentTransactionDisputeStatusEnum": [
+            ("open", "Open"),
+            ("under_review", "Under Review"),
+            ("escalated", "Escalated"),
+            ("resolved", "Resolved"),
+        ],
+        "PaymentTransactionBookingTypeEnum": [
+            ("booking", "Hotel Room"),
+            ("guesthouse", "Guesthouse"),
+            ("eventspace", "Event Space"),
+            ("carrental", "Car Rental"),
+            ("propertyrental", "Property Rental"),
+            ("contact_reveal", "Contact Reveal"),
+        ],
+    },
 }
 
 JAZZMIN_SETTINGS = {
@@ -304,6 +387,7 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 BOOKING_PENDING_TIMEOUT_MINUTES = 15
+PROPERTY_RENTAL_TAX_RATE = Decimal("0.15")
 PLATFORM_FEE_RATE = 0.05
 
 
@@ -318,9 +402,24 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 60.0 * 5,  # Every 5 minutes
         "args": (),
     },
+    "cleanup-expired-otp-challenges-every-5-minutes": {
+        "task": "apps.account.tasks.cleanup_expired_otp_challenges",
+        "schedule": 60.0 * 5,
+        "args": (),
+    },
     "process-dirty-analytics-dates-every-10-minutes": {
         "task": "apps.analytics.tasks.process_dirty_analytics_dates",
         "schedule": 60.0 * 10,  # Every 10 minutes
+        "args": (),
+    },
+    "precompute-admin-analytics-cache-every-1-hour": {
+        "task": "apps.analytics.tasks.precompute_analytics_cache",
+        "schedule": 60.0 * 60,
+        "args": (),
+    },
+    "sync-promotion-campaign-statuses-every-5-minutes": {
+        "task": "apps.promotions.tasks.sync_campaign_statuses",
+        "schedule": 60.0 * 5,
         "args": (),
     },
 }

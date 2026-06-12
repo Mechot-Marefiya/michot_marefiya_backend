@@ -1,10 +1,14 @@
 """SMS delivery wrapper based on the provider contract in Agents/SMS_SERVICE.md."""
 
 import logging
+import ssl
+from functools import lru_cache
 from pathlib import Path
 
 import requests
 from django.conf import settings
+from requests.adapters import HTTPAdapter
+from urllib3.poolmanager import PoolManager
 
 logger = logging.getLogger(__name__)
 _sms_file_handler = None
@@ -71,6 +75,28 @@ def _ensure_sms_file_handler() -> None:
     _sms_file_handler_path = log_path
 
 
+class _LegacyTLSAdapter(HTTPAdapter):
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        context = ssl.create_default_context()
+        legacy_option = getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0)
+        if legacy_option:
+            context.options |= legacy_option
+        self.poolmanager = PoolManager(
+            num_pools=connections,
+            maxsize=maxsize,
+            block=block,
+            ssl_context=context,
+            **pool_kwargs,
+        )
+
+
+@lru_cache(maxsize=1)
+def _get_sms_session() -> requests.Session:
+    session = requests.Session()
+    session.mount("https://", _LegacyTLSAdapter())
+    return session
+
+
 def _log_sms_error(message: str, *args) -> None:
     _ensure_sms_file_handler()
     logger.error(message, *args)
@@ -93,7 +119,7 @@ def send_sms(to: str, message: str) -> bool:
     }
 
     try:
-        response = requests.get(
+        response = _get_sms_session().get(
             AFRO_MESSAGE_SEND_URL,
             params=params,
             headers=headers,

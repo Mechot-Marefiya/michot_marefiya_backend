@@ -5,8 +5,17 @@ from apps.listing.services import StayAvailabilityService
 from django.db import transaction
 from django.conf import settings
 from config.celery import app
-from apps.listing.models import Booking, GuestHouseBooking
-from apps.listing.services import BookingService, GuestHouseBookingService
+from apps.listing.models import (
+    Booking,
+    ContactRevealRequest,
+    GuestHouseBooking,
+    PropertyContactRevealRequest,
+    PropertyRentalBooking,
+)
+from apps.listing.services import BookingService, GuestHouseBookingService, PropertyRentalBookingService
+from apps.notifications.models import Notification
+from apps.notifications.services import NotificationService
+from services.sms import send_sms
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +69,30 @@ def auto_cancel_pending_guesthouse_booking(booking_id):
     except Exception as e:
         logger.exception(f"Unexpected error while auto-cancelling GuestHouse booking {booking_id}: {e}")
 
+
+@app.task
+def auto_cancel_pending_property_rental_booking(booking_id):
+    logger.info(f"Starting auto-cancellation check for PropertyRental booking {booking_id}")
+    try:
+        with transaction.atomic():
+            booking = PropertyRentalBooking.objects.select_for_update().get(id=booking_id)
+
+            if booking.status != PropertyRentalBooking.RentStatus.PENDING:
+                logger.info(
+                    f"PropertyRentalBooking {booking_id} is no longer PENDING "
+                    f"(status: {booking.status}), skipping."
+                )
+                return
+
+            PropertyRentalBookingService.cancel_booking(booking)
+            logger.info(f"Successfully auto-cancelled abandoned PropertyRental booking {booking_id}")
+
+    except PropertyRentalBooking.DoesNotExist:
+        logger.warning(f"PropertyRentalBooking {booking_id} not found for auto-cancellation.")
+    except Exception as e:
+        logger.exception(f"Unexpected error while auto-cancelling PropertyRental booking {booking_id}: {e}")
+
+
 @app.task
 def cancel_all_expired_bookings():
     """
@@ -93,3 +126,78 @@ def cancel_all_expired_bookings():
             auto_cancel_pending_guesthouse_booking.delay(gh_booking.id)
     else:
         logger.debug("No expired pending guesthouse bookings found during periodic sweep.")
+
+    expired_property_bookings = PropertyRentalBooking.objects.filter(
+        status=PropertyRentalBooking.RentStatus.PENDING,
+        created_at__lte=threshold
+    )
+    property_count = expired_property_bookings.count()
+    if property_count > 0:
+        logger.info(f"Found {property_count} expired pending property rental bookings. Starting mass cancellation...")
+        for property_booking in expired_property_bookings:
+            auto_cancel_pending_property_rental_booking.delay(property_booking.id)
+    else:
+        logger.debug("No expired pending property rental bookings found during periodic sweep.")
+
+
+@app.task
+def send_contact_reveal_unlocked_notification(reveal_request_id):
+    reveal_request = None
+    for request_model in (ContactRevealRequest, PropertyContactRevealRequest):
+        try:
+            reveal_request = request_model.objects.select_related("buyer", "listing").get(
+                id=reveal_request_id
+            )
+            break
+        except request_model.DoesNotExist:
+            continue
+
+    if reveal_request is None:
+        logger.warning("Contact reveal request %s not found for notification.", reveal_request_id)
+        return False
+
+    if reveal_request.status != reveal_request.RevealStatus.PAID_REVEALED:
+        logger.info(
+            "Skipping contact reveal notification for %s in status %s.",
+            reveal_request_id,
+            reveal_request.status,
+        )
+        return False
+
+    message = (
+        f"Seller contact for {reveal_request.listing.title} is now unlocked. "
+        "Open the listing contact screen to view details."
+    )
+    notification = NotificationService.create_notification(
+        user=reveal_request.buyer,
+        notification_type=Notification.NotificationType.CONTACT_REVEAL_UNLOCKED,
+        title="Seller Contact Unlocked",
+        message=message,
+        metadata={
+            "listing_id": str(reveal_request.listing_id),
+            "reveal_request_id": str(reveal_request.id),
+            "reveal_request_type": reveal_request.__class__.__name__,
+            "tx_ref": reveal_request.tx_ref,
+        },
+        priority=Notification.Priority.HIGH,
+    )
+
+    phone = getattr(reveal_request.buyer, "phone", None)
+    if phone:
+        try:
+            send_sms(phone, message)
+            if notification:
+                notification.delivered_sms = True
+                notification.sms_sent_at = timezone.now()
+                notification.save(update_fields=["delivered_sms", "sms_sent_at"])
+        except Exception as exc:
+            logger.error("Failed to send contact reveal SMS: %s", exc, exc_info=True)
+            if notification:
+                metadata = dict(notification.metadata or {})
+                errors = dict(metadata.get("delivery_errors", {}))
+                errors["sms"] = str(exc)
+                metadata["delivery_errors"] = errors
+                notification.metadata = metadata
+                notification.save(update_fields=["metadata"])
+
+    return True

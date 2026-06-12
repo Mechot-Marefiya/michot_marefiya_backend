@@ -678,6 +678,18 @@ def api_client() -> APIClient:
 
 
 @pytest.fixture
+def address():
+    return Address.objects.create(
+        street_line1="Test Street",
+        city="Addis Ababa",
+        country="Ethiopia",
+        sub_city="Bole",
+        state="Addis Ababa",
+        postal_code="1000",
+    )
+
+
+@pytest.fixture
 def admin_role():
     return Role.objects.create(name="Admin", code=RoleCode.ADMIN.value)
 

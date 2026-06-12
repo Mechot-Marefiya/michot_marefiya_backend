@@ -11,11 +11,29 @@ from decimal import Decimal
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 
-from apps.account.models import CompanyProfile
-from apps.listing.models import Booking, BookingAddon, BookingItem, CarRental, CarRentalItem
+from apps.account.models import CompanyProfile, OwnerComplianceAgreement
+from apps.listing.models import (
+    Booking,
+    BookingAddon,
+    BookingItem,
+    CarListing,
+    CarRental,
+    CarRentalItem,
+    CarSaleListing,
+    ContactRevealRequest,
+    PropertyRentalBooking,
+)
 from apps.listing.services import get_effective_platform_fee_rate
 from apps.payment.models import PaymentTransaction
-from apps.payment.services import ChapaPaymentService
+from apps.payment.serializers import PaymentTransactionSerializer
+from apps.payment.services import (
+    ChapaPaymentService,
+    ContactRevealPaymentService,
+    apply_tax_to_transaction,
+    calculate_tax,
+    get_payment_tax_breakdown,
+    is_tax_applicable,
+)
 from tests.conftest import (
     CompanyProfileFactory,
     BookingFactory,
@@ -26,12 +44,14 @@ from tests.conftest import (
     EventSpaceBookingItemFactory,
     GuestHouseBookingFactory,
     GuestHouseBookingItemFactory,
+    PropertyListingFactory,
 )
 
 pytestmark = pytest.mark.django_db
 
 
 def _build_booking(user, room):
+    booking_reference = f"H-{Booking.objects.count() + 1:06d}"
     booking = Booking.objects.create(
         user=user,
         check_in_date=date.today() + timedelta(days=7),
@@ -44,7 +64,7 @@ def _build_booking(user, room):
         guest_email="guest@example.com",
         guest_phone="0911000000",
         special_requests="None",
-        booking_reference="H-000001",
+        booking_reference=booking_reference,
         terms_accepted=True,
         terms_version="1",
         terms_accepted_at=timezone.now(),
@@ -81,6 +101,212 @@ def _build_car_rental(renter, car_listing):
     return rental
 
 
+def _build_car_sale(company, **overrides):
+    defaults = {
+        "company": company,
+        "title": "Toyota Vitz for sale",
+        "description": "Clean sale listing",
+        "base_price": Decimal("850000.00"),
+        "currency": "ETB",
+        "brand": CarListing.CarBrandChoices.TOYOTA,
+        "model": "Vitz",
+        "year": 2018,
+        "mileage": 65000,
+        "fuel_type": CarListing.FuelTypeChoices.PETROL,
+        "transmission": CarListing.TransmissionChoices.AUTOMATIC,
+        "condition": CarListing.ConditionChoices.USED,
+        "car_class": CarListing.CarClassChoices.NORMAL,
+        "seats": 5,
+        "seller_contact_name": "Seller One",
+        "seller_phone": "0911777888",
+        "seller_email": "seller@example.com",
+        "reveal_fee": Decimal("100.00"),
+        "is_active": True,
+    }
+    defaults.update(overrides)
+    return CarSaleListing.objects.create(**defaults)
+
+
+def _build_property_rental(property_listing, renter, **overrides):
+    defaults = {
+        "property_listing": property_listing,
+        "renter": renter,
+        "start_date": date.today() + timedelta(days=7),
+        "end_date": date.today() + timedelta(days=9),
+        "total_price": Decimal("6300.00"),
+        "currency": "ETB",
+        "status": PropertyRentalBooking.RentStatus.PENDING,
+        "guest_first_name": "Property",
+        "guest_last_name": "Guest",
+        "guest_email": "property-guest@example.com",
+        "guest_phone": "0911444555",
+        "booking_reference": "P-000001",
+        "terms_accepted": True,
+        "terms_version": "1",
+        "terms_accepted_at": timezone.now(),
+        "terms_content_snapshot": "Terms",
+    }
+    defaults.update(overrides)
+    return PropertyRentalBooking.objects.create(**defaults)
+
+
+def _build_reveal_request(listing, buyer, **overrides):
+    defaults = {
+        "listing": listing,
+        "buyer": buyer,
+        "amount": listing.reveal_fee,
+        "currency": listing.currency,
+        "status": ContactRevealRequest.RevealStatus.PAYMENT_INITIATED,
+        "tx_ref": "contact-tx-1",
+        "expires_at": timezone.now() + timezone.timedelta(minutes=30),
+    }
+    defaults.update(overrides)
+    return ContactRevealRequest.objects.create(**defaults)
+
+
+def test_property_rental_tax_applies_to_individual_owner(settings, individual_owner, user):
+    settings.PROPERTY_RENTAL_TAX_RATE = Decimal("0.15")
+    listing = PropertyListingFactory(company=None, individual_owner=individual_owner, base_price=Decimal("3000.00"))
+    OwnerComplianceAgreement.objects.create(
+        owner=individual_owner,
+        agreement_version="v1",
+        status=OwnerComplianceAgreement.Status.SIGNED,
+        signed_at=timezone.now(),
+    )
+    booking = _build_property_rental(listing, user)
+
+    assert is_tax_applicable(booking) is True
+    assert calculate_tax(Decimal("6000.00")) == Decimal("900.00")
+
+    tx = PaymentTransaction.objects.create(
+        content_type=ContentType.objects.get_for_model(PropertyRentalBooking),
+        object_id=booking.id,
+        booking_type="propertyrental",
+        tx_ref="property-tax-1",
+        amount=Decimal("6900.00"),
+        currency="ETB",
+        status=PaymentTransaction.PaymentStatus.PENDING,
+    )
+
+    apply_tax_to_transaction(tx, booking)
+    tx.refresh_from_db()
+    assert tx.tax_amount == Decimal("900.00")
+    assert tx.tax_rate == settings.PROPERTY_RENTAL_TAX_RATE
+    assert tx.tax_liability_status == PaymentTransaction.TaxLiabilityStatus.APPLICABLE
+
+
+def test_property_rental_tax_skipped_for_licensed_company_owner(property_listing, user):
+    booking = _build_property_rental(property_listing, user)
+    tx = PaymentTransaction.objects.create(
+        content_type=ContentType.objects.get_for_model(PropertyRentalBooking),
+        object_id=booking.id,
+        booking_type="propertyrental",
+        tx_ref="property-tax-skipped-company",
+        amount=Decimal("6300.00"),
+        currency="ETB",
+        status=PaymentTransaction.PaymentStatus.PENDING,
+    )
+
+    assert is_tax_applicable(booking) is False
+    apply_tax_to_transaction(tx, booking)
+    tx.refresh_from_db()
+    assert tx.tax_amount is None
+    assert tx.tax_rate is None
+    assert tx.tax_liability_status is None
+
+
+def test_tax_skipped_for_existing_non_property_flows(booking, guesthouse_booking, company, user):
+    car_listing = _build_car_sale(company)
+    reveal_request = _build_reveal_request(car_listing, user)
+
+    for booking_object, booking_type, tx_ref in [
+        (booking, "booking", "tax-skip-hotel"),
+        (guesthouse_booking, "guesthouse", "tax-skip-guesthouse"),
+        (reveal_request, "contact_reveal", "tax-skip-car-sale"),
+    ]:
+        tx = PaymentTransaction.objects.create(
+            content_type=ContentType.objects.get_for_model(booking_object),
+            object_id=booking_object.id,
+            booking_type=booking_type,
+            tx_ref=tx_ref,
+            amount=Decimal("1000.00"),
+            currency="ETB",
+            status=PaymentTransaction.PaymentStatus.PENDING,
+        )
+        apply_tax_to_transaction(tx, booking_object)
+        tx.refresh_from_db()
+        assert tx.tax_amount is None
+        assert tx.tax_rate is None
+        assert tx.tax_liability_status is None
+
+
+def test_property_rental_breakdown_and_serializer_grand_total(settings, individual_owner, user):
+    settings.PROPERTY_RENTAL_TAX_RATE = Decimal("0.15")
+    listing = PropertyListingFactory(company=None, individual_owner=individual_owner, base_price=Decimal("3000.00"))
+    OwnerComplianceAgreement.objects.create(
+        owner=individual_owner,
+        agreement_version="v1",
+        status=OwnerComplianceAgreement.Status.SIGNED,
+        signed_at=timezone.now(),
+    )
+    booking = _build_property_rental(listing, user)
+
+    breakdown = get_payment_tax_breakdown(booking)
+    assert breakdown["owner_price"] == Decimal("6000.00")
+    assert breakdown["service_fee"] == Decimal("0.00")
+    assert breakdown["tax_amount"] == Decimal("900.00")
+    assert breakdown["grand_total"] == Decimal("6900.00")
+
+    tx = PaymentTransaction.objects.create(
+        content_type=ContentType.objects.get_for_model(PropertyRentalBooking),
+        object_id=booking.id,
+        booking_type="propertyrental",
+        tx_ref="property-tax-serializer",
+        amount=breakdown["grand_total"],
+        currency="ETB",
+        status=PaymentTransaction.PaymentStatus.PENDING,
+        tax_amount=breakdown["tax_amount"],
+        tax_rate=breakdown["tax_rate"],
+        tax_liability_status=breakdown["tax_liability_status"],
+    )
+
+    data = PaymentTransactionSerializer(tx).data
+    assert data["owner_price"] == "6000.00"
+    assert data["service_fee"] == "0.00"
+    assert data["tax_amount"] == "900.00"
+    assert data["grand_total"] == "6900.00"
+
+
+def test_serializer_non_tax_flow_returns_null_tax_amount(booking):
+    tx = PaymentTransaction.objects.create(
+        content_type=ContentType.objects.get_for_model(Booking),
+        object_id=booking.id,
+        booking=booking,
+        booking_type="booking",
+        tx_ref="non-tax-null",
+        amount=Decimal("1000.00"),
+        currency="ETB",
+        status=PaymentTransaction.PaymentStatus.PENDING,
+    )
+
+    data = PaymentTransactionSerializer(tx).data
+    assert data["tax_amount"] is None
+    assert data["grand_total"] == "1000.00"
+
+
+def test_tax_rate_uses_settings_constant(settings):
+    settings.PROPERTY_RENTAL_TAX_RATE = Decimal("0.20")
+    assert calculate_tax(Decimal("1000.00")) == Decimal("200.00")
+
+
+def test_property_rental_tax_skipped_without_active_agreement(settings, individual_owner, user):
+    settings.PROPERTY_RENTAL_TAX_RATE = Decimal("0.15")
+    listing = PropertyListingFactory(company=None, individual_owner=individual_owner, base_price=Decimal("3000.00"))
+    booking = _build_property_rental(listing, user)
+
+    assert is_tax_applicable(booking) is False
+
+
 @pytest.mark.parametrize(
     "booking_factory,item_factory,owner_attr",
     [
@@ -114,6 +340,106 @@ def test_first_and_repeat_booking_fee_rates_follow_phone_identity_across_flows(
     else:
         item_factory(booking=second_booking)
     assert get_effective_platform_fee_rate(booking=second_booking) == Decimal("0.05")
+
+
+def test_contact_reveal_stale_requests_expire_safely(company, user):
+    listing = _build_car_sale(company)
+    stale = _build_reveal_request(
+        listing,
+        user,
+        status=ContactRevealRequest.RevealStatus.PAYMENT_INITIATED,
+        expires_at=timezone.now() - timezone.timedelta(minutes=1),
+    )
+
+    expired_count = ContactRevealPaymentService.expire_stale_requests()
+
+    stale.refresh_from_db()
+    assert expired_count == 1
+    assert stale.status == ContactRevealRequest.RevealStatus.EXPIRED
+
+
+def test_contact_reveal_callback_unlocks_contact_and_fires_notification(
+    company,
+    user,
+    monkeypatch,
+    django_capture_on_commit_callbacks,
+):
+    listing = _build_car_sale(company)
+    reveal_request = _build_reveal_request(listing, user, tx_ref="contact-success-1")
+    payment = PaymentTransaction.objects.create(
+        content_type=ContentType.objects.get_for_model(ContactRevealRequest),
+        object_id=reveal_request.id,
+        booking_type="contact_reveal",
+        tx_ref="contact-success-1",
+        amount=reveal_request.amount,
+        currency=reveal_request.currency,
+        status=PaymentTransaction.PaymentStatus.PENDING,
+        metadata={},
+    )
+    calls = []
+
+    monkeypatch.setattr(
+        "apps.payment.services.ChapaPaymentService.verify_payment",
+        lambda tx_ref: {
+            "status": "success",
+            "data": {
+                "amount": str(payment.amount),
+                "currency": payment.currency,
+                "id": "chapa-contact-1",
+                "method": "test",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "apps.listing.tasks.send_contact_reveal_unlocked_notification.delay",
+        lambda reveal_id: calls.append(reveal_id),
+    )
+
+    with django_capture_on_commit_callbacks(execute=True):
+        result = ChapaPaymentService.handle_callback({"tx_ref": payment.tx_ref})
+
+    payment.refresh_from_db()
+    reveal_request.refresh_from_db()
+    assert result["success"] is True
+    assert payment.status == PaymentTransaction.PaymentStatus.SUCCESS
+    assert reveal_request.status == ContactRevealRequest.RevealStatus.PAID_REVEALED
+    assert reveal_request.contact_snapshot["seller_phone"] == listing.seller_phone
+    assert calls == [reveal_request.id]
+
+
+def test_contact_reveal_callback_rejects_amount_mismatch(company, user, monkeypatch):
+    listing = _build_car_sale(company)
+    reveal_request = _build_reveal_request(listing, user, tx_ref="contact-mismatch-1")
+    payment = PaymentTransaction.objects.create(
+        content_type=ContentType.objects.get_for_model(ContactRevealRequest),
+        object_id=reveal_request.id,
+        booking_type="contact_reveal",
+        tx_ref="contact-mismatch-1",
+        amount=reveal_request.amount,
+        currency=reveal_request.currency,
+        status=PaymentTransaction.PaymentStatus.PENDING,
+        metadata={},
+    )
+
+    monkeypatch.setattr(
+        "apps.payment.services.ChapaPaymentService.verify_payment",
+        lambda tx_ref: {
+            "status": "success",
+            "data": {
+                "amount": "999.00",
+                "currency": payment.currency,
+                "id": "chapa-contact-2",
+            },
+        },
+    )
+
+    result = ChapaPaymentService.handle_callback({"tx_ref": payment.tx_ref})
+
+    payment.refresh_from_db()
+    reveal_request.refresh_from_db()
+    assert result["success"] is False
+    assert payment.status == PaymentTransaction.PaymentStatus.FAILED
+    assert reveal_request.status == ContactRevealRequest.RevealStatus.PAYMENT_INITIATED
 
 
 def test_post_payment_initiate_success(auth_client, user, room, monkeypatch):
@@ -779,3 +1105,268 @@ def test_get_owner_ledger_detail_not_found_for_other_owner(company_client, user,
     response = company_client.get(f"/api/v1/payment/ledger/{payment_tx.id}/")
 
     assert response.status_code == 404
+
+
+def _create_monitor_transaction(user, room, **overrides):
+    defaults = {
+        "booking": _build_booking(user, room),
+        "tx_ref": f"tx-monitor-{PaymentTransaction.objects.count()}",
+        "amount": Decimal("1000.00"),
+        "currency": "ETB",
+        "status": PaymentTransaction.PaymentStatus.SUCCESS,
+        "booking_type": "booking",
+        "payout_status": PaymentTransaction.PayoutStatus.PENDING,
+        "tax_amount": Decimal("15.00"),
+    }
+    defaults.update(overrides)
+    return PaymentTransaction.objects.create(**defaults)
+
+
+def _response_results(response):
+    data = response.json()
+    return data["results"] if "results" in data else data
+
+
+def test_admin_transaction_monitor_list_success(admin_client, user, room):
+    tx = _create_monitor_transaction(user, room)
+
+    response = admin_client.get("/api/v1/payment/admin/transactions/")
+
+    assert response.status_code == 200
+    result = _response_results(response)[0]
+    assert result["id"] == str(tx.id)
+    assert result["tx_ref"] == tx.tx_ref
+    assert "tax_amount" in result
+    assert "grand_total" in result
+
+
+def test_admin_transaction_monitor_filters_by_status(admin_client, user, room):
+    success_tx = _create_monitor_transaction(user, room, tx_ref="tx-monitor-success")
+    _create_monitor_transaction(
+        user,
+        room,
+        tx_ref="tx-monitor-failed",
+        status=PaymentTransaction.PaymentStatus.FAILED,
+    )
+
+    response = admin_client.get(
+        "/api/v1/payment/admin/transactions/",
+        {"status": PaymentTransaction.PaymentStatus.SUCCESS},
+    )
+
+    assert response.status_code == 200
+    refs = {item["tx_ref"] for item in _response_results(response)}
+    assert refs == {success_tx.tx_ref}
+
+
+def test_admin_transaction_monitor_filters_by_date_range(admin_client, user, room):
+    old_tx = _create_monitor_transaction(user, room, tx_ref="tx-monitor-old")
+    recent_tx = _create_monitor_transaction(user, room, tx_ref="tx-monitor-recent")
+    PaymentTransaction.objects.filter(id=old_tx.id).update(
+        created_at=timezone.now() - timedelta(days=10)
+    )
+    PaymentTransaction.objects.filter(id=recent_tx.id).update(
+        created_at=timezone.now() - timedelta(days=1)
+    )
+
+    response = admin_client.get(
+        "/api/v1/payment/admin/transactions/",
+        {"date_from": (date.today() - timedelta(days=2)).isoformat()},
+    )
+
+    assert response.status_code == 200
+    refs = {item["tx_ref"] for item in _response_results(response)}
+    assert recent_tx.tx_ref in refs
+    assert old_tx.tx_ref not in refs
+
+
+def test_admin_transaction_monitor_filters_by_has_dispute(admin_client, user, room):
+    disputed_tx = _create_monitor_transaction(
+        user,
+        room,
+        tx_ref="tx-monitor-disputed",
+        dispute_status=PaymentTransaction.DisputeStatus.OPEN,
+    )
+    _create_monitor_transaction(user, room, tx_ref="tx-monitor-undisputed")
+
+    response = admin_client.get(
+        "/api/v1/payment/admin/transactions/",
+        {"has_dispute": "true"},
+    )
+
+    assert response.status_code == 200
+    refs = {item["tx_ref"] for item in _response_results(response)}
+    assert refs == {disputed_tx.tx_ref}
+
+
+def test_admin_transaction_monitor_filters_by_payout_failed(admin_client, user, room):
+    failed_payout_tx = _create_monitor_transaction(
+        user,
+        room,
+        tx_ref="tx-monitor-payout-failed",
+        payout_status=PaymentTransaction.PayoutStatus.FAILED,
+    )
+    _create_monitor_transaction(user, room, tx_ref="tx-monitor-payout-pending")
+
+    response = admin_client.get(
+        "/api/v1/payment/admin/transactions/",
+        {"payout_failed": "true"},
+    )
+
+    assert response.status_code == 200
+    refs = {item["tx_ref"] for item in _response_results(response)}
+    assert refs == {failed_payout_tx.tx_ref}
+
+
+def test_admin_transaction_monitor_detail_success(admin_client, user, room):
+    tx = _create_monitor_transaction(user, room, tx_ref="tx-monitor-detail")
+
+    response = admin_client.get(f"/api/v1/payment/admin/transactions/{tx.id}/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == str(tx.id)
+    assert data["tx_ref"] == tx.tx_ref
+    assert "owner_price" in data
+    assert "service_fee" in data
+    assert "tax_rate" in data
+    assert "dispute_note" in data
+
+
+def test_admin_transaction_monitor_non_admin_forbidden(auth_client):
+    response = auth_client.get("/api/v1/payment/admin/transactions/")
+
+    assert response.status_code == 403
+
+
+def test_admin_transaction_monitor_unauthenticated_requires_auth(api_client):
+    response = api_client.get("/api/v1/payment/admin/transactions/")
+
+    assert response.status_code == 401
+
+
+def test_admin_opens_dispute_success(admin_client, admin_user, user, room):
+    tx = _create_monitor_transaction(user, room, tx_ref="tx-monitor-open-dispute")
+
+    response = admin_client.post(
+        f"/api/v1/payment/admin/transactions/{tx.id}/dispute/open/",
+        {"note": "Customer reported duplicate charge."},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["dispute_status"] == PaymentTransaction.DisputeStatus.OPEN
+    assert "duplicate charge" in data["dispute_note"]
+    tx.refresh_from_db()
+    assert tx.dispute_opened_at is not None
+    assert tx.dispute_handled_by == admin_user
+
+
+def test_admin_updates_dispute_note_success(admin_client, user, room):
+    tx = _create_monitor_transaction(
+        user,
+        room,
+        tx_ref="tx-monitor-update-dispute",
+        dispute_status=PaymentTransaction.DisputeStatus.OPEN,
+        dispute_note="Initial note",
+        dispute_opened_at=timezone.now(),
+    )
+
+    response = admin_client.patch(
+        f"/api/v1/payment/admin/transactions/{tx.id}/dispute/",
+        {
+            "status": PaymentTransaction.DisputeStatus.UNDER_REVIEW,
+            "note": "Reviewed with payment provider.",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["dispute_status"] == PaymentTransaction.DisputeStatus.UNDER_REVIEW
+    assert "Initial note" in data["dispute_note"]
+    assert "payment provider" in data["dispute_note"]
+
+
+def test_admin_resolves_dispute_success(admin_client, user, room):
+    tx = _create_monitor_transaction(
+        user,
+        room,
+        tx_ref="tx-monitor-resolve-dispute",
+        dispute_status=PaymentTransaction.DisputeStatus.OPEN,
+        dispute_note="Initial note",
+        dispute_opened_at=timezone.now(),
+    )
+
+    response = admin_client.post(
+        f"/api/v1/payment/admin/transactions/{tx.id}/dispute/resolve/",
+        {"note": "Resolved without refund per policy."},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["dispute_status"] == PaymentTransaction.DisputeStatus.RESOLVED
+    assert data["dispute_resolved_at"] is not None
+    assert "without refund" in data["dispute_note"]
+
+
+def test_non_admin_open_dispute_forbidden(auth_client, user, room):
+    tx = _create_monitor_transaction(user, room, tx_ref="tx-monitor-non-admin-dispute")
+
+    response = auth_client.post(
+        f"/api/v1/payment/admin/transactions/{tx.id}/dispute/open/",
+        {"note": "Should fail"},
+        format="json",
+    )
+
+    assert response.status_code == 403
+
+
+def test_invalid_dispute_status_rejected(admin_client, user, room):
+    tx = _create_monitor_transaction(
+        user,
+        room,
+        tx_ref="tx-monitor-invalid-dispute",
+        dispute_status=PaymentTransaction.DisputeStatus.OPEN,
+        dispute_opened_at=timezone.now(),
+    )
+
+    response = admin_client.patch(
+        f"/api/v1/payment/admin/transactions/{tx.id}/dispute/",
+        {"status": "pending"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+
+
+def test_open_dispute_not_found(admin_client):
+    missing = "00000000-0000-0000-0000-000000000000"
+
+    response = admin_client.post(
+        f"/api/v1/payment/admin/transactions/{missing}/dispute/open/",
+        {"note": "Missing"},
+        format="json",
+    )
+
+    assert response.status_code == 404
+
+
+def test_duplicate_active_dispute_rejected(admin_client, user, room):
+    tx = _create_monitor_transaction(
+        user,
+        room,
+        tx_ref="tx-monitor-duplicate-dispute",
+        dispute_status=PaymentTransaction.DisputeStatus.OPEN,
+        dispute_opened_at=timezone.now(),
+    )
+
+    response = admin_client.post(
+        f"/api/v1/payment/admin/transactions/{tx.id}/dispute/open/",
+        {"note": "Duplicate"},
+        format="json",
+    )
+
+    assert response.status_code == 400

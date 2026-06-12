@@ -14,10 +14,22 @@ from django.utils import timezone
 
 from apps.account.enums import RoleCode
 from apps.account.models import HotelProfile
-from apps.account.models import OtpChallenge, Role
-from apps.core.models import CurrencyRate
-from apps.listing.models import Booking, BookingItem, TermsAndConditions
+from apps.account.models import OtpChallenge, OwnerComplianceAgreement, Role
+from apps.core.models import Address, CurrencyRate
+from apps.listing.models import (
+    Booking,
+    BookingItem,
+    CarListing,
+    CarSaleListing,
+    ContactRevealRequest,
+    PropertyContactRevealRequest,
+    PropertyRentalAvailability,
+    PropertyRentalBooking,
+    PropertySaleListing,
+    TermsAndConditions,
+)
 from apps.payment.models import PaymentTransaction
+from apps.promotions.models import PromotionCampaign, PromotionPlacement
 
 pytestmark = pytest.mark.django_db
 
@@ -26,6 +38,7 @@ def _assert_verification_fields(payload):
     assert "is_verified" in payload
     assert "verified_at" in payload
     assert "verified_by" in payload
+    assert "verification_note" in payload
 
 
 def test_flutter_contract_auth_me(auth_client, user):
@@ -48,7 +61,7 @@ def test_flutter_contract_auth_otp_request(mock_send_sms, mock_generate_code, ap
 
     assert response.status_code == 200
     data = response.json()
-    for key in ["success", "challenge_id", "purpose", "expires_at", "phone"]:
+    for key in ["success", "challenge_id", "challenge_token", "purpose", "expires_at", "cooldown_seconds", "phone"]:
         assert key in data
 
 
@@ -191,6 +204,28 @@ def test_flutter_contract_account_hotels(api_client, hotel):
     _assert_verification_fields(data["results"][0])
 
 
+def test_flutter_contract_individual_owner_agreement(individual_owner_client, individual_owner):
+    OwnerComplianceAgreement.objects.create(
+        owner=individual_owner,
+        agreement_version="v1",
+        status=OwnerComplianceAgreement.Status.SIGNED,
+        signed_at=timezone.now(),
+    )
+
+    detail_response = individual_owner_client.get(
+        f"/api/v1/account/individual-owners/{individual_owner.id}/agreement/"
+    )
+    profile_response = individual_owner_client.get("/api/v1/account/profile/agreement/")
+
+    assert detail_response.status_code == 200
+    detail_data = detail_response.json()
+    assert set(detail_data.keys()) == {"status", "signed_at", "agreement_version"}
+
+    assert profile_response.status_code == 200
+    profile_data = profile_response.json()
+    assert set(profile_data.keys()) == {"status", "signed_at", "agreement_version"}
+
+
 def test_flutter_contract_listing_verification_fields(
     api_client,
     guest_house,
@@ -218,6 +253,243 @@ def test_flutter_contract_listing_room_detail(api_client, room):
     data = response.json()
     for key in ["id", "title", "description", "base_price", "currency"]:
         assert key in data
+    _assert_verification_fields(data)
+
+
+def test_flutter_contract_car_sales_connector(auth_client, user, company):
+    listing = CarSaleListing.objects.create(
+        company=company,
+        title="Flutter Sale Car",
+        description="Sale listing for contract test",
+        base_price=Decimal("950000.00"),
+        currency="ETB",
+        brand=CarListing.CarBrandChoices.TOYOTA,
+        model="Yaris",
+        year=2019,
+        mileage=50000,
+        fuel_type=CarListing.FuelTypeChoices.PETROL,
+        transmission=CarListing.TransmissionChoices.AUTOMATIC,
+        condition=CarListing.ConditionChoices.USED,
+        car_class=CarListing.CarClassChoices.NORMAL,
+        seats=5,
+        seller_contact_name="Flutter Seller",
+        seller_phone="0911999888",
+        seller_email="flutter-seller@example.com",
+        reveal_fee=Decimal("100.00"),
+        is_active=True,
+    )
+
+    response = auth_client.get(f"/api/v1/listing/car-sales/{listing.id}/")
+    assert response.status_code == 200
+    data = response.json()
+    for key in [
+        "id",
+        "title",
+        "description",
+        "base_price",
+        "currency",
+        "brand",
+        "model",
+        "year",
+        "mileage",
+        "reveal_fee",
+        "reveal_state",
+        "is_verified",
+        "verified_at",
+        "verified_by",
+        "verification_note",
+    ]:
+        assert key in data
+    assert "seller_phone" not in data
+    assert "seller_email" not in data
+
+    reveal_request = ContactRevealRequest.objects.create(
+        listing=listing,
+        buyer=user,
+        amount=listing.reveal_fee,
+        currency=listing.currency,
+        status=ContactRevealRequest.RevealStatus.PAID_REVEALED,
+        tx_ref="contract-contact-1",
+        expires_at=timezone.now() + timezone.timedelta(minutes=30),
+        unlocked_at=timezone.now(),
+        contact_snapshot={
+            "seller_contact_name": listing.seller_contact_name,
+            "seller_phone": listing.seller_phone,
+            "seller_email": listing.seller_email,
+            "off_platform_notice": "The sale closes off-platform.",
+        },
+    )
+
+    response = auth_client.get(f"/api/v1/listing/car-sales/{listing.id}/contact/")
+    assert response.status_code == 200
+    contact = response.json()
+    for key in [
+        "listing_id",
+        "request_id",
+        "status",
+        "seller_contact_name",
+        "seller_phone",
+        "seller_email",
+        "off_platform_notice",
+    ]:
+        assert key in contact
+    assert contact["request_id"] == str(reveal_request.id)
+
+
+def test_flutter_contract_property_sales_connector(auth_client, user, company):
+    address = Address.objects.create(
+        street_line1="Bole Road",
+        country="Ethiopia",
+        city="Addis Ababa",
+        sub_city="Bole",
+        state="Addis Ababa",
+        postal_code="1000",
+        latitude="9.010000",
+        longitude="38.760000",
+    )
+    listing = PropertySaleListing.objects.create(
+        company=company,
+        address=address,
+        title="Flutter Sale Property",
+        description="Property sale listing for contract test",
+        base_price=Decimal("4500000.00"),
+        currency="ETB",
+        property_type=PropertySaleListing.PropertyTypeChoices.VILLA,
+        bedrooms=4,
+        bathrooms=3,
+        square_meters=Decimal("240.00"),
+        land_size_square_meters=Decimal("320.00"),
+        is_furnished=True,
+        seller_contact_name="Flutter Property Seller",
+        seller_phone="0911888777",
+        seller_email="flutter-property-seller@example.com",
+        reveal_fee=Decimal("150.00"),
+        is_active=True,
+    )
+
+    response = auth_client.get(f"/api/v1/listing/property-sales/{listing.id}/")
+    assert response.status_code == 200
+    data = response.json()
+    for key in [
+        "id",
+        "title",
+        "description",
+        "base_price",
+        "currency",
+        "address",
+        "property_type",
+        "bedrooms",
+        "bathrooms",
+        "square_meters",
+        "reveal_fee",
+        "reveal_state",
+        "is_verified",
+        "verified_at",
+        "verified_by",
+        "verification_note",
+    ]:
+        assert key in data
+    assert "seller_phone" not in data
+    assert "seller_email" not in data
+
+    reveal_request = PropertyContactRevealRequest.objects.create(
+        listing=listing,
+        buyer=user,
+        amount=listing.reveal_fee,
+        currency=listing.currency,
+        status=PropertyContactRevealRequest.RevealStatus.PAID_REVEALED,
+        tx_ref="property-contract-contact-1",
+        expires_at=timezone.now() + timezone.timedelta(minutes=30),
+        unlocked_at=timezone.now(),
+        contact_snapshot={
+            "seller_contact_name": listing.seller_contact_name,
+            "seller_phone": listing.seller_phone,
+            "seller_email": listing.seller_email,
+            "off_platform_notice": "The sale closes off-platform.",
+        },
+    )
+
+    response = auth_client.post(f"/api/v1/listing/property-sales/{listing.id}/request-contact/", {}, format="json")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["contact_unlocked"] is True
+    assert payload["reveal_request"]["id"] == str(reveal_request.id)
+    for key in ["seller_contact_name", "seller_phone", "seller_email", "off_platform_notice"]:
+        assert key in payload["contact"]
+
+
+def test_flutter_contract_property_rental_booking(auth_client, property_listing):
+    start_date = date.today() + timedelta(days=3)
+    end_date = start_date + timedelta(days=2)
+    TermsAndConditions.objects.create(
+        content_type=ContentType.objects.get_for_model(property_listing),
+        object_id=property_listing.id,
+        version="1",
+        title="Property rental terms",
+        content="Property rental terms content",
+        effective_date=date.today(),
+        is_active=True,
+    )
+    for offset in range((end_date - start_date).days):
+        PropertyRentalAvailability.objects.update_or_create(
+            property_listing=property_listing,
+            date=start_date + timedelta(days=offset),
+            defaults={"available_units": 1, "price": Decimal("3000.00")},
+        )
+
+    preview_response = auth_client.post(
+        "/api/v1/listing/property-rentals/bookings/price-preview/",
+        {
+            "property_listing": str(property_listing.id),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "guest_phone": "0911777001",
+        },
+        format="json",
+    )
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    for key in ["nights", "items", "totals"]:
+        assert key in preview
+
+    create_response = auth_client.post(
+        "/api/v1/listing/property-rentals/bookings/",
+        {
+            "property_listing": str(property_listing.id),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "guest_first_name": "Flutter",
+            "guest_last_name": "Rental",
+            "guest_email": "flutter-property-rental@example.com",
+            "guest_phone": "0911777001",
+            "terms_accepted": True,
+            "terms_version": "1",
+        },
+        format="json",
+    )
+    assert create_response.status_code == 201
+    data = create_response.json()
+    for key in [
+        "id",
+        "booking_reference",
+        "property_listing",
+        "start_date",
+        "end_date",
+        "total_price",
+        "currency",
+        "status",
+        "terms_accepted",
+        "terms_version",
+        "terms_content_snapshot",
+        "snapshot",
+        "created_at",
+    ]:
+        assert key in data
+    assert data["status"] == PropertyRentalBooking.RentStatus.PENDING
+
+    detail_response = auth_client.get(f"/api/v1/listing/property-rentals/bookings/{data['id']}/")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["booking_reference"] == data["booking_reference"]
 
 
 def test_flutter_contract_listing_terms(api_client, hotel):
@@ -295,6 +567,59 @@ def test_flutter_contract_payment_verify_public(api_client, user, room):
     assert response.status_code == 200
     data = response.json()
     assert "chapa_verification" in data
+
+
+def test_flutter_contract_admin_transaction_monitor(admin_client, user, room):
+    booking = Booking.objects.create(
+        user=user,
+        check_in_date=date.today() + timedelta(days=7),
+        check_out_date=date.today() + timedelta(days=9),
+        total_price=Decimal("1000.00"),
+        currency="ETB",
+        status=Booking.BookingStatus.PENDING,
+        guest_first_name="Guest",
+        guest_last_name="User",
+        guest_email="guest@example.com",
+        guest_phone="0911000000",
+        special_requests="None",
+        booking_reference="H-000778",
+        terms_accepted=True,
+        terms_version="1",
+        terms_accepted_at=None,
+        terms_content_snapshot="Terms",
+    )
+    BookingItem.objects.create(booking=booking, room=room, units_booked=1, price_per_unit=Decimal("1000.00"))
+    payment = PaymentTransaction.objects.create(
+        content_type=ContentType.objects.get_for_model(Booking),
+        object_id=booking.id,
+        booking=booking,
+        booking_type="booking",
+        tx_ref="tx-contract-monitor-1",
+        amount=Decimal("1000.00"),
+        currency="ETB",
+        status=PaymentTransaction.PaymentStatus.SUCCESS,
+        tax_amount=Decimal("15.00"),
+        metadata={},
+    )
+
+    response = admin_client.get("/api/v1/payment/admin/transactions/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "results" in data
+    result = data["results"][0]
+    for key in [
+        "id",
+        "tx_ref",
+        "status",
+        "amount",
+        "tax_amount",
+        "grand_total",
+        "payout_status",
+        "dispute_status",
+    ]:
+        assert key in result
+    assert result["id"] == str(payment.id)
 
 
 def test_flutter_contract_favorites_list(auth_client, favorite):
@@ -417,3 +742,36 @@ def test_flutter_contract_analytics_frontdesk_availability(company_client, hotel
     if data:
         for key in ["room_id", "room_name", "total_units", "availability"]:
             assert key in data[0]
+
+
+def test_flutter_contract_public_promotions(api_client, user, car_listing):
+    content_type = ContentType.objects.get_for_model(car_listing)
+    campaign = PromotionCampaign.objects.create(
+        name="Flutter Promo",
+        advertiser=user,
+        status=PromotionCampaign.Status.ACTIVE,
+        starts_at=timezone.now() - timezone.timedelta(hours=1),
+        ends_at=timezone.now() + timezone.timedelta(days=1),
+    )
+    PromotionPlacement.objects.create(
+        campaign=campaign,
+        slot_type=PromotionPlacement.SlotType.FEATURED_LISTING,
+        content_type=content_type,
+        object_id=car_listing.id,
+        target_category="cars",
+        is_active=True,
+    )
+
+    response = api_client.get("/api/v1/promotions/placements/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data, list)
+    assert data
+    placement = data[0]
+    for key in ["id", "slot_type", "display_order", "promoted_listing", "promoted_category"]:
+        assert key in placement
+    assert "budget" not in placement
+    listing = placement["promoted_listing"]
+    for key in ["id", "title", "thumbnail", "category", "rating", "price_preview", "currency", "listing_type"]:
+        assert key in listing

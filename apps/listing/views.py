@@ -26,7 +26,7 @@ from apps.listing.docs.schema import search_schema
 from apps.core.views import AbstractModelViewSet
 from apps.core.utils import get_display_currency
 from apps.notifications.services import NotificationService
-from rest_framework import viewsets
+from rest_framework import mixins, viewsets
 from apps.listing.utils import ParseDatesAndQuantity
 from apps.listing.filters import PropertyFilter, RoomFilter, BookingFilter,EventSpaceFilter,EventSpaceBookingFilter
 from apps.core.pagination import StandardResultsSetPagination
@@ -46,9 +46,13 @@ from apps.account.enums import RoleCode
 from apps.listing.models import (
     Amenity,
     CarListing,
-    CarListing,
+    CarSaleListing,
+    ContactRevealRequest,
     GuestHouseProfile, GuestHouseRoom,
     PropertyListing,
+    PropertyRentalBooking,
+    PropertySaleListing,
+    PropertyContactRevealRequest,
     RoomListing,
     Booking,StayAvailability,
     BookingItem,
@@ -69,6 +73,17 @@ from apps.listing.serializers import (
     BookingSerializer,BookingResponseSerializer,
     CarListingResponseSerializer,
     CarListingSerializer,
+    CarSaleContactSerializer,
+    CarSaleListingResponseSerializer,
+    CarSaleListingSerializer,
+    ContactRevealRequestResponseSerializer,
+    ContactRevealRequestSerializer,
+    PropertyContactRevealRequestResponseSerializer,
+    PropertyRentalBookingPreviewSerializer,
+    PropertyRentalBookingResponseSerializer,
+    PropertyRentalBookingSerializer,
+    PropertySaleListingResponseSerializer,
+    PropertySaleListingSerializer,
     BookingRatingSerializer,
     
     CarAvailabilityUpdateSerializer,
@@ -98,13 +113,17 @@ from apps.listing.serializers import (
     BookingLookupSerializer,
     GuestCancellationSerializer,
     GuestBookingOtpRequestSerializer,
+    VerifyActionSerializer,
     SeasonSerializer, SeasonalRateSerializer,
 )
 from apps.listing.services import (
     StayAvailabilityService, BookingService, CarAvailabilityService, 
     PriceService, GuestHouseAvailabilityService, EventSpaceAvailabilityService,
-    PriceCalculationService, CarRentalService, get_effective_platform_fee_rate
+    PriceCalculationService, CarRentalService, PropertyRentalAvailabilityService,
+    PropertyRentalBookingService, get_effective_platform_fee_rate,
+    verify_listing, unverify_listing,
 )
+from apps.payment.services import ContactRevealPaymentService
 from apps.listing.exceptions import BookingConflict
 from rest_framework.exceptions import PermissionDenied
 
@@ -127,13 +146,6 @@ def _with_booking_no_refund_policy(payload, *, cancellation_effect="booking_canc
     return response
 
 
-def _set_listing_verification(instance, *, verified, actor):
-    instance.is_verified = verified
-    instance.verified_at = timezone.now() if verified else None
-    instance.verified_by = actor if verified else None
-    instance.save(update_fields=["is_verified", "verified_at", "verified_by", "updated_at"])
-
-
 def _request_guest_booking_otp(request, *, booking_type):
     serializer = GuestBookingOtpRequestSerializer(
         data=request.data,
@@ -145,9 +157,11 @@ def _request_guest_booking_otp(request, *, booking_type):
         {
             "success": True,
             "challenge_id": challenge.challenge_id,
+            "challenge_token": challenge.challenge_id,
             "purpose": "guest_booking",
             "booking_type": challenge.booking_type,
             "expires_at": challenge.expires_at,
+            "cooldown_seconds": int(getattr(settings, "OTP_COOLDOWN_SECONDS", 60)),
             "phone": challenge.phone,
         },
         status=status.HTTP_201_CREATED,
@@ -183,6 +197,8 @@ class RoomListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelVie
         """
         if self.action == 'create':
             return [IsAuthenticated()]
+        elif self.action in ["verify", "unverify"]:
+            return [IsAdmin()]
         elif self.action in ['list', 'retrieve', 'price_preview']:
             return [AllowAny()]
         else:
@@ -270,6 +286,36 @@ class RoomListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelVie
             'This endpoint will be removed in v2.0"'
         )
         return response
+
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: RoomListingResponseSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
+    def verify(self, request, pk=None):
+        room = self.get_object()
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        verify_listing(
+            room,
+            request.user,
+            verification_note=action_serializer.validated_data.get("verification_note"),
+        )
+        serializer = RoomListingResponseSerializer(room, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: RoomListingResponseSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
+    def unverify(self, request, pk=None):
+        room = self.get_object()
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        unverify_listing(room, request.user)
+        serializer = RoomListingResponseSerializer(room, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -462,6 +508,8 @@ class GuestHouseRoomViewSet(SavedListingDeletionNotificationMixin, AbstractModel
     def get_permissions(self):
         if self.action == 'create':
             return [IsAuthenticated()]
+        elif self.action in ["verify", "unverify"]:
+            return [IsAdmin()]
         elif self.action in ['list', 'retrieve', 'price_preview']:
             return [AllowAny()]
         else:
@@ -521,6 +569,36 @@ class GuestHouseRoomViewSet(SavedListingDeletionNotificationMixin, AbstractModel
         instance = self.get_object()
         serializer = GuestHouseRoomResponseSerializer(instance, context=self.get_serializer_context())
         return Response(serializer.data)
+
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: GuestHouseRoomResponseSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
+    def verify(self, request, pk=None):
+        room = self.get_object()
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        verify_listing(
+            room,
+            request.user,
+            verification_note=action_serializer.validated_data.get("verification_note"),
+        )
+        serializer = GuestHouseRoomResponseSerializer(room, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: GuestHouseRoomResponseSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
+    def unverify(self, request, pk=None):
+        room = self.get_object()
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        unverify_listing(room, request.user)
+        serializer = GuestHouseRoomResponseSerializer(room, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'], url_path='availability-matrix')
     def availability_matrix(self, request):
@@ -752,17 +830,33 @@ class GuestHouseProfileViewSet(SavedListingDeletionNotificationMixin, AbstractMo
                 "results": serializer.data
             })
 
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: GuestHouseProfileResponseSerializer},
+    )
     @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
     def verify(self, request, pk=None):
         guest_house = self.get_object()
-        _set_listing_verification(guest_house, verified=True, actor=request.user)
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        verify_listing(
+            guest_house,
+            request.user,
+            verification_note=action_serializer.validated_data.get("verification_note"),
+        )
         serializer = GuestHouseProfileResponseSerializer(guest_house, context=self.get_serializer_context())
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: GuestHouseProfileResponseSerializer},
+    )
     @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
     def unverify(self, request, pk=None):
         guest_house = self.get_object()
-        _set_listing_verification(guest_house, verified=False, actor=request.user)
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        unverify_listing(guest_house, request.user)
         serializer = GuestHouseProfileResponseSerializer(guest_house, context=self.get_serializer_context())
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -1232,17 +1326,33 @@ class CarListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelView
         serializer = CarListingResponseSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
 
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: CarListingResponseSerializer},
+    )
     @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
     def verify(self, request, pk=None):
         car_listing = self.get_object()
-        _set_listing_verification(car_listing, verified=True, actor=request.user)
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        verify_listing(
+            car_listing,
+            request.user,
+            verification_note=action_serializer.validated_data.get("verification_note"),
+        )
         serializer = CarListingResponseSerializer(car_listing, context=self.get_serializer_context())
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: CarListingResponseSerializer},
+    )
     @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
     def unverify(self, request, pk=None):
         car_listing = self.get_object()
-        _set_listing_verification(car_listing, verified=False, actor=request.user)
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        unverify_listing(car_listing, request.user)
         serializer = CarListingResponseSerializer(car_listing, context=self.get_serializer_context())
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -1327,6 +1437,372 @@ class CarListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelView
             return self.get_paginated_response(serializer.data)
         serializer = CarListingResponseSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
+
+
+@extend_schema(tags=["Car Sales"])
+class CarSaleListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelViewSet):
+    queryset = CarSaleListing.objects.all()
+    serializer_class = CarSaleListingSerializer
+    throttle_scope = None
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ["brand", "car_class", "fuel_type", "transmission", "condition", "is_active"]
+    search_fields = ["title", "description", "brand", "model"]
+    ordering_fields = ["base_price", "year", "mileage", "created_at"]
+    ordering = ["-created_at"]
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["request"] = self.request
+        context["display_currency"] = get_display_currency(self.request)
+        return context
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [AllowAny()]
+        if self.action in ["request_contact", "contact"]:
+            return [IsAuthenticated()]
+        if self.action in ["verify", "unverify"]:
+            return [IsAdmin()]
+        return [IsListingOwner()]
+
+    def get_serializer_class(self):
+        if self.action in ["create", "update", "partial_update"]:
+            return CarSaleListingSerializer
+        return CarSaleListingResponseSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset().select_related(
+            "company",
+            "individual_owner",
+        ).prefetch_related("images", "contact_reveal_requests")
+        user = self.request.user
+
+        if user.is_authenticated and (
+            user.is_superuser or getattr(user, "role", None) and user.role.code == RoleCode.ADMIN.value
+        ):
+            return queryset
+
+        managed_only = self.request.query_params.get("managed") == "true"
+        if managed_only and user.is_authenticated:
+            company = getattr(user, "company", None) or getattr(user, "profile", None)
+            individual_owner = getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)
+            q = Q()
+            if company:
+                q |= Q(company=company)
+            if individual_owner:
+                q |= Q(individual_owner=individual_owner)
+            return queryset.filter(q).order_by("-created_at")
+
+        return queryset.filter(is_active=True).order_by("-created_at")
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if not serializer.validated_data.get("company") and not serializer.validated_data.get("individual_owner"):
+            individual_owner = getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)
+            if individual_owner:
+                serializer.save(individual_owner=individual_owner)
+                return
+
+            company = getattr(user, "company", None) or getattr(user, "profile", None)
+            if company:
+                if company.status != CompanyProfile.StatusChoice.APPROVED:
+                    raise PermissionDenied("Company profile is not approved.")
+                serializer.save(company=company)
+                return
+
+        serializer.save()
+
+    def _is_listing_owner(self, listing):
+        user = self.request.user
+        if user.is_superuser or getattr(user, "role", None) and user.role.code == RoleCode.ADMIN.value:
+            return True
+        company = getattr(user, "company", None) or getattr(user, "profile", None)
+        individual_owner = getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)
+        return (company and listing.company_id == company.id) or (
+            individual_owner and listing.individual_owner_id == individual_owner.id
+        )
+
+    @extend_schema(
+        request=ContactRevealRequestSerializer,
+        responses={200: OpenApiTypes.OBJECT, 201: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=["post"], url_path="request-contact")
+    def request_contact(self, request, pk=None):
+        listing = self.get_object()
+        if self._is_listing_owner(listing):
+            return Response(
+                {"detail": "Listing owners cannot request their own seller contact."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = ContactRevealRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reveal_request = ContactRevealPaymentService.create_reveal_request(
+            listing=listing,
+            buyer=request.user,
+            buyer_note=serializer.validated_data.get("buyer_note", ""),
+            buyer_phone=serializer.validated_data.get("buyer_phone", ""),
+        )
+
+        if reveal_request.status == ContactRevealRequest.RevealStatus.PAID_REVEALED:
+            return Response(
+                {
+                    "success": True,
+                    "contact_unlocked": True,
+                    "reveal_request": ContactRevealRequestResponseSerializer(reveal_request).data,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        result = ContactRevealPaymentService.initialize_contact_reveal_payment(reveal_request)
+        if not result.get("success"):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        reveal_request = result["reveal_request"]
+        return Response(
+            {
+                "success": True,
+                "checkout_url": result["checkout_url"],
+                "tx_ref": result["tx_ref"],
+                "reveal_request": ContactRevealRequestResponseSerializer(reveal_request).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(responses={200: CarSaleContactSerializer, 403: OpenApiTypes.OBJECT})
+    @action(detail=True, methods=["get"], url_path="contact")
+    def contact(self, request, pk=None):
+        listing = self.get_object()
+        contact = ContactRevealPaymentService.get_unlocked_contact(
+            listing=listing,
+            buyer=request.user,
+        )
+        serializer = CarSaleContactSerializer(contact)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: CarSaleListingResponseSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
+    def verify(self, request, pk=None):
+        sale_listing = self.get_object()
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        verify_listing(
+            sale_listing,
+            request.user,
+            verification_note=action_serializer.validated_data.get("verification_note"),
+        )
+        serializer = CarSaleListingResponseSerializer(sale_listing, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: CarSaleListingResponseSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
+    def unverify(self, request, pk=None):
+        sale_listing = self.get_object()
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        unverify_listing(sale_listing, request.user)
+        serializer = CarSaleListingResponseSerializer(sale_listing, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@extend_schema(tags=["Property Sales"])
+class PropertySaleListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelViewSet):
+    http_method_names = ["get", "post"]
+    queryset = PropertySaleListing.objects.all()
+    serializer_class = PropertySaleListingSerializer
+    throttle_scope = None
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ["property_type", "is_furnished", "is_active"]
+    search_fields = ["title", "description", "address__city", "address__sub_city"]
+    ordering_fields = ["base_price", "square_meters", "created_at"]
+    ordering = ["-created_at"]
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["request"] = self.request
+        context["display_currency"] = get_display_currency(self.request)
+        return context
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve"]:
+            return [AllowAny()]
+        if self.action in ["verify", "unverify"]:
+            return [IsAdmin()]
+        if self.action == "request_contact":
+            return [IsAuthenticated()]
+        return [IsAuthenticated()]
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return PropertySaleListingSerializer
+        return PropertySaleListingResponseSerializer
+
+    def get_queryset(self):
+        queryset = super().get_queryset().select_related(
+            "company",
+            "individual_owner",
+            "address",
+        ).prefetch_related("images", "contact_reveal_requests")
+        user = self.request.user
+
+        if user.is_authenticated and (
+            user.is_superuser or getattr(user, "role", None) and user.role.code == RoleCode.ADMIN.value
+        ):
+            return queryset
+
+        managed_only = self.request.query_params.get("managed") == "true"
+        if managed_only and user.is_authenticated:
+            company = getattr(user, "company", None) or getattr(user, "profile", None)
+            individual_owner = getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)
+            q = Q()
+            if company:
+                q |= Q(company=company)
+            if individual_owner:
+                q |= Q(individual_owner=individual_owner)
+            return queryset.filter(q).order_by("-created_at")
+
+        return queryset.filter(is_active=True).order_by("-created_at")
+
+    def _is_admin(self, user):
+        return user.is_superuser or getattr(user, "role", None) and user.role.code == RoleCode.ADMIN.value
+
+    def _current_owner_paths(self):
+        user = self.request.user
+        company = getattr(user, "company", None) or getattr(user, "profile", None)
+        individual_owner = getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)
+        return company, individual_owner
+
+    def create(self, request, *args, **kwargs):
+        company, individual_owner = self._current_owner_paths()
+        if not self._is_admin(request.user) and not company and not individual_owner:
+            return Response(
+                {"detail": "Only approved companies, individual owners, or admins can create property sale listings."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return super().create(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        user = self.request.user
+        if not serializer.validated_data.get("company") and not serializer.validated_data.get("individual_owner"):
+            company, individual_owner = self._current_owner_paths()
+            if individual_owner:
+                serializer.save(individual_owner=individual_owner)
+                return
+            if company:
+                if company.status != CompanyProfile.StatusChoice.APPROVED:
+                    raise PermissionDenied("Company profile is not approved.")
+                serializer.save(company=company)
+                return
+
+        if not self._is_admin(user):
+            company, individual_owner = self._current_owner_paths()
+            requested_company = serializer.validated_data.get("company")
+            requested_individual_owner = serializer.validated_data.get("individual_owner")
+            if requested_company and (not company or requested_company.id != company.id):
+                raise PermissionDenied("Cannot create property sale listings for another company.")
+            if requested_individual_owner and (
+                not individual_owner or requested_individual_owner.id != individual_owner.id
+            ):
+                raise PermissionDenied("Cannot create property sale listings for another individual owner.")
+
+        serializer.save()
+
+    def _is_listing_owner(self, listing):
+        user = self.request.user
+        if self._is_admin(user):
+            return True
+        company, individual_owner = self._current_owner_paths()
+        return (company and listing.company_id == company.id) or (
+            individual_owner and listing.individual_owner_id == individual_owner.id
+        )
+
+    @extend_schema(
+        request=ContactRevealRequestSerializer,
+        responses={200: OpenApiTypes.OBJECT, 201: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=["post"], url_path="request-contact")
+    def request_contact(self, request, pk=None):
+        listing = self.get_object()
+        if self._is_listing_owner(listing):
+            return Response(
+                {"detail": "Listing owners cannot request their own seller contact."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        serializer = ContactRevealRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reveal_request = ContactRevealPaymentService.create_reveal_request(
+            listing=listing,
+            buyer=request.user,
+            buyer_note=serializer.validated_data.get("buyer_note", ""),
+            buyer_phone=serializer.validated_data.get("buyer_phone", ""),
+        )
+
+        if reveal_request.status == PropertyContactRevealRequest.RevealStatus.PAID_REVEALED:
+            contact = ContactRevealPaymentService.get_unlocked_contact(
+                listing=listing,
+                buyer=request.user,
+            )
+            return Response(
+                {
+                    "success": True,
+                    "contact_unlocked": True,
+                    "reveal_request": PropertyContactRevealRequestResponseSerializer(reveal_request).data,
+                    "contact": contact,
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        result = ContactRevealPaymentService.initialize_contact_reveal_payment(reveal_request)
+        if not result.get("success"):
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        reveal_request = result["reveal_request"]
+        return Response(
+            {
+                "success": True,
+                "checkout_url": result["checkout_url"],
+                "tx_ref": result["tx_ref"],
+                "reveal_request": PropertyContactRevealRequestResponseSerializer(reveal_request).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: PropertySaleListingResponseSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
+    def verify(self, request, pk=None):
+        listing = self.get_object()
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        verify_listing(
+            listing,
+            request.user,
+            verification_note=action_serializer.validated_data.get("verification_note"),
+        )
+        serializer = PropertySaleListingResponseSerializer(listing, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: PropertySaleListingResponseSerializer},
+    )
+    @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
+    def unverify(self, request, pk=None):
+        listing = self.get_object()
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        unverify_listing(listing, request.user)
+        serializer = PropertySaleListingResponseSerializer(listing, context=self.get_serializer_context())
+        return Response(serializer.data, status=status.HTTP_200_OK)
 # Car Rental ViewSet
 @extend_schema(tags=["Car Rentals"])
 class CarRentalViewSet(AbstractModelViewSet):
@@ -1732,19 +2208,191 @@ class PropertyListingViewSet(SavedListingDeletionNotificationMixin, AbstractMode
 
         return queryset.filter(is_active=True).order_by("-created_at")
 
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: PropertyListingResponseSerializer},
+    )
     @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
     def verify(self, request, pk=None):
         property_listing = self.get_object()
-        _set_listing_verification(property_listing, verified=True, actor=request.user)
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        verify_listing(
+            property_listing,
+            request.user,
+            verification_note=action_serializer.validated_data.get("verification_note"),
+        )
         serializer = PropertyListingResponseSerializer(property_listing, context=self.get_serializer_context())
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: PropertyListingResponseSerializer},
+    )
     @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
     def unverify(self, request, pk=None):
         property_listing = self.get_object()
-        _set_listing_verification(property_listing, verified=False, actor=request.user)
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        unverify_listing(property_listing, request.user)
         serializer = PropertyListingResponseSerializer(property_listing, context=self.get_serializer_context())
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+@extend_schema(tags=["Property Rental Bookings"])
+class PropertyRentalBookingViewSet(
+    mixins.CreateModelMixin,
+    mixins.RetrieveModelMixin,
+    viewsets.GenericViewSet,
+):
+    serializer_class = PropertyRentalBookingSerializer
+    queryset = PropertyRentalBooking.objects.all()
+    throttle_scope = None
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter, filters.SearchFilter]
+    filterset_fields = {
+        "status": ["exact"],
+        "start_date": ["gte", "lte"],
+        "end_date": ["gte", "lte"],
+    }
+    ordering_fields = ["start_date", "end_date", "total_price", "created_at"]
+    ordering = ["-created_at"]
+    search_fields = [
+        "booking_reference",
+        "renter__email",
+        "renter__first_name",
+        "renter__last_name",
+        "guest_email",
+        "guest_first_name",
+        "guest_last_name",
+        "guest_phone",
+    ]
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["display_currency"] = get_display_currency(self.request)
+        context["request"] = self.request
+        return context
+
+    def get_serializer_class(self):
+        if self.action in ["retrieve", "cancel"]:
+            return PropertyRentalBookingResponseSerializer
+        return PropertyRentalBookingSerializer
+
+    def get_permissions(self):
+        if self.action in ["create", "price_preview"]:
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
+    def get_throttles(self):
+        if self.action == "create":
+            self.throttle_scope = "booking_create"
+            return [ScopedRateThrottle()]
+        return super().get_throttles()
+
+    def get_queryset(self):
+        return super().get_queryset().select_related(
+            "renter",
+            "property_listing",
+            "property_listing__company",
+            "property_listing__individual_owner",
+            "property_listing__address",
+        ).prefetch_related("property_listing__images")
+
+    def _is_admin(self, user):
+        return user.is_superuser or getattr(user, "role", None) and user.role.code == RoleCode.ADMIN.value
+
+    def _can_access_booking(self, booking):
+        user = self.request.user
+        if self._is_admin(user):
+            return True
+        if booking.renter_id and booking.renter_id == user.id:
+            return True
+        company = getattr(user, "company", None) or getattr(user, "profile", None)
+        individual_owner = getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)
+        listing = booking.property_listing
+        return (company and listing.company_id == company.id) or (
+            individual_owner and listing.individual_owner_id == individual_owner.id
+        )
+
+    @extend_schema(
+        request=PropertyRentalBookingSerializer,
+        responses={201: PropertyRentalBookingResponseSerializer, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
+    )
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        booking = serializer.save()
+        return Response(
+            PropertyRentalBookingResponseSerializer(booking, context=self.get_serializer_context()).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @extend_schema(responses={200: PropertyRentalBookingResponseSerializer, 403: OpenApiTypes.OBJECT})
+    def retrieve(self, request, *args, **kwargs):
+        booking = self.get_object()
+        if not self._can_access_booking(booking):
+            return Response({"detail": "You do not have permission to view this booking."}, status=status.HTTP_403_FORBIDDEN)
+        serializer = PropertyRentalBookingResponseSerializer(booking, context=self.get_serializer_context())
+        return Response(serializer.data)
+
+    @extend_schema(
+        responses={200: PropertyRentalBookingResponseSerializer, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT}
+    )
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        booking = self.get_object()
+        if not self._can_access_booking(booking):
+            return Response({"detail": "You do not have permission to cancel this booking."}, status=status.HTTP_403_FORBIDDEN)
+        try:
+            cancelled = PropertyRentalBookingService.cancel_booking(booking)
+        except Exception as exc:
+            return Response(
+                _with_booking_no_refund_policy(
+                    {"detail": str(exc)},
+                    cancellation_effect="booking_not_cancelled",
+                ),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            _with_booking_no_refund_policy(
+                PropertyRentalBookingResponseSerializer(cancelled, context=self.get_serializer_context()).data
+            )
+        )
+
+    @extend_schema(
+        request=PropertyRentalBookingPreviewSerializer,
+        responses={200: PricePreviewResponseSerializer, 400: OpenApiTypes.OBJECT},
+    )
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="price-preview",
+        throttle_classes=[ScopedRateThrottle],
+        throttle_scope="availability_check",
+    )
+    def price_preview(self, request):
+        serializer = PropertyRentalBookingPreviewSerializer(data=request.data, context=self.get_serializer_context())
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        listing = data["property_listing"]
+        start = data["start_date"]
+        end = data["end_date"]
+        try:
+            PropertyRentalAvailabilityService.validate_availability(listing, start, end, lock=False)
+        except Exception as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        preview_phone = data.get("guest_phone") or (request.user.phone if request.user.is_authenticated else None)
+        return Response(
+            PropertyRentalBookingService.calculate_price_preview(
+                listing,
+                start,
+                end,
+                payment_currency=listing.currency,
+                guest_phone=preview_phone,
+                display_currency=get_display_currency(request),
+            )
+        )
 
 
 class AmenityViewSet(AbstractModelViewSet):
@@ -2259,12 +2907,18 @@ class StaySearchView(APIView):
         )
         return paginator.get_paginated_response(serializer.data)
 class StayAvailabilityUpdateView(APIView):
+    serializer_class = StayAvailabilityUpdateSerializer
+
     def get_permissions(self):
         """
         Only company owners of the hotel or admin can update availability.
         """
         return [IsAuthenticated()]
 
+    @extend_schema(
+        tags=["Inventory Management"],
+        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT, 404: OpenApiTypes.OBJECT},
+    )
     def put(self, request, pk):
         """
         Update a StayAvailability instance.
@@ -2559,17 +3213,33 @@ class EventSpaceListingViewSet(SavedListingDeletionNotificationMixin, AbstractMo
         serializer = self.get_serializer(available_listings, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: EventSpaceListingResponseSerializer},
+    )
     @action(detail=True, methods=["post"], url_path="verify", permission_classes=[IsAdmin])
     def verify(self, request, pk=None):
         event_space = self.get_object()
-        _set_listing_verification(event_space, verified=True, actor=request.user)
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        verify_listing(
+            event_space,
+            request.user,
+            verification_note=action_serializer.validated_data.get("verification_note"),
+        )
         serializer = EventSpaceListingResponseSerializer(event_space, context=self.get_serializer_context())
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        request=VerifyActionSerializer,
+        responses={200: EventSpaceListingResponseSerializer},
+    )
     @action(detail=True, methods=["post"], url_path="unverify", permission_classes=[IsAdmin])
     def unverify(self, request, pk=None):
         event_space = self.get_object()
-        _set_listing_verification(event_space, verified=False, actor=request.user)
+        action_serializer = VerifyActionSerializer(data=request.data)
+        action_serializer.is_valid(raise_exception=True)
+        unverify_listing(event_space, request.user)
         serializer = EventSpaceListingResponseSerializer(event_space, context=self.get_serializer_context())
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -2853,6 +3523,13 @@ class TermsAndConditionsViewSet(viewsets.ReadOnlyModelViewSet):
     @extend_schema(
         summary="Get active Terms & Conditions for a hotel",
         description="Retrieve the currently active T&C for a specific hotel",
+        parameters=[
+            OpenApiParameter(
+                "hotel_id",
+                OpenApiTypes.UUID,
+                location=OpenApiParameter.PATH,
+            ),
+        ],
         responses={200: TermsAndConditionsSerializer, 404: None}
     )
     @action(detail=False, methods=['get'], url_path='hotel/(?P<hotel_id>[^/.]+)')
@@ -2876,6 +3553,9 @@ class TermsAndConditionsViewSet(viewsets.ReadOnlyModelViewSet):
     @extend_schema(
         summary="Get active Terms & Conditions for a guest house",
         description="Retrieve the currently active T&C for a specific guest house profile",
+        parameters=[
+            OpenApiParameter("gh_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
+        ],
         responses={200: TermsAndConditionsSerializer, 404: None}
     )
     @action(detail=False, methods=['get'], url_path='guesthouse/(?P<gh_id>[^/.]+)')
@@ -2899,6 +3579,9 @@ class TermsAndConditionsViewSet(viewsets.ReadOnlyModelViewSet):
     @extend_schema(
         summary="Get active Terms & Conditions for a company (Car Rental)",
         description="Retrieve the currently active T&C for a specific company (Car Rental, etc.)",
+        parameters=[
+            OpenApiParameter("company_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
+        ],
         responses={200: TermsAndConditionsSerializer, 404: None}
     )
     @action(detail=False, methods=['get'], url_path='company/(?P<company_id>[^/.]+)')
@@ -3091,7 +3774,8 @@ class InventoryGridView(APIView):
             OpenApiParameter("property_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=True, enum=['hotel', 'guesthouse', 'eventspace']),
             OpenApiParameter("start_date", OpenApiTypes.DATE, OpenApiParameter.QUERY, required=False, description="Default is today"),
             OpenApiParameter("days", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False, default=30),
-        ]
+        ],
+        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
     )
     def get(self, request):
         property_id = request.query_params.get('property_id')

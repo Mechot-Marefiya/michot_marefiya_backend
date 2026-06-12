@@ -5,6 +5,9 @@ from apps.listing.views import (
     RoomListingViewSet,
     GuestHouseProfileViewSet, GuestHouseRoomViewSet,
     CarListingViewSet,
+    CarSaleListingViewSet,
+    PropertySaleListingViewSet,
+    PropertyRentalBookingViewSet,
     PropertyListingViewSet,
     AmenityViewSet,
     StaySearchView,
@@ -29,6 +32,9 @@ router.register("rooms", RoomListingViewSet, basename="rooms")
 router.register("guest-houses", GuestHouseProfileViewSet, basename="guest_houses")
 router.register("guest-house-rooms", GuestHouseRoomViewSet, basename="guest_house_rooms")
 router.register("cars", CarListingViewSet, basename="cars")
+router.register("car-sales", CarSaleListingViewSet, basename="car-sales")
+router.register("property-sales", PropertySaleListingViewSet, basename="property-sales")
+router.register("property-rentals/bookings", PropertyRentalBookingViewSet, basename="property-rental-bookings")
 router.register("properties", PropertyListingViewSet, basename="properties")
 router.register("amenities", AmenityViewSet, basename="amenities")
 router.register("bookings", BookingViewSet, basename="bookings")

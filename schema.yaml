@@ -535,14 +535,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/HotelProfileRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/HotelProfileRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/HotelProfileRequest'
-        required: true
+              $ref: '#/components/schemas/VerifyActionRequest'
       security:
       - jwtAuth: []
       responses:
@@ -550,7 +549,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HotelProfileDoc'
+                $ref: '#/components/schemas/HotelProfile'
           description: ''
   /api/v1/account/hotels/{id}/verify/:
     post:
@@ -569,14 +568,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/HotelProfileRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/HotelProfileRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/HotelProfileRequest'
-        required: true
+              $ref: '#/components/schemas/VerifyActionRequest'
       security:
       - jwtAuth: []
       responses:
@@ -584,7 +582,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HotelProfileDoc'
+                $ref: '#/components/schemas/HotelProfile'
           description: ''
   /api/v1/account/hotels/featured/:
     get:
@@ -726,6 +724,178 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/account/individual-owners/{id}/agreement/:
+    get:
+      operationId: v1_account_individual_owners_agreement_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Individual Owner Profile.
+        required: true
+      tags:
+      - Identity & Auth
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerComplianceAgreement'
+          description: ''
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerComplianceAgreement'
+          description: ''
+    post:
+      operationId: v1_account_individual_owners_agreement_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Individual Owner Profile.
+        required: true
+      tags:
+      - Identity & Auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnerComplianceAgreementCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OwnerComplianceAgreementCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OwnerComplianceAgreementCreateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerComplianceAgreement'
+          description: ''
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerComplianceAgreement'
+          description: ''
+    patch:
+      operationId: v1_account_individual_owners_agreement_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Individual Owner Profile.
+        required: true
+      tags:
+      - Identity & Auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedOwnerComplianceAgreementCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedOwnerComplianceAgreementCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedOwnerComplianceAgreementCreateRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerComplianceAgreement'
+          description: ''
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerComplianceAgreement'
+          description: ''
+  /api/v1/account/individual-owners/{id}/agreement/revoke/:
+    post:
+      operationId: v1_account_individual_owners_agreement_revoke_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Individual Owner Profile.
+        required: true
+      tags:
+      - Identity & Auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OwnerComplianceAgreementRevokeRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/OwnerComplianceAgreementRevokeRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/OwnerComplianceAgreementRevokeRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerComplianceAgreement'
+          description: ''
+  /api/v1/account/individual-owners/{id}/agreement/sign/:
+    post:
+      operationId: v1_account_individual_owners_agreement_sign_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Individual Owner Profile.
+        required: true
+      tags:
+      - Identity & Auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IndividualOwnerProfileRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/IndividualOwnerProfileRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/IndividualOwnerProfileRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerComplianceAgreement'
+          description: ''
   /api/v1/account/password-reset/:
     post:
       operationId: v1_account_password_reset_create
@@ -780,6 +950,27 @@ paths:
       - {}
       responses:
         '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/account/profile/agreement/:
+    get:
+      operationId: v1_account_profile_agreement_retrieve
+      tags:
+      - Identity & Auth
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OwnerComplianceAgreementRead'
+          description: ''
+        '404':
           content:
             application/json:
               schema:
@@ -1428,6 +1619,81 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/v1/analytics/admin/overview/:
+    get:
+      operationId: v1_analytics_admin_overview_retrieve
+      parameters:
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+      tags:
+      - Analytics
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OverviewMetrics'
+          description: ''
+  /api/v1/analytics/admin/payout-failures/:
+    get:
+      operationId: v1_analytics_admin_payout_failures_retrieve
+      parameters:
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+      tags:
+      - Analytics
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PayoutFailureMetrics'
+          description: ''
+  /api/v1/analytics/admin/revenue/:
+    get:
+      operationId: v1_analytics_admin_revenue_retrieve
+      parameters:
+      - in: query
+        name: date_from
+        schema:
+          type: string
+          format: date
+      - in: query
+        name: date_to
+        schema:
+          type: string
+          format: date
+      tags:
+      - Analytics
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RevenueMetrics'
+          description: ''
   /api/v1/analytics/company/activity/:
     get:
       operationId: v1_analytics_company_activity_list
@@ -1588,8 +1854,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/OtpResponse'
           description: ''
         '400':
           content:
@@ -3535,6 +3800,389 @@ paths:
               schema:
                 $ref: '#/components/schemas/CarRental'
           description: ''
+  /api/v1/listing/car-sales/:
+    get:
+      operationId: v1_listing_car_sales_list
+      parameters:
+      - in: query
+        name: brand
+        schema:
+          type: string
+          enum:
+          - Mercedes-Benz
+          - Volkswagen
+          - audi
+          - bmw
+          - chevrolet
+          - fiat
+          - ford
+          - honda
+          - hyundai
+          - jeep
+          - kia
+          - land_rover
+          - lexus
+          - mazda
+          - nissan
+          - peugeot
+          - porsche
+          - subaru
+          - toyota
+          - volvo
+        description: |-
+          * `toyota` - Toyota
+          * `bmw` - BMW
+          * `Mercedes-Benz` - Mercedes-Benz
+          * `audi` - Audi
+          * `Volkswagen` - Volkswagen
+          * `honda` - Honda
+          * `ford` - Ford
+          * `nissan` - Nissan
+          * `chevrolet` - Chevrolet
+          * `kia` - Kia
+          * `hyundai` - Hyundai
+          * `volvo` - Volvo
+          * `jeep` - Jeep
+          * `porsche` - Porsche
+          * `lexus` - Lexus
+          * `mazda` - Mazda
+          * `land_rover` - Land Rover
+          * `subaru` - Subaru
+          * `fiat` - Fiat
+          * `peugeot` - Peugeot
+      - in: query
+        name: car_class
+        schema:
+          type: string
+          title: Class Category
+          enum:
+          - luxury
+          - normal
+        description: |-
+          * `luxury` - Luxury
+          * `normal` - Normal
+      - in: query
+        name: condition
+        schema:
+          type: string
+          enum:
+          - new
+          - used
+        description: |-
+          * `new` - Brand New
+          * `used` - Used
+      - in: query
+        name: fuel_type
+        schema:
+          type: string
+          title: Engine Type
+          enum:
+          - diesel
+          - electric
+          - hybrid
+          - petrol
+        description: |-
+          * `diesel` - Diesel
+          * `electric` - Electric
+          * `petrol` - Petrol
+          * `hybrid` - Hybrid
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      - in: query
+        name: transmission
+        schema:
+          type: string
+          enum:
+          - automatic
+          - manual
+        description: |-
+          * `manual` - Manual
+          * `automatic` - Automatic
+      tags:
+      - Car Sales
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCarSaleListingResponseList'
+          description: ''
+    post:
+      operationId: v1_listing_car_sales_create
+      tags:
+      - Car Sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CarSaleListingRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CarSaleListingRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CarSaleListingRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarSaleListing'
+          description: ''
+  /api/v1/listing/car-sales/{id}/:
+    get:
+      operationId: v1_listing_car_sales_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Car Sale Listing.
+        required: true
+      tags:
+      - Car Sales
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarSaleListingResponse'
+          description: ''
+    patch:
+      operationId: v1_listing_car_sales_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Car Sale Listing.
+        required: true
+      tags:
+      - Car Sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedCarSaleListingRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedCarSaleListingRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedCarSaleListingRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarSaleListing'
+          description: ''
+    delete:
+      operationId: v1_listing_car_sales_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Car Sale Listing.
+        required: true
+      tags:
+      - Car Sales
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/listing/car-sales/{id}/contact/:
+    get:
+      operationId: v1_listing_car_sales_contact_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Car Sale Listing.
+        required: true
+      tags:
+      - Car Sales
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarSaleContact'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/listing/car-sales/{id}/request-contact/:
+    post:
+      operationId: v1_listing_car_sales_request_contact_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Car Sale Listing.
+        required: true
+      tags:
+      - Car Sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactRevealRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ContactRevealRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ContactRevealRequestRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/listing/car-sales/{id}/unverify/:
+    post:
+      operationId: v1_listing_car_sales_unverify_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Car Sale Listing.
+        required: true
+      tags:
+      - Car Sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarSaleListingResponse'
+          description: ''
+  /api/v1/listing/car-sales/{id}/verify/:
+    post:
+      operationId: v1_listing_car_sales_verify_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Car Sale Listing.
+        required: true
+      tags:
+      - Car Sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarSaleListingResponse'
+          description: ''
   /api/v1/listing/cars/:
     get:
       operationId: v1_listing_cars_list
@@ -3837,14 +4485,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CarListingResponseRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/CarListingResponseRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/CarListingResponseRequest'
-        required: true
+              $ref: '#/components/schemas/VerifyActionRequest'
       security:
       - jwtAuth: []
       responses:
@@ -3871,14 +4518,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CarListingResponseRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/CarListingResponseRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/CarListingResponseRequest'
-        required: true
+              $ref: '#/components/schemas/VerifyActionRequest'
       security:
       - jwtAuth: []
       responses:
@@ -4117,14 +4763,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/EventSpaceListingRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/EventSpaceListingRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/EventSpaceListingRequest'
-        required: true
+              $ref: '#/components/schemas/VerifyActionRequest'
       security:
       - jwtAuth: []
       responses:
@@ -4154,14 +4799,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/EventSpaceListingRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/EventSpaceListingRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/EventSpaceListingRequest'
-        required: true
+              $ref: '#/components/schemas/VerifyActionRequest'
       security:
       - jwtAuth: []
       responses:
@@ -4391,6 +5035,72 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/v1/listing/guest-house-rooms/{id}/unverify/:
+    post:
+      operationId: v1_listing_guest_house_rooms_unverify_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Guest House Room.
+        required: true
+      tags:
+      - Guest House Rooms
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestHouseRoomResponse'
+          description: ''
+  /api/v1/listing/guest-house-rooms/{id}/verify/:
+    post:
+      operationId: v1_listing_guest_house_rooms_verify_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Guest House Room.
+        required: true
+      tags:
+      - Guest House Rooms
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GuestHouseRoomResponse'
+          description: ''
   /api/v1/listing/guest-house-rooms/availability-matrix/:
     get:
       operationId: v1_listing_guest_house_rooms_availability_matrix_retrieve
@@ -4553,14 +5263,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GuestHouseProfileRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/GuestHouseProfileRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/GuestHouseProfileRequest'
-        required: true
+              $ref: '#/components/schemas/VerifyActionRequest'
       security:
       - jwtAuth: []
       responses:
@@ -4568,7 +5277,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GuestHouseProfile'
+                $ref: '#/components/schemas/GuestHouseProfileResponse'
           description: ''
   /api/v1/listing/guest-houses/{id}/verify/:
     post:
@@ -4587,14 +5296,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GuestHouseProfileRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/GuestHouseProfileRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/GuestHouseProfileRequest'
-        required: true
+              $ref: '#/components/schemas/VerifyActionRequest'
       security:
       - jwtAuth: []
       responses:
@@ -4602,7 +5310,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GuestHouseProfile'
+                $ref: '#/components/schemas/GuestHouseProfileResponse'
           description: ''
   /api/v1/listing/guest-houses/check-availability/:
     get:
@@ -5176,7 +5884,26 @@ paths:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/listing/properties/:
     get:
       operationId: v1_listing_properties_list
@@ -5347,14 +6074,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PropertyListingRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PropertyListingRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PropertyListingRequest'
-        required: true
+              $ref: '#/components/schemas/VerifyActionRequest'
       security:
       - jwtAuth: []
       responses:
@@ -5381,14 +6107,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PropertyListingRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PropertyListingRequest'
+              $ref: '#/components/schemas/VerifyActionRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PropertyListingRequest'
-        required: true
+              $ref: '#/components/schemas/VerifyActionRequest'
       security:
       - jwtAuth: []
       responses:
@@ -5397,6 +6122,383 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PropertyListingResponse'
+          description: ''
+  /api/v1/listing/property-rentals/bookings/:
+    post:
+      operationId: v1_listing_property_rentals_bookings_create
+      tags:
+      - Property Rental Bookings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PropertyRentalBookingRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PropertyRentalBookingRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PropertyRentalBookingRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyRentalBookingResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/listing/property-rentals/bookings/{id}/:
+    get:
+      operationId: v1_listing_property_rentals_bookings_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Property Rental Booking.
+        required: true
+      tags:
+      - Property Rental Bookings
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyRentalBookingResponse'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/listing/property-rentals/bookings/{id}/cancel/:
+    post:
+      operationId: v1_listing_property_rentals_bookings_cancel_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Property Rental Booking.
+        required: true
+      tags:
+      - Property Rental Bookings
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertyRentalBookingResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/listing/property-rentals/bookings/price-preview/:
+    post:
+      operationId: v1_listing_property_rentals_bookings_price_preview_create
+      tags:
+      - Property Rental Bookings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PropertyRentalBookingPreviewRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PropertyRentalBookingPreviewRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PropertyRentalBookingPreviewRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PricePreviewResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/listing/property-sales/:
+    get:
+      operationId: v1_listing_property_sales_list
+      parameters:
+      - in: query
+        name: is_active
+        schema:
+          type: boolean
+      - in: query
+        name: is_furnished
+        schema:
+          type: boolean
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: property_type
+        schema:
+          type: string
+          enum:
+          - apartment
+          - commercial
+          - condo
+          - house
+          - land
+          - other
+          - villa
+        description: |-
+          * `apartment` - Apartment
+          * `condo` - Condo
+          * `villa` - Villa
+          * `house` - House
+          * `land` - Land
+          * `commercial` - Commercial
+          * `other` - Other
+      - name: search
+        required: false
+        in: query
+        description: A search term.
+        schema:
+          type: string
+      tags:
+      - Property Sales
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPropertySaleListingResponseList'
+          description: ''
+    post:
+      operationId: v1_listing_property_sales_create
+      tags:
+      - Property Sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PropertySaleListingRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PropertySaleListingRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PropertySaleListingRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertySaleListing'
+          description: ''
+  /api/v1/listing/property-sales/{id}/:
+    get:
+      operationId: v1_listing_property_sales_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Property Sale Listing.
+        required: true
+      tags:
+      - Property Sales
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertySaleListingResponse'
+          description: ''
+  /api/v1/listing/property-sales/{id}/request-contact/:
+    post:
+      operationId: v1_listing_property_sales_request_contact_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Property Sale Listing.
+        required: true
+      tags:
+      - Property Sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ContactRevealRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ContactRevealRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ContactRevealRequestRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/listing/property-sales/{id}/unverify/:
+    post:
+      operationId: v1_listing_property_sales_unverify_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Property Sale Listing.
+        required: true
+      tags:
+      - Property Sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertySaleListingResponse'
+          description: ''
+  /api/v1/listing/property-sales/{id}/verify/:
+    post:
+      operationId: v1_listing_property_sales_verify_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Property Sale Listing.
+        required: true
+      tags:
+      - Property Sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertySaleListingResponse'
           description: ''
   /api/v1/listing/rooms/:
     get:
@@ -5612,6 +6714,72 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
+          description: ''
+  /api/v1/listing/rooms/{id}/unverify/:
+    post:
+      operationId: v1_listing_rooms_unverify_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Room Listing.
+        required: true
+      tags:
+      - Accommodations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomListingResponse'
+          description: ''
+  /api/v1/listing/rooms/{id}/verify/:
+    post:
+      operationId: v1_listing_rooms_verify_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Room Listing.
+        required: true
+      tags:
+      - Accommodations
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/VerifyActionRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomListingResponse'
           description: ''
   /api/v1/listing/rooms/availability-matrix/:
     get:
@@ -5965,12 +7133,49 @@ paths:
           format: uuid
         required: true
       tags:
-      - v1
+      - Inventory Management
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StayAvailabilityUpdateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/StayAvailabilityUpdateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/StayAvailabilityUpdateRequest'
       security:
       - jwtAuth: []
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/listing/stays/search/:
     get:
       operationId: v1_listing_stays_search_retrieve
@@ -6097,6 +7302,7 @@ paths:
         name: company_id
         schema:
           type: string
+          format: uuid
         required: true
       tags:
       - Terms & Conditions
@@ -6122,6 +7328,7 @@ paths:
         name: gh_id
         schema:
           type: string
+          format: uuid
         required: true
       tags:
       - Terms & Conditions
@@ -6147,6 +7354,7 @@ paths:
         name: hotel_id
         schema:
           type: string
+          format: uuid
         required: true
       tags:
       - Terms & Conditions
@@ -6235,6 +7443,8 @@ paths:
         name: id
         schema:
           type: string
+          format: uuid
+        description: Notification UUID
         required: true
       tags:
       - Notifications
@@ -6257,6 +7467,8 @@ paths:
         name: id
         schema:
           type: string
+          format: uuid
+        description: Notification UUID
         required: true
       tags:
       - Notifications
@@ -6275,6 +7487,8 @@ paths:
         name: id
         schema:
           type: string
+          format: uuid
+        description: A UUID string identifying this Notification.
         required: true
       tags:
       - Notifications
@@ -6304,7 +7518,6 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
-                description: Unspecified response body
           description: ''
   /api/v1/notifications/bulk-delete/:
     delete:
@@ -6322,7 +7535,6 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
-                description: Unspecified response body
           description: ''
         '400':
           content:
@@ -6330,7 +7542,6 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
-                description: Unspecified response body
           description: ''
   /api/v1/notifications/mark-all-read/:
     post:
@@ -6360,7 +7571,6 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
-                description: Unspecified response body
           description: ''
   /api/v1/notifications/mark-read-batch/:
     post:
@@ -6390,7 +7600,6 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
-                description: Unspecified response body
           description: ''
   /api/v1/notifications/preferences/:
     get:
@@ -6440,7 +7649,6 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
-                description: Unspecified response body
           description: ''
   /api/v1/notifications/summary/:
     get:
@@ -6458,7 +7666,6 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
-                description: Unspecified response body
           description: ''
   /api/v1/notifications/templates/:
     get:
@@ -6633,7 +7840,178 @@ paths:
               schema:
                 type: object
                 additionalProperties: {}
-                description: Unspecified response body
+          description: ''
+  /api/v1/payment/admin/transactions/:
+    get:
+      operationId: v1_payment_admin_transactions_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - Admin Payments
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTransactionMonitorListList'
+          description: ''
+  /api/v1/payment/admin/transactions/{id}/:
+    get:
+      operationId: v1_payment_admin_transactions_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Payment Transaction.
+        required: true
+      tags:
+      - Admin Payments
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TransactionMonitorDetail'
+          description: ''
+  /api/v1/payment/admin/transactions/{id}/dispute/:
+    patch:
+      operationId: v1_payment_admin_transactions_dispute_partial_update
+      summary: Update a payment transaction dispute
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Payment Transaction.
+        required: true
+      tags:
+      - Admin Payments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDisputeActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedDisputeActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedDisputeActionRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisputeStatus'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/payment/admin/transactions/{id}/dispute/open/:
+    post:
+      operationId: v1_payment_admin_transactions_dispute_open_create
+      summary: Open a payment transaction dispute
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Payment Transaction.
+        required: true
+      tags:
+      - Admin Payments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisputeActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DisputeActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DisputeActionRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisputeStatus'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/payment/admin/transactions/{id}/dispute/resolve/:
+    post:
+      operationId: v1_payment_admin_transactions_dispute_resolve_create
+      summary: Resolve a payment transaction dispute
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Payment Transaction.
+        required: true
+      tags:
+      - Admin Payments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DisputeActionRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/DisputeActionRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/DisputeActionRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisputeStatus'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /api/v1/payment/callback/chapa/:
     get:
@@ -6994,8 +8372,281 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/v1/promotions/campaigns/:
+    get:
+      operationId: v1_promotions_campaigns_list
+      parameters:
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPromotionCampaignList'
+          description: ''
+    post:
+      operationId: v1_promotions_campaigns_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromotionCampaignRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PromotionCampaignRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PromotionCampaignRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromotionCampaign'
+          description: ''
+  /api/v1/promotions/campaigns/{id}/:
+    get:
+      operationId: v1_promotions_campaigns_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this promotion campaign.
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromotionCampaignDetail'
+          description: ''
+    put:
+      operationId: v1_promotions_campaigns_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this promotion campaign.
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromotionCampaignRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PromotionCampaignRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PromotionCampaignRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromotionCampaign'
+          description: ''
+    patch:
+      operationId: v1_promotions_campaigns_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this promotion campaign.
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPromotionCampaignRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPromotionCampaignRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPromotionCampaignRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromotionCampaign'
+          description: ''
+    delete:
+      operationId: v1_promotions_campaigns_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this promotion campaign.
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/v1/promotions/campaigns/{id}/placements/:
+    get:
+      operationId: v1_promotions_campaigns_placements_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this promotion campaign.
+        required: true
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromotionCampaign'
+          description: ''
+    post:
+      operationId: v1_promotions_campaigns_placements_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this promotion campaign.
+        required: true
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PromotionCampaignRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PromotionCampaignRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PromotionCampaignRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PromotionCampaign'
+          description: ''
+  /api/v1/promotions/placements/:
+    get:
+      operationId: v1_promotions_placements_list
+      tags:
+      - v1
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PublicPlacement'
+          description: ''
+  /api/v1/promotions/track/:
+    post:
+      operationId: v1_promotions_track_create
+      tags:
+      - v1
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TrackingEventRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TrackingEventRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TrackingEventRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '204':
+          description: No response body
 components:
   schemas:
+    ActiveListingMetric:
+      type: object
+      properties:
+        category:
+          type: string
+        count:
+          type: integer
+      required:
+      - category
+      - count
+    AddonCategoryEnum:
+      enum:
+      - meal
+      - transport
+      - service
+      - amenity
+      type: string
+      description: |-
+        * `meal` - Meal/Food
+        * `transport` - Transportation
+        * `service` - Service
+        * `amenity` - Amenity/Equipment
     AddonOffering:
       type: object
       properties:
@@ -7016,7 +8667,7 @@ components:
           type: string
           description: Detailed description of the addon service
         category:
-          $ref: '#/components/schemas/Category6daEnum'
+          $ref: '#/components/schemas/AddonCategoryEnum'
         price_per_unit:
           type: string
           format: decimal
@@ -7111,7 +8762,7 @@ components:
           description: Detailed description of the addon service
         category:
           allOf:
-          - $ref: '#/components/schemas/Category6daEnum'
+          - $ref: '#/components/schemas/AddonCategoryEnum'
           readOnly: true
         price_per_unit:
           type: string
@@ -7178,7 +8829,7 @@ components:
           type: string
           description: Detailed description of the addon service
         category:
-          $ref: '#/components/schemas/Category6daEnum'
+          $ref: '#/components/schemas/AddonCategoryEnum'
         price_per_unit:
           type: string
           format: decimal
@@ -7324,6 +8975,73 @@ components:
       required:
       - city
       - street_line1
+    AddressSchema:
+      type: object
+      properties:
+        city:
+          type: string
+        country:
+          type: string
+        sub_city:
+          type: string
+          nullable: true
+        street_line1:
+          type: string
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        postal_code:
+          type: string
+          nullable: true
+      required:
+      - city
+      - country
+      - street_line1
+    AddressSchemaRequest:
+      type: object
+      properties:
+        city:
+          type: string
+          minLength: 1
+        country:
+          type: string
+          minLength: 1
+        sub_city:
+          type: string
+          nullable: true
+        street_line1:
+          type: string
+          minLength: 1
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        state:
+          type: string
+          nullable: true
+        postal_code:
+          type: string
+          nullable: true
+      required:
+      - city
+      - country
+      - street_line1
     AmenityResponseS:
       type: object
       properties:
@@ -7395,6 +9113,9 @@ components:
         * `twin` - Twin
         * `double` - Double
         * `mixed` - Mixed/Multiple
+    BlankEnum:
+      enum:
+      - ''
     Booking:
       type: object
       properties:
@@ -7415,7 +9136,7 @@ components:
           description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
         status:
           allOf:
-          - $ref: '#/components/schemas/Status01bEnum'
+          - $ref: '#/components/schemas/BookingStatusEnum'
           readOnly: true
         guest_first_name:
           type: string
@@ -7471,7 +9192,7 @@ components:
           type: string
           description: Detailed description of the addon
         category:
-          $ref: '#/components/schemas/Category6daEnum'
+          $ref: '#/components/schemas/AddonCategoryEnum'
         quantity:
           type: integer
           maximum: 2147483647
@@ -7762,7 +9483,7 @@ components:
           description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
           maxLength: 3
         status:
-          $ref: '#/components/schemas/Status01bEnum'
+          $ref: '#/components/schemas/BookingStatusEnum'
         items:
           type: array
           items:
@@ -7847,6 +9568,18 @@ components:
       - total_addon_cost
       - total_price
       - total_room_cost
+    BookingStatusEnum:
+      enum:
+      - pending
+      - confirmed
+      - cancelled
+      - walk_in
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `confirmed` - Confirmed
+        * `cancelled` - Cancelled
+        * `walk_in` - Walk-In
     BrandEnum:
       enum:
       - toyota
@@ -8009,18 +9742,6 @@ components:
       required:
       - end_date
       - start_date
-    CarAvailabilityRequest:
-      type: object
-      properties:
-        date:
-          type: string
-          format: date
-        available_units:
-          type: integer
-          maximum: 2147483647
-          minimum: 0
-      required:
-      - date
     CarAvailabilityUpdate:
       type: object
       properties:
@@ -8185,6 +9906,17 @@ components:
       - title
       - transmission
       - year
+    CarListingCurrentAvailability:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        available_units:
+          type: integer
+      required:
+      - available_units
+      - date
     CarListingRequest:
       type: object
       properties:
@@ -8465,7 +10197,8 @@ components:
             $ref: '#/components/schemas/CarAvailability'
           readOnly: true
         current_availability:
-          type: string
+          allOf:
+          - $ref: '#/components/schemas/CarListingCurrentAvailability'
           readOnly: true
         created_at:
           type: string
@@ -8481,7 +10214,8 @@ components:
           readOnly: true
           description: Metadata about currency conversion if requested
         price_quote:
-          type: string
+          allOf:
+          - $ref: '#/components/schemas/ListingPriceQuote'
           readOnly: true
           description: Complete pricing breakdown including platform fees. Populated
             only when check_in/check_out dates are provided.
@@ -8498,6 +10232,11 @@ components:
           format: uuid
           readOnly: true
           nullable: true
+        verification_note:
+          type: string
+          nullable: true
+          description: Optional note recorded by an administrator during verification.
+          maxLength: 500
       required:
       - availabilities
       - brand
@@ -8515,148 +10254,6 @@ components:
       - transmission
       - updated_at
       - verified_by
-      - year
-    CarListingResponseRequest:
-      type: object
-      properties:
-        title:
-          type: string
-          minLength: 1
-          description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
-          maxLength: 255
-        description:
-          type: string
-          description: Detailed description of the listing.
-        base_price:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
-          nullable: true
-          title: Price
-          description: Price of the service/product (if applicable).
-        booking_forward_window_days:
-          type: integer
-          maximum: 2147483647
-          minimum: 0
-          description: Maximum number of days ahead a booking can start for this listing.
-        is_active:
-          type: boolean
-          description: Whether the listing is active and visible.
-        brand:
-          allOf:
-          - $ref: '#/components/schemas/BrandEnum'
-          description: |-
-            Car brand, e.g., Toyota, BMW.
-
-            * `toyota` - Toyota
-            * `bmw` - BMW
-            * `Mercedes-Benz` - Mercedes-Benz
-            * `audi` - Audi
-            * `Volkswagen` - Volkswagen
-            * `honda` - Honda
-            * `ford` - Ford
-            * `nissan` - Nissan
-            * `chevrolet` - Chevrolet
-            * `kia` - Kia
-            * `hyundai` - Hyundai
-            * `volvo` - Volvo
-            * `jeep` - Jeep
-            * `porsche` - Porsche
-            * `lexus` - Lexus
-            * `mazda` - Mazda
-            * `land_rover` - Land Rover
-            * `subaru` - Subaru
-            * `fiat` - Fiat
-            * `peugeot` - Peugeot
-        model:
-          type: string
-          minLength: 1
-          description: Car model, e.g., Camry, X5.
-          maxLength: 100
-        year:
-          type: integer
-          maximum: 2147483647
-          minimum: 0
-          description: Manufacturing year of the car.
-        mileage:
-          type: integer
-          maximum: 2147483647
-          minimum: 0
-          title: Mileage (km)
-          description: Mileage of the car in kilometers.
-        fuel_type:
-          allOf:
-          - $ref: '#/components/schemas/FuelTypeEnum'
-          title: Engine Type
-        transmission:
-          $ref: '#/components/schemas/TransmissionEnum'
-        condition:
-          $ref: '#/components/schemas/ConditionEnum'
-        listing_type:
-          allOf:
-          - $ref: '#/components/schemas/ListingTypeEnum'
-          description: |-
-            Whether the item is For sell or Rent.
-
-            * `sale` - For Sale
-            * `rent` - For Rent
-        rental_mode:
-          allOf:
-          - $ref: '#/components/schemas/RentalModeEnum'
-          description: |-
-            Whether the vehicle is rented with a driver or as a self-drive booking.
-
-            * `with_driver` - With Driver
-            * `without_driver` - Without Driver
-        car_class:
-          allOf:
-          - $ref: '#/components/schemas/CarClassEnum'
-          title: Class Category
-        quantity:
-          type: integer
-          maximum: 32767
-          minimum: 0
-        company:
-          type: string
-          format: uuid
-          nullable: true
-          description: The company that owns this listing.
-        seats:
-          type: integer
-          maximum: 32767
-          minimum: 0
-        individual_owner:
-          type: string
-          format: uuid
-          nullable: true
-          description: The individual person that owns this listing.
-        requires_code_3:
-          type: boolean
-          description: Whether self-drive renters must provide a Code 3 license/permit.
-        requires_business_license:
-          type: boolean
-          description: Whether self-drive renters must provide a business license
-            number.
-        pre_rental_requirements:
-          type: string
-          description: Owner-defined instructions or compliance notes that renters
-            must review before booking.
-        is_verified:
-          type: boolean
-          description: Whether the listing has been verified by an administrator.
-        verified_at:
-          type: string
-          format: date-time
-          nullable: true
-          description: When the listing was last verified by an administrator.
-      required:
-      - brand
-      - condition
-      - fuel_type
-      - mileage
-      - model
-      - title
-      - transmission
       - year
     CarRental:
       type: object
@@ -8997,30 +10594,384 @@ components:
         * `pending` - Pending
         * `confirmed` - Confirmed
         * `cancelled` - Cancelled
-    Category6daEnum:
-      enum:
-      - meal
-      - transport
-      - service
-      - amenity
-      type: string
-      description: |-
-        * `meal` - Meal/Food
-        * `transport` - Transportation
-        * `service` - Service
-        * `amenity` - Amenity/Equipment
-    Category70bEnum:
-      enum:
-      - hotel
-      - pension
-      - house
-      - vehicle
-      type: string
-      description: |-
-        * `hotel` - Hotel
-        * `pension` - Pension
-        * `house` - House
-        * `vehicle` - Vehicle
+    CarSaleContact:
+      type: object
+      properties:
+        listing_id:
+          type: string
+          format: uuid
+        request_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        seller_contact_name:
+          type: string
+        seller_phone:
+          type: string
+        seller_email:
+          type: string
+          format: email
+        off_platform_notice:
+          type: string
+      required:
+      - listing_id
+      - off_platform_notice
+      - request_id
+      - seller_contact_name
+      - seller_phone
+      - status
+    CarSaleListing:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
+          maxLength: 255
+        description:
+          type: string
+          description: Detailed description of the listing.
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          title: Price
+          description: Price of the service/product (if applicable).
+        currency:
+          type: string
+          description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
+          maxLength: 3
+        company:
+          type: string
+          format: uuid
+          nullable: true
+        individual_owner:
+          type: string
+          format: uuid
+          nullable: true
+        brand:
+          $ref: '#/components/schemas/BrandEnum'
+        model:
+          type: string
+          maxLength: 100
+        year:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        mileage:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          title: Mileage (km)
+        fuel_type:
+          allOf:
+          - $ref: '#/components/schemas/FuelTypeEnum'
+          title: Engine Type
+        transmission:
+          $ref: '#/components/schemas/TransmissionEnum'
+        condition:
+          $ref: '#/components/schemas/ConditionEnum'
+        car_class:
+          allOf:
+          - $ref: '#/components/schemas/CarClassEnum'
+          title: Class Category
+        seats:
+          type: integer
+          maximum: 32767
+          minimum: 0
+        seller_contact_name:
+          type: string
+          maxLength: 150
+        seller_phone:
+          type: string
+          maxLength: 20
+        seller_email:
+          type: string
+          format: email
+        reveal_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - brand
+      - condition
+      - fuel_type
+      - mileage
+      - model
+      - seller_phone
+      - title
+      - transmission
+      - year
+    CarSaleListingRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
+          maxLength: 255
+        description:
+          type: string
+          description: Detailed description of the listing.
+        images:
+          type: array
+          items:
+            type: string
+            format: binary
+          writeOnly: true
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          title: Price
+          description: Price of the service/product (if applicable).
+        currency:
+          type: string
+          minLength: 1
+          description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
+          maxLength: 3
+        company:
+          type: string
+          format: uuid
+          nullable: true
+        individual_owner:
+          type: string
+          format: uuid
+          nullable: true
+        brand:
+          $ref: '#/components/schemas/BrandEnum'
+        model:
+          type: string
+          minLength: 1
+          maxLength: 100
+        year:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        mileage:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          title: Mileage (km)
+        fuel_type:
+          allOf:
+          - $ref: '#/components/schemas/FuelTypeEnum'
+          title: Engine Type
+        transmission:
+          $ref: '#/components/schemas/TransmissionEnum'
+        condition:
+          $ref: '#/components/schemas/ConditionEnum'
+        car_class:
+          allOf:
+          - $ref: '#/components/schemas/CarClassEnum'
+          title: Class Category
+        seats:
+          type: integer
+          maximum: 32767
+          minimum: 0
+        seller_contact_name:
+          type: string
+          maxLength: 150
+        seller_phone:
+          type: string
+          minLength: 1
+          maxLength: 20
+        seller_email:
+          type: string
+          format: email
+        reveal_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - brand
+      - condition
+      - fuel_type
+      - mileage
+      - model
+      - seller_phone
+      - title
+      - transmission
+      - year
+    CarSaleListingResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+          description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
+        description:
+          type: string
+          readOnly: true
+          description: Detailed description of the listing.
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListingImage'
+          readOnly: true
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+          title: Price
+          description: Price of the service/product (if applicable).
+        currency:
+          type: string
+          readOnly: true
+          description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
+        brand:
+          allOf:
+          - $ref: '#/components/schemas/BrandEnum'
+          readOnly: true
+        model:
+          type: string
+          readOnly: true
+        year:
+          type: integer
+          readOnly: true
+        mileage:
+          type: integer
+          readOnly: true
+          title: Mileage (km)
+        fuel_type:
+          allOf:
+          - $ref: '#/components/schemas/FuelTypeEnum'
+          readOnly: true
+          title: Engine Type
+        transmission:
+          allOf:
+          - $ref: '#/components/schemas/TransmissionEnum'
+          readOnly: true
+        condition:
+          allOf:
+          - $ref: '#/components/schemas/ConditionEnum'
+          readOnly: true
+        car_class:
+          allOf:
+          - $ref: '#/components/schemas/CarClassEnum'
+          readOnly: true
+          title: Class Category
+        seats:
+          type: integer
+          readOnly: true
+        company:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        individual_owner:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        reveal_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+          description: Whether the listing is active and visible.
+        is_verified:
+          type: boolean
+          readOnly: true
+          description: Whether the listing has been verified by an administrator.
+        verified_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the listing was last verified by an administrator.
+        verified_by:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        verification_note:
+          type: string
+          readOnly: true
+          nullable: true
+          description: Optional note recorded by an administrator during verification.
+        reveal_state:
+          allOf:
+          - $ref: '#/components/schemas/CarSaleRevealState'
+          readOnly: true
+        conversion:
+          allOf:
+          - $ref: '#/components/schemas/CurrencyConversionMetadata'
+          readOnly: true
+          description: Metadata about currency conversion if requested
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - base_price
+      - brand
+      - car_class
+      - company
+      - condition
+      - conversion
+      - created_at
+      - currency
+      - description
+      - fuel_type
+      - id
+      - images
+      - individual_owner
+      - is_active
+      - is_verified
+      - mileage
+      - model
+      - reveal_fee
+      - reveal_state
+      - seats
+      - title
+      - transmission
+      - updated_at
+      - verification_note
+      - verified_at
+      - verified_by
+      - year
+    CarSaleRevealState:
+      type: object
+      properties:
+        status:
+          type: string
+          nullable: true
+        request_id:
+          type: string
+          format: uuid
+          nullable: true
+        tx_ref:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        unlocked_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - expires_at
+      - request_id
+      - status
+      - tx_ref
+      - unlocked_at
     ChangePasswordRequest:
       type: object
       properties:
@@ -9068,6 +11019,18 @@ components:
         signature:
           type: string
           minLength: 1
+    CompanyCategoryEnum:
+      enum:
+      - hotel
+      - pension
+      - house
+      - vehicle
+      type: string
+      description: |-
+        * `hotel` - Hotel
+        * `pension` - Pension
+        * `house` - House
+        * `vehicle` - Vehicle
     CompanyProfileRequest:
       type: object
       properties:
@@ -9085,7 +11048,7 @@ components:
           title: Company Name
           maxLength: 100
         address:
-          $ref: '#/components/schemas/AddressRequest'
+          $ref: '#/components/schemas/AddressSchemaRequest'
         phone:
           type: string
           minLength: 1
@@ -9096,7 +11059,7 @@ components:
           format: binary
           nullable: true
         category:
-          $ref: '#/components/schemas/Category70bEnum'
+          $ref: '#/components/schemas/CompanyCategoryEnum'
         tin:
           type: string
           nullable: true
@@ -9141,7 +11104,7 @@ components:
           title: Phone Number
           maxLength: 15
         category:
-          $ref: '#/components/schemas/Category70bEnum'
+          $ref: '#/components/schemas/CompanyCategoryEnum'
         description:
           type: string
         address:
@@ -9210,7 +11173,7 @@ components:
           format: binary
           nullable: true
         category:
-          $ref: '#/components/schemas/Category70bEnum'
+          $ref: '#/components/schemas/CompanyCategoryEnum'
         description:
           type: string
         phone:
@@ -9227,7 +11190,7 @@ components:
           nullable: true
           maxLength: 50
         address:
-          $ref: '#/components/schemas/AddressRequest'
+          $ref: '#/components/schemas/AddressSchemaRequest'
       required:
       - address
       - category
@@ -9246,6 +11209,14 @@ components:
       description: |-
         * `new` - Brand New
         * `used` - Used
+    ContactRevealRequestRequest:
+      type: object
+      properties:
+        buyer_note:
+          type: string
+        buyer_phone:
+          type: string
+          maxLength: 20
     ConversionInputRequest:
       type: object
       description: Serializer for validating currency conversion input.
@@ -9355,6 +11326,56 @@ components:
       required:
       - email
       - password
+    DisputeActionRequest:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/PaymentTransactionDisputeStatusEnum'
+        note:
+          type: string
+    DisputeStatus:
+      type: object
+      properties:
+        dispute_status:
+          readOnly: true
+          nullable: true
+          description: |-
+            Admin dispute triage status for this transaction
+
+            * `open` - Open
+            * `under_review` - Under Review
+            * `escalated` - Escalated
+            * `resolved` - Resolved
+          oneOf:
+          - $ref: '#/components/schemas/PaymentTransactionDisputeStatusEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        dispute_note:
+          type: string
+          readOnly: true
+          nullable: true
+          description: Latest admin note for transaction dispute triage
+        dispute_opened_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When dispute triage was opened
+        dispute_resolved_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When dispute triage was resolved
+        handled_by:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+      required:
+      - dispute_note
+      - dispute_opened_at
+      - dispute_resolved_at
+      - dispute_status
+      - handled_by
     EventSpaceBooking:
       type: object
       description: Main serializer for creating a new Event Space Booking.
@@ -9597,7 +11618,7 @@ components:
           readOnly: true
           description: Total cost of all event space units
         status:
-          $ref: '#/components/schemas/Status01bEnum'
+          $ref: '#/components/schemas/BookingStatusEnum'
         items:
           type: array
           items:
@@ -9707,10 +11728,12 @@ components:
           minimum: 0
           description: Maximum number of days ahead a booking can start for this listing.
         address:
-          $ref: '#/components/schemas/Address'
+          $ref: '#/components/schemas/AddressSchema'
         amenities:
-          type: object
-          additionalProperties: {}
+          type: array
+          items:
+            type: string
+            format: uuid
         number_of_guests:
           type: integer
           maximum: 2147483647
@@ -9771,10 +11794,12 @@ components:
           minimum: 0
           description: Maximum number of days ahead a booking can start for this listing.
         address:
-          $ref: '#/components/schemas/AddressRequest'
+          $ref: '#/components/schemas/AddressSchemaRequest'
         amenities:
-          type: object
-          additionalProperties: {}
+          type: array
+          items:
+            type: string
+            format: uuid
         number_of_guests:
           type: integer
           maximum: 2147483647
@@ -9857,7 +11882,8 @@ components:
           readOnly: true
           description: Metadata about currency conversion if requested
         price_quote:
-          type: string
+          allOf:
+          - $ref: '#/components/schemas/ListingPriceQuote'
           readOnly: true
           description: Complete pricing breakdown including platform fees. Populated
             only when check_in/check_out dates are provided.
@@ -9874,6 +11900,11 @@ components:
           format: uuid
           readOnly: true
           nullable: true
+        verification_note:
+          type: string
+          nullable: true
+          description: Optional note recorded by an administrator during verification.
+          maxLength: 500
       required:
       - amenities
       - conversion
@@ -9948,6 +11979,16 @@ components:
       required:
       - id
       - name
+    FailureReasonMetric:
+      type: object
+      properties:
+        reason:
+          type: string
+        count:
+          type: integer
+      required:
+      - count
+      - reason
     Favorite:
       type: object
       properties:
@@ -10181,7 +12222,7 @@ components:
           readOnly: true
         status:
           allOf:
-          - $ref: '#/components/schemas/Status01bEnum'
+          - $ref: '#/components/schemas/BookingStatusEnum'
           readOnly: true
         conversion:
           allOf:
@@ -10382,6 +12423,13 @@ components:
       - end_date
       - items
       - start_date
+    GuestHouseFacilityPayload:
+      type: object
+      properties:
+        name:
+          type: string
+      required:
+      - name
     GuestHouseProfile:
       type: object
       properties:
@@ -10412,10 +12460,12 @@ components:
           type: string
           description: Detailed description of the listing.
         amenities:
-          type: object
-          additionalProperties: {}
+          type: array
+          items:
+            type: string
+            format: uuid
         address:
-          $ref: '#/components/schemas/Address'
+          $ref: '#/components/schemas/AddressSchema'
         facility:
           type: array
           items:
@@ -10475,10 +12525,12 @@ components:
           type: string
           description: Detailed description of the listing.
         amenities:
-          type: object
-          additionalProperties: {}
+          type: array
+          items:
+            type: string
+            format: uuid
         address:
-          $ref: '#/components/schemas/AddressRequest'
+          $ref: '#/components/schemas/AddressSchemaRequest'
         facility:
           type: array
           items:
@@ -10544,10 +12596,12 @@ components:
           title: Average Rating
           description: Average rating from user reviews (0–5).
         facility:
-          type: string
+          type: array
+          items:
+            $ref: '#/components/schemas/GuestHouseFacilityPayload'
           readOnly: true
         is_favorite:
-          type: string
+          type: boolean
           readOnly: true
         rooms:
           type: array
@@ -10589,6 +12643,11 @@ components:
           format: uuid
           readOnly: true
           nullable: true
+        verification_note:
+          type: string
+          nullable: true
+          description: Optional note recorded by an administrator during verification.
+          maxLength: 500
       required:
       - address
       - amenities
@@ -10764,7 +12823,7 @@ components:
           title: Total Rooms of This Type
           description: How many rooms of this type exist in the guest house.
         available_units:
-          type: string
+          type: integer
           readOnly: true
         bed_type:
           $ref: '#/components/schemas/BedTypeEnum'
@@ -10773,13 +12832,32 @@ components:
           maximum: 2147483647
           minimum: 0
           nullable: true
+        is_verified:
+          type: boolean
+          description: Whether the listing has been verified by an administrator.
+        verified_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the listing was last verified by an administrator.
+        verified_by:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        verification_note:
+          type: string
+          nullable: true
+          description: Optional note recorded by an administrator during verification.
+          maxLength: 500
         conversion:
           allOf:
           - $ref: '#/components/schemas/CurrencyConversionMetadata'
           readOnly: true
           description: Metadata about currency conversion if requested
         price_quote:
-          type: string
+          allOf:
+          - $ref: '#/components/schemas/ListingPriceQuote'
           readOnly: true
           description: Complete pricing breakdown including platform fees. Populated
             only when check_in/check_out dates are provided.
@@ -10791,6 +12869,53 @@ components:
       - images
       - price_quote
       - title
+      - verified_by
+    HotelProfile:
+      type: object
+      properties:
+        name:
+          type: string
+          title: Hotel Name
+          maxLength: 255
+        description:
+          type: string
+        phone:
+          type: string
+          nullable: true
+          title: Phone Number
+          maxLength: 20
+        website:
+          type: string
+          format: uri
+          nullable: true
+          maxLength: 200
+        address:
+          $ref: '#/components/schemas/AddressSchema'
+        license:
+          type: string
+          format: uri
+        logo:
+          type: string
+          format: uri
+        stars:
+          type: integer
+          maximum: 32767
+          minimum: 0
+          nullable: true
+        featured:
+          type: boolean
+          nullable: true
+        facilities:
+          type: object
+          additionalProperties: {}
+        images:
+          type: array
+          items:
+            type: string
+            format: uri
+      required:
+      - address
+      - facilities
     HotelProfileDoc:
       type: object
       properties:
@@ -10848,7 +12973,7 @@ components:
           nullable: true
           maxLength: 200
         address:
-          $ref: '#/components/schemas/AddressRequest'
+          $ref: '#/components/schemas/AddressSchemaRequest'
         license:
           type: string
           format: binary
@@ -10888,6 +13013,18 @@ components:
       - available_units
       - room_id
       - room_name
+    IndividualOwnerAgreementStatus:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/OwnerComplianceAgreementStatusEnum'
+        signed_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - signed_at
+      - status
     IndividualOwnerProfileRequest:
       type: object
       properties:
@@ -10942,8 +13079,13 @@ components:
           type: string
           title: Phone Number
           maxLength: 15
+        agreement_status:
+          allOf:
+          - $ref: '#/components/schemas/IndividualOwnerAgreementStatus'
+          readOnly: true
       required:
       - address
+      - agreement_status
       - first_name
       - id
       - last_name
@@ -10976,6 +13118,96 @@ components:
           maxLength: 255
       required:
       - image
+    ListingPriceQuote:
+      type: object
+      properties:
+        breakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListingPriceQuoteBreakdownItem'
+        daily_breakdown:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListingPriceQuoteDailyBreakdownItem'
+        items_subtotal:
+          type: string
+        subtotal:
+          type: string
+        base_total:
+          type: string
+        platform_fee:
+          type: string
+        platform_fee_percentage:
+          type: string
+        total:
+          type: string
+        currency:
+          type: string
+        has_discount:
+          type: boolean
+        min_price_per_unit:
+          type: string
+        min_nightly_price:
+          type: string
+      required:
+      - base_total
+      - breakdown
+      - currency
+      - daily_breakdown
+      - has_discount
+      - items_subtotal
+      - min_nightly_price
+      - min_price_per_unit
+      - platform_fee
+      - platform_fee_percentage
+      - subtotal
+      - total
+    ListingPriceQuoteBreakdownItem:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        price_per_unit:
+          type: string
+        units:
+          type: integer
+        daily_total:
+          type: string
+        source:
+          type: string
+        is_discounted:
+          type: boolean
+      required:
+      - daily_total
+      - date
+      - is_discounted
+      - price_per_unit
+      - source
+      - units
+    ListingPriceQuoteDailyBreakdownItem:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        price_per_unit:
+          type: string
+        units:
+          type: integer
+        daily_total:
+          type: string
+        source:
+          type: string
+        is_discounted:
+          type: boolean
+      required:
+      - daily_total
+      - date
+      - is_discounted
+      - price_per_unit
+      - source
+      - units
     ListingTypeEnum:
       enum:
       - sale
@@ -11255,6 +13487,7 @@ components:
       - booking_cancelled
       - payment_success
       - payment_failed
+      - contact_reveal_unlocked
       - listing_deleted
       - company_approved
       - company_rejected
@@ -11270,12 +13503,16 @@ components:
         * `booking_cancelled` - Booking Cancelled
         * `payment_success` - Payment Successful
         * `payment_failed` - Payment Failed
+        * `contact_reveal_unlocked` - Contact Reveal Unlocked
         * `listing_deleted` - Listing Deleted
         * `company_approved` - Company Approved
         * `company_rejected` - Company Rejected
         * `new_booking_received` - New Booking Received
         * `payout_completed` - Payout Completed
         * `new_company_registration` - New Company Registration
+    NullEnum:
+      enum:
+      - null
     OtpRequestRequest:
       type: object
       properties:
@@ -11289,10 +13526,41 @@ components:
           default: login
       required:
       - phone
+    OtpResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        challenge_id:
+          type: string
+          format: uuid
+        challenge_token:
+          type: string
+          format: uuid
+        purpose:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        cooldown_seconds:
+          type: integer
+        phone:
+          type: string
+      required:
+      - challenge_id
+      - challenge_token
+      - cooldown_seconds
+      - expires_at
+      - phone
+      - purpose
+      - success
     OtpVerifyRequest:
       type: object
       properties:
         challenge_id:
+          type: string
+          format: uuid
+        challenge_token:
           type: string
           format: uuid
         code:
@@ -11304,7 +13572,6 @@ components:
           - $ref: '#/components/schemas/PurposeEnum'
           default: login
       required:
-      - challenge_id
       - code
     Overview:
       type: object
@@ -11332,6 +13599,105 @@ components:
       - confirmed_bookings
       - total_bookings
       - total_revenue
+    OverviewMetrics:
+      type: object
+      properties:
+        total_revenue:
+          type: number
+          format: double
+        total_transactions:
+          type: integer
+        pending_approvals:
+          type: integer
+        active_listings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActiveListingMetric'
+        total_users:
+          type: integer
+        new_users_in_range:
+          type: integer
+      required:
+      - active_listings
+      - new_users_in_range
+      - pending_approvals
+      - total_revenue
+      - total_transactions
+      - total_users
+    OwnerComplianceAgreement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        status:
+          $ref: '#/components/schemas/OwnerComplianceAgreementStatusEnum'
+        signed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        signed_by_admin:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        agreement_version:
+          type: string
+          maxLength: 50
+        note:
+          type: string
+      required:
+      - agreement_version
+      - id
+      - signed_at
+      - signed_by_admin
+    OwnerComplianceAgreementCreateRequest:
+      type: object
+      properties:
+        agreement_version:
+          type: string
+          minLength: 1
+          maxLength: 50
+        note:
+          type: string
+      required:
+      - agreement_version
+    OwnerComplianceAgreementRead:
+      type: object
+      properties:
+        status:
+          allOf:
+          - $ref: '#/components/schemas/OwnerComplianceAgreementStatusEnum'
+          readOnly: true
+        signed_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        agreement_version:
+          type: string
+          readOnly: true
+      required:
+      - agreement_version
+      - signed_at
+      - status
+    OwnerComplianceAgreementRevokeRequest:
+      type: object
+      properties:
+        note:
+          type: string
+    OwnerComplianceAgreementStatusEnum:
+      enum:
+      - pending
+      - signed
+      - revoked
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `signed` - Signed
+        * `revoked` - Revoked
     OwnerPaymentTransaction:
       type: object
       description: |-
@@ -11353,7 +13719,7 @@ components:
           type: string
           maxLength: 3
         status:
-          $ref: '#/components/schemas/OwnerPaymentTransactionStatusEnum'
+          $ref: '#/components/schemas/PaymentTransactionStatusEnum'
         payment_method:
           type: string
           nullable: true
@@ -11364,7 +13730,7 @@ components:
           readOnly: true
         booking_type:
           allOf:
-          - $ref: '#/components/schemas/OwnerPaymentTransactionBookingTypeEnum'
+          - $ref: '#/components/schemas/PaymentTransactionBookingTypeEnum'
           description: |-
             Discriminator for the type of booking
 
@@ -11372,6 +13738,8 @@ components:
             * `guesthouse` - Guesthouse
             * `eventspace` - Event Space
             * `carrental` - Car Rental
+            * `propertyrental` - Property Rental
+            * `contact_reveal` - Contact Reveal
         booking_reference:
           type: string
           readOnly: true
@@ -11382,8 +13750,41 @@ components:
           type: string
           readOnly: true
         booking_dates:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        owner_price:
           type: string
           readOnly: true
+        service_fee:
+          type: string
+          readOnly: true
+        tax_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+          description: Tax amount collected for eligible property rental transactions
+        tax_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,1}(?:\.\d{0,4})?$
+          nullable: true
+          description: Tax rate used for eligible property rental transactions
+        grand_total:
+          type: string
+          readOnly: true
+        tax_liability_status:
+          nullable: true
+          description: |-
+            Tax applicability status for this transaction
+
+            * `applicable` - Applicable
+            * `not_applicable` - Not Applicable
+          oneOf:
+          - $ref: '#/components/schemas/TaxLiabilityStatusEnum'
+          - $ref: '#/components/schemas/BlankEnum'
+          - $ref: '#/components/schemas/NullEnum'
         commission_rate:
           type: string
           format: decimal
@@ -11418,33 +13819,12 @@ components:
       - booking_reference
       - created_at
       - customer_name
+      - grand_total
       - id
       - listing_title
+      - owner_price
+      - service_fee
       - tx_ref
-    OwnerPaymentTransactionBookingTypeEnum:
-      enum:
-      - booking
-      - guesthouse
-      - eventspace
-      - carrental
-      type: string
-      description: |-
-        * `booking` - Hotel Room
-        * `guesthouse` - Guesthouse
-        * `eventspace` - Event Space
-        * `carrental` - Car Rental
-    OwnerPaymentTransactionStatusEnum:
-      enum:
-      - pending
-      - success
-      - failed
-      - cancelled
-      type: string
-      description: |-
-        * `pending` - Pending
-        * `success` - Success
-        * `failed` - Failed
-        * `cancelled` - Cancelled
     PaginatedAddonOfferingListList:
       type: object
       properties:
@@ -11590,6 +13970,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CarRental'
+    PaginatedCarSaleListingResponseList:
+      type: object
+      properties:
+        count:
+          type: integer
+          example: 123
+        total_pages:
+          type: integer
+          example: 15
+        current_page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 10
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=404
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarSaleListingResponse'
     PaginatedCompanyProfileResponseList:
       type: object
       properties:
@@ -12019,6 +14428,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/OwnerPaymentTransaction'
+    PaginatedPromotionCampaignList:
+      type: object
+      properties:
+        count:
+          type: integer
+          example: 123
+        total_pages:
+          type: integer
+          example: 15
+        current_page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 10
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=404
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromotionCampaign'
     PaginatedPropertyListingResponseList:
       type: object
       properties:
@@ -12048,6 +14486,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PropertyListingResponse'
+    PaginatedPropertySaleListingResponseList:
+      type: object
+      properties:
+        count:
+          type: integer
+          example: 123
+        total_pages:
+          type: integer
+          example: 15
+        current_page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 10
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=404
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/PropertySaleListingResponse'
     PaginatedRoleList:
       type: object
       properties:
@@ -12244,6 +14711,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TermsAndConditions'
+    PaginatedTransactionMonitorListList:
+      type: object
+      properties:
+        count:
+          type: integer
+          example: 123
+        total_pages:
+          type: integer
+          example: 15
+        current_page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 10
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=404
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TransactionMonitorList'
     PaginatedUserResponseList:
       type: object
       properties:
@@ -12345,7 +14841,7 @@ components:
           type: string
           description: Detailed description of the addon service
         category:
-          $ref: '#/components/schemas/Category6daEnum'
+          $ref: '#/components/schemas/AddonCategoryEnum'
         price_per_unit:
           type: string
           format: decimal
@@ -12647,6 +15143,88 @@ components:
 
             * `USD` - USD
             * `ETB` - ETB
+    PatchedCarSaleListingRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
+          maxLength: 255
+        description:
+          type: string
+          description: Detailed description of the listing.
+        images:
+          type: array
+          items:
+            type: string
+            format: binary
+          writeOnly: true
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          title: Price
+          description: Price of the service/product (if applicable).
+        currency:
+          type: string
+          minLength: 1
+          description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
+          maxLength: 3
+        company:
+          type: string
+          format: uuid
+          nullable: true
+        individual_owner:
+          type: string
+          format: uuid
+          nullable: true
+        brand:
+          $ref: '#/components/schemas/BrandEnum'
+        model:
+          type: string
+          minLength: 1
+          maxLength: 100
+        year:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        mileage:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          title: Mileage (km)
+        fuel_type:
+          allOf:
+          - $ref: '#/components/schemas/FuelTypeEnum'
+          title: Engine Type
+        transmission:
+          $ref: '#/components/schemas/TransmissionEnum'
+        condition:
+          $ref: '#/components/schemas/ConditionEnum'
+        car_class:
+          allOf:
+          - $ref: '#/components/schemas/CarClassEnum'
+          title: Class Category
+        seats:
+          type: integer
+          maximum: 32767
+          minimum: 0
+        seller_contact_name:
+          type: string
+          maxLength: 150
+        seller_phone:
+          type: string
+          minLength: 1
+          maxLength: 20
+        seller_email:
+          type: string
+          format: email
+        reveal_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
     PatchedCompanyProfileRequest:
       type: object
       properties:
@@ -12664,7 +15242,7 @@ components:
           title: Company Name
           maxLength: 100
         address:
-          $ref: '#/components/schemas/AddressRequest'
+          $ref: '#/components/schemas/AddressSchemaRequest'
         phone:
           type: string
           minLength: 1
@@ -12675,7 +15253,7 @@ components:
           format: binary
           nullable: true
         category:
-          $ref: '#/components/schemas/Category70bEnum'
+          $ref: '#/components/schemas/CompanyCategoryEnum'
         tin:
           type: string
           nullable: true
@@ -12686,6 +15264,13 @@ components:
           type: string
           nullable: true
           maxLength: 50
+    PatchedDisputeActionRequest:
+      type: object
+      properties:
+        status:
+          $ref: '#/components/schemas/PaymentTransactionDisputeStatusEnum'
+        note:
+          type: string
     PatchedEventSpaceListingRequest:
       type: object
       description: Serializer used for POST/PUT operations, relying on the service
@@ -12725,10 +15310,12 @@ components:
           minimum: 0
           description: Maximum number of days ahead a booking can start for this listing.
         address:
-          $ref: '#/components/schemas/AddressRequest'
+          $ref: '#/components/schemas/AddressSchemaRequest'
         amenities:
-          type: object
-          additionalProperties: {}
+          type: array
+          items:
+            type: string
+            format: uuid
         number_of_guests:
           type: integer
           maximum: 2147483647
@@ -12860,10 +15447,12 @@ components:
           type: string
           description: Detailed description of the listing.
         amenities:
-          type: object
-          additionalProperties: {}
+          type: array
+          items:
+            type: string
+            format: uuid
         address:
-          $ref: '#/components/schemas/AddressRequest'
+          $ref: '#/components/schemas/AddressSchemaRequest'
         facility:
           type: array
           items:
@@ -12966,7 +15555,7 @@ components:
           nullable: true
           maxLength: 200
         address:
-          $ref: '#/components/schemas/AddressRequest'
+          $ref: '#/components/schemas/AddressSchemaRequest'
         license:
           type: string
           format: binary
@@ -13061,6 +15650,38 @@ components:
         push_body_template:
           type: string
         required_variables: {}
+    PatchedOwnerComplianceAgreementCreateRequest:
+      type: object
+      properties:
+        agreement_version:
+          type: string
+          minLength: 1
+          maxLength: 50
+        note:
+          type: string
+    PatchedPromotionCampaignRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        advertiser:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/PromotionCampaignStatusEnum'
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        budget:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
     PatchedPropertyListingRequest:
       type: object
       properties:
@@ -13102,7 +15723,7 @@ components:
         address:
           $ref: '#/components/schemas/AddressRequest'
         property_type:
-          $ref: '#/components/schemas/PropertyTypeEnum'
+          $ref: '#/components/schemas/PropertyListingTypeEnum'
         bedrooms:
           type: integer
           maximum: 2147483647
@@ -13339,12 +15960,14 @@ components:
       - guesthouse
       - eventspace
       - carrental
+      - propertyrental
       type: string
       description: |-
         * `booking` - booking
         * `guesthouse` - guesthouse
         * `eventspace` - eventspace
         * `carrental` - carrental
+        * `propertyrental` - propertyrental
     PaymentInitializeRequest:
       type: object
       properties:
@@ -13357,12 +15980,13 @@ components:
           - $ref: '#/components/schemas/PaymentInitializeBookingTypeEnum'
           default: booking
           description: |-
-            Type of booking: 'booking' (hotel room), 'guesthouse', 'eventspace', or 'carrental'
+            Type of booking: 'booking' (hotel room), 'guesthouse', 'eventspace', 'carrental', or 'propertyrental'
 
             * `booking` - booking
             * `guesthouse` - guesthouse
             * `eventspace` - eventspace
             * `carrental` - carrental
+            * `propertyrental` - propertyrental
         email:
           type: string
           format: email
@@ -13410,9 +16034,87 @@ components:
           type: string
         original_currency:
           type: string
+        owner_price:
+          type: string
+          nullable: true
+        service_fee:
+          type: string
+          nullable: true
+        tax_amount:
+          type: string
+          nullable: true
+        tax_rate:
+          type: string
+          nullable: true
+        grand_total:
+          type: string
+          nullable: true
+        tax_liability_status:
+          type: string
+          nullable: true
       required:
       - message
       - success
+    PaymentTransactionBookingTypeEnum:
+      enum:
+      - booking
+      - guesthouse
+      - eventspace
+      - carrental
+      - propertyrental
+      - contact_reveal
+      type: string
+      description: |-
+        * `booking` - Hotel Room
+        * `guesthouse` - Guesthouse
+        * `eventspace` - Event Space
+        * `carrental` - Car Rental
+        * `propertyrental` - Property Rental
+        * `contact_reveal` - Contact Reveal
+    PaymentTransactionDisputeStatusEnum:
+      enum:
+      - open
+      - under_review
+      - escalated
+      - resolved
+      type: string
+      description: |-
+        * `open` - Open
+        * `under_review` - Under Review
+        * `escalated` - Escalated
+        * `resolved` - Resolved
+    PaymentTransactionStatusEnum:
+      enum:
+      - pending
+      - success
+      - failed
+      - cancelled
+      type: string
+      description: |-
+        * `pending` - Pending
+        * `success` - Success
+        * `failed` - Failed
+        * `cancelled` - Cancelled
+    PayoutFailureMetrics:
+      type: object
+      properties:
+        total_failures:
+          type: integer
+        failure_rate:
+          type: number
+          format: double
+        failures_by_reason:
+          type: array
+          items:
+            $ref: '#/components/schemas/FailureReasonMetric'
+        total_failed_amount:
+          type: number
+          format: double
+      required:
+      - failure_rate
+      - failures_by_reason
+      - total_failed_amount
+      - total_failures
     PayoutStatusEnum:
       enum:
       - pending
@@ -13554,6 +16256,227 @@ components:
         * `medium` - Medium
         * `high` - High
         * `critical` - Critical
+    PromotedCategorySnapshot:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+      required:
+      - id
+      - name
+    PromotedListingSnapshot:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        thumbnail:
+          type: string
+          format: uri
+          nullable: true
+        category:
+          type: string
+        rating:
+          type: number
+          format: double
+          nullable: true
+        price_preview:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+        currency:
+          type: string
+        listing_type:
+          type: string
+      required:
+      - category
+      - currency
+      - id
+      - listing_type
+      - price_preview
+      - rating
+      - thumbnail
+      - title
+    PromotionCampaign:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        advertiser:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/PromotionCampaignStatusEnum'
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        budget:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - advertiser
+      - created_at
+      - ends_at
+      - id
+      - name
+      - starts_at
+      - updated_at
+    PromotionCampaignDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        name:
+          type: string
+          maxLength: 255
+        advertiser:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/PromotionCampaignStatusEnum'
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        budget:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        placements:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromotionPlacement'
+          readOnly: true
+      required:
+      - advertiser
+      - created_at
+      - ends_at
+      - id
+      - name
+      - placements
+      - starts_at
+      - updated_at
+    PromotionCampaignRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        advertiser:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/PromotionCampaignStatusEnum'
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        budget:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+      required:
+      - advertiser
+      - ends_at
+      - name
+      - starts_at
+    PromotionCampaignStatusEnum:
+      enum:
+      - draft
+      - scheduled
+      - active
+      - paused
+      - expired
+      type: string
+      description: |-
+        * `draft` - Draft
+        * `scheduled` - Scheduled
+        * `active` - Active
+        * `paused` - Paused
+        * `expired` - Expired
+    PromotionPlacement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        campaign:
+          type: string
+          format: uuid
+        slot_type:
+          $ref: '#/components/schemas/SlotTypeEnum'
+        content_type:
+          type: integer
+          nullable: true
+        object_id:
+          type: string
+          format: uuid
+          nullable: true
+        target_category:
+          type: string
+          nullable: true
+          maxLength: 100
+        display_order:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - campaign
+      - created_at
+      - id
+      - slot_type
+      - updated_at
     PropertyListingRequest:
       type: object
       properties:
@@ -13595,7 +16518,7 @@ components:
         address:
           $ref: '#/components/schemas/AddressRequest'
         property_type:
-          $ref: '#/components/schemas/PropertyTypeEnum'
+          $ref: '#/components/schemas/PropertyListingTypeEnum'
         bedrooms:
           type: integer
           maximum: 2147483647
@@ -13655,7 +16578,7 @@ components:
         address:
           $ref: '#/components/schemas/Address'
         property_type:
-          $ref: '#/components/schemas/PropertyTypeEnum'
+          $ref: '#/components/schemas/PropertyListingTypeEnum'
         bedrooms:
           type: integer
           maximum: 2147483647
@@ -13688,6 +16611,11 @@ components:
           format: uuid
           readOnly: true
           nullable: true
+        verification_note:
+          type: string
+          nullable: true
+          description: Optional note recorded by an administrator during verification.
+          maxLength: 500
       required:
       - address
       - bathrooms
@@ -13699,7 +16627,78 @@ components:
       - square_meters
       - title
       - verified_by
-    PropertyTypeEnum:
+    PropertyListingResponseRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
+          maxLength: 255
+        description:
+          type: string
+          description: Detailed description of the listing.
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListingImageRequest'
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          title: Price
+          description: Price of the service/product (if applicable).
+        currency:
+          type: string
+          minLength: 1
+          description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
+          maxLength: 3
+        booking_forward_window_days:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Maximum number of days ahead a booking can start for this listing.
+        address:
+          $ref: '#/components/schemas/AddressRequest'
+        property_type:
+          $ref: '#/components/schemas/PropertyListingTypeEnum'
+        bedrooms:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        bathrooms:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        square_meters:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        is_furnished:
+          type: boolean
+        is_verified:
+          type: boolean
+          description: Whether the listing has been verified by an administrator.
+        verified_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the listing was last verified by an administrator.
+        verification_note:
+          type: string
+          nullable: true
+          description: Optional note recorded by an administrator during verification.
+          maxLength: 500
+      required:
+      - address
+      - bathrooms
+      - bedrooms
+      - images
+      - property_type
+      - square_meters
+      - title
+    PropertyListingTypeEnum:
       enum:
       - apartment
       - condo
@@ -13709,16 +16708,577 @@ components:
         * `apartment` - Apartment
         * `condo` - Condo
         * `villa` - Villa
+    PropertyRentalBookingPreviewRequest:
+      type: object
+      properties:
+        property_listing:
+          type: string
+          format: uuid
+        start_date:
+          type: string
+          format: date
+          description: Arrival date. Must be within the configured forward booking
+            window.
+        end_date:
+          type: string
+          format: date
+          description: Departure date
+        guest_phone:
+          type: string
+      required:
+      - end_date
+      - property_listing
+      - start_date
+    PropertyRentalBookingRequest:
+      type: object
+      properties:
+        property_listing:
+          type: string
+          format: uuid
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        terms_accepted:
+          type: boolean
+          writeOnly: true
+        terms_version:
+          type: string
+          writeOnly: true
+          minLength: 1
+        guest_first_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        guest_last_name:
+          type: string
+          minLength: 1
+          maxLength: 100
+        guest_email:
+          type: string
+          format: email
+          minLength: 1
+        guest_phone:
+          type: string
+          minLength: 1
+          maxLength: 20
+        special_requests:
+          type: string
+        payment_currency:
+          allOf:
+          - $ref: '#/components/schemas/PaymentCurrencyEnum'
+          writeOnly: true
+      required:
+      - end_date
+      - property_listing
+      - start_date
+      - terms_accepted
+      - terms_version
+    PropertyRentalBookingResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        renter:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+          title: Renter Account
+        booking_reference:
+          type: string
+          readOnly: true
+        property_listing:
+          allOf:
+          - $ref: '#/components/schemas/PropertyListingResponse'
+          readOnly: true
+        start_date:
+          type: string
+          format: date
+          readOnly: true
+        end_date:
+          type: string
+          format: date
+          readOnly: true
+        total_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        total_item_cost:
+          type: string
+          readOnly: true
+        currency:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/CarRentalStatusEnum'
+          readOnly: true
+        conversion:
+          allOf:
+          - $ref: '#/components/schemas/CurrencyConversionMetadata'
+          readOnly: true
+          description: Metadata about currency conversion if requested
+        terms_accepted:
+          type: boolean
+          readOnly: true
+        terms_version:
+          type: string
+          readOnly: true
+        terms_accepted_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        terms_content_snapshot:
+          type: string
+          readOnly: true
+          nullable: true
+        is_legacy:
+          type: boolean
+          readOnly: true
+        guest_first_name:
+          type: string
+          readOnly: true
+        guest_last_name:
+          type: string
+          readOnly: true
+        guest_email:
+          type: string
+          format: email
+          readOnly: true
+        guest_phone:
+          type: string
+          readOnly: true
+        special_requests:
+          type: string
+          readOnly: true
+        snapshot:
+          readOnly: true
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - booking_reference
+      - conversion
+      - created_at
+      - currency
+      - end_date
+      - guest_email
+      - guest_first_name
+      - guest_last_name
+      - guest_phone
+      - id
+      - is_legacy
+      - property_listing
+      - renter
+      - snapshot
+      - special_requests
+      - start_date
+      - status
+      - terms_accepted
+      - terms_accepted_at
+      - terms_content_snapshot
+      - terms_version
+      - total_item_cost
+      - total_price
+      - updated_at
+    PropertySaleListing:
+      type: object
+      properties:
+        title:
+          type: string
+          description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
+          maxLength: 255
+        description:
+          type: string
+          description: Detailed description of the listing.
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          title: Price
+          description: Price of the service/product (if applicable).
+        currency:
+          type: string
+          description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
+          maxLength: 3
+        company:
+          type: string
+          format: uuid
+          nullable: true
+        individual_owner:
+          type: string
+          format: uuid
+          nullable: true
+        address:
+          $ref: '#/components/schemas/AddressSchema'
+        property_type:
+          $ref: '#/components/schemas/PropertySaleListingTypeEnum'
+        bedrooms:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        bathrooms:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        square_meters:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        land_size_square_meters:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+        is_furnished:
+          type: boolean
+        seller_contact_name:
+          type: string
+          maxLength: 150
+        seller_phone:
+          type: string
+          maxLength: 20
+        seller_email:
+          type: string
+          format: email
+        reveal_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - address
+      - property_type
+      - seller_phone
+      - square_meters
+      - title
+    PropertySaleListingRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
+          maxLength: 255
+        description:
+          type: string
+          description: Detailed description of the listing.
+        images:
+          type: array
+          items:
+            type: string
+            format: binary
+          writeOnly: true
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          title: Price
+          description: Price of the service/product (if applicable).
+        currency:
+          type: string
+          minLength: 1
+          description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
+          maxLength: 3
+        company:
+          type: string
+          format: uuid
+          nullable: true
+        individual_owner:
+          type: string
+          format: uuid
+          nullable: true
+        address:
+          $ref: '#/components/schemas/AddressSchemaRequest'
+        property_type:
+          $ref: '#/components/schemas/PropertySaleListingTypeEnum'
+        bedrooms:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        bathrooms:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        square_meters:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        land_size_square_meters:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+        is_furnished:
+          type: boolean
+        seller_contact_name:
+          type: string
+          maxLength: 150
+        seller_phone:
+          type: string
+          minLength: 1
+          maxLength: 20
+        seller_email:
+          type: string
+          format: email
+        reveal_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+      required:
+      - address
+      - property_type
+      - seller_phone
+      - square_meters
+      - title
+    PropertySaleListingResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+          description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
+        description:
+          type: string
+          readOnly: true
+          description: Detailed description of the listing.
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListingImage'
+          readOnly: true
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+          title: Price
+          description: Price of the service/product (if applicable).
+        currency:
+          type: string
+          readOnly: true
+          description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
+        company:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        individual_owner:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        address:
+          allOf:
+          - $ref: '#/components/schemas/Address'
+          readOnly: true
+        property_type:
+          allOf:
+          - $ref: '#/components/schemas/PropertySaleListingTypeEnum'
+          readOnly: true
+        bedrooms:
+          type: integer
+          readOnly: true
+        bathrooms:
+          type: integer
+          readOnly: true
+        square_meters:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        land_size_square_meters:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+        is_furnished:
+          type: boolean
+          readOnly: true
+        reveal_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+          description: Whether the listing is active and visible.
+        is_verified:
+          type: boolean
+          readOnly: true
+          description: Whether the listing has been verified by an administrator.
+        verified_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the listing was last verified by an administrator.
+        verified_by:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        verification_note:
+          type: string
+          readOnly: true
+          nullable: true
+          description: Optional note recorded by an administrator during verification.
+        reveal_state:
+          allOf:
+          - $ref: '#/components/schemas/PropertySaleRevealState'
+          readOnly: true
+        conversion:
+          allOf:
+          - $ref: '#/components/schemas/CurrencyConversionMetadata'
+          readOnly: true
+          description: Metadata about currency conversion if requested
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - address
+      - base_price
+      - bathrooms
+      - bedrooms
+      - company
+      - conversion
+      - created_at
+      - currency
+      - description
+      - id
+      - images
+      - individual_owner
+      - is_active
+      - is_furnished
+      - is_verified
+      - land_size_square_meters
+      - property_type
+      - reveal_fee
+      - reveal_state
+      - square_meters
+      - title
+      - updated_at
+      - verification_note
+      - verified_at
+      - verified_by
+    PropertySaleListingTypeEnum:
+      enum:
+      - apartment
+      - condo
+      - villa
+      - house
+      - land
+      - commercial
+      - other
+      type: string
+      description: |-
+        * `apartment` - Apartment
+        * `condo` - Condo
+        * `villa` - Villa
+        * `house` - House
+        * `land` - Land
+        * `commercial` - Commercial
+        * `other` - Other
+    PropertySaleRevealState:
+      type: object
+      properties:
+        status:
+          type: string
+          nullable: true
+        request_id:
+          type: string
+          format: uuid
+          nullable: true
+        tx_ref:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        unlocked_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - expires_at
+      - request_id
+      - status
+      - tx_ref
+      - unlocked_at
+    PublicPlacement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        slot_type:
+          allOf:
+          - $ref: '#/components/schemas/SlotTypeEnum'
+          readOnly: true
+        display_order:
+          type: integer
+          readOnly: true
+        promoted_listing:
+          allOf:
+          - $ref: '#/components/schemas/PromotedListingSnapshot'
+          nullable: true
+          readOnly: true
+        promoted_category:
+          allOf:
+          - $ref: '#/components/schemas/PromotedCategorySnapshot'
+          nullable: true
+          readOnly: true
+      required:
+      - display_order
+      - id
+      - promoted_category
+      - promoted_listing
+      - slot_type
     PurposeEnum:
       enum:
       - login
       - signup
       - password_change
+      - guest_hotel_booking
+      - guest_guesthouse_booking
+      - guest_eventspace_booking
+      - guest_car_rental_booking
       type: string
       description: |-
         * `login` - Login
         * `signup` - Signup
         * `password_change` - Password Change
+        * `guest_hotel_booking` - Guest Hotel Booking
+        * `guest_guesthouse_booking` - Guest Guesthouse Booking
+        * `guest_eventspace_booking` - Guest Event Space Booking
+        * `guest_car_rental_booking` - Guest Car Rental Booking
     RentalModeEnum:
       enum:
       - with_driver
@@ -13727,6 +17287,50 @@ components:
       description: |-
         * `with_driver` - With Driver
         * `without_driver` - Without Driver
+    RevenueCategoryMetric:
+      type: object
+      properties:
+        category:
+          type: string
+        amount:
+          type: number
+          format: double
+      required:
+      - amount
+      - category
+    RevenueMetrics:
+      type: object
+      properties:
+        revenue_by_period:
+          type: array
+          items:
+            $ref: '#/components/schemas/RevenuePeriodMetric'
+        revenue_by_category:
+          type: array
+          items:
+            $ref: '#/components/schemas/RevenueCategoryMetric'
+        average_transaction:
+          type: number
+          format: double
+        total_service_fees:
+          type: number
+          format: double
+      required:
+      - average_transaction
+      - revenue_by_category
+      - revenue_by_period
+      - total_service_fees
+    RevenuePeriodMetric:
+      type: object
+      properties:
+        date:
+          type: string
+        amount:
+          type: number
+          format: double
+      required:
+      - amount
+      - date
     Role:
       type: object
       properties:
@@ -13912,6 +17516,110 @@ components:
       - room_size_sqm
       - title
       - total_units
+    RoomListingResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListingImage'
+        title:
+          type: string
+          description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
+          maxLength: 255
+        description:
+          type: string
+          description: Detailed description of the listing.
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          title: Price
+          description: Price of the service/product (if applicable).
+        currency:
+          type: string
+          description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
+          maxLength: 3
+        booking_forward_window_days:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          description: Maximum number of days ahead a booking can start for this listing.
+        amenities:
+          type: array
+          items:
+            $ref: '#/components/schemas/AmenityResponseS'
+        number_of_guests:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        total_units:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+          title: Total Rooms of This Type
+          description: How many rooms of this type exist in the property.
+        bed_type:
+          $ref: '#/components/schemas/BedTypeEnum'
+        room_size_sqm:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        smoking_allowed:
+          type: boolean
+        children_allowed:
+          type: boolean
+        refundable:
+          type: boolean
+          description: Whether standard rate is refundable.
+        available_units:
+          type: integer
+          readOnly: true
+        is_verified:
+          type: boolean
+          description: Whether the listing has been verified by an administrator.
+        verified_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the listing was last verified by an administrator.
+        verified_by:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        verification_note:
+          type: string
+          nullable: true
+          description: Optional note recorded by an administrator during verification.
+          maxLength: 500
+        conversion:
+          allOf:
+          - $ref: '#/components/schemas/CurrencyConversionMetadata'
+          readOnly: true
+          description: Metadata about currency conversion if requested
+        price_quote:
+          allOf:
+          - $ref: '#/components/schemas/ListingPriceQuote'
+          readOnly: true
+          description: Complete pricing breakdown including platform fees. Populated
+            only when check_in/check_out dates are provided.
+      required:
+      - amenities
+      - available_units
+      - conversion
+      - id
+      - images
+      - price_quote
+      - room_size_sqm
+      - title
+      - total_units
+      - verified_by
     SearchResult:
       type: object
       properties:
@@ -13948,7 +17656,7 @@ components:
           type: boolean
           description: True if this is a sponsored or featured property
         is_favorite:
-          type: string
+          type: boolean
           readOnly: true
           description: True if the current user has favorited this hotel
         rooms:
@@ -14198,6 +17906,18 @@ components:
           nullable: true
       required:
       - season
+    SlotTypeEnum:
+      enum:
+      - featured_listing
+      - category_banner
+      - search_top
+      - home_banner
+      type: string
+      description: |-
+        * `featured_listing` - Featured Listing
+        * `category_banner` - Category Banner
+        * `search_top` - Top of Search Results
+        * `home_banner` - Home Banner
     SpaceTypeEnum:
       enum:
       - auditorium
@@ -14282,18 +18002,21 @@ components:
       - id
       - role
       - workspace
-    Status01bEnum:
+    StayAvailabilityUpdateRequest:
+      type: object
+      properties:
+        available_rooms:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+    TaxLiabilityStatusEnum:
       enum:
-      - pending
-      - confirmed
-      - cancelled
-      - walk_in
+      - applicable
+      - not_applicable
       type: string
       description: |-
-        * `pending` - Pending
-        * `confirmed` - Confirmed
-        * `cancelled` - Cancelled
-        * `walk_in` - Walk-In
+        * `applicable` - Applicable
+        * `not_applicable` - Not Applicable
     TermsAndConditions:
       type: object
       properties:
@@ -14369,6 +18092,281 @@ components:
           minLength: 1
       required:
       - refresh
+    TrackingEventRequest:
+      type: object
+      properties:
+        placement_id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          minLength: 1
+      required:
+      - event_type
+      - placement_id
+    TransactionMonitorDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        tx_ref:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/PaymentTransactionStatusEnum'
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        currency:
+          type: string
+          readOnly: true
+        booking_type:
+          allOf:
+          - $ref: '#/components/schemas/PaymentTransactionBookingTypeEnum'
+          readOnly: true
+          description: |-
+            Discriminator for the type of booking
+
+            * `booking` - Hotel Room
+            * `guesthouse` - Guesthouse
+            * `eventspace` - Event Space
+            * `carrental` - Car Rental
+            * `propertyrental` - Property Rental
+            * `contact_reveal` - Contact Reveal
+        listing_reference:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        user_reference:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        payout_status:
+          allOf:
+          - $ref: '#/components/schemas/PayoutStatusEnum'
+          readOnly: true
+          description: |-
+            Status of the vendor payout split
+
+            * `pending` - Pending
+            * `paid` - Paid (Split Success)
+            * `failed` - Failed (Split Error)
+            * `na` - Not Applicable
+        tax_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+          description: Tax amount collected for eligible property rental transactions
+        grand_total:
+          type: string
+          readOnly: true
+        dispute_status:
+          readOnly: true
+          nullable: true
+          description: |-
+            Admin dispute triage status for this transaction
+
+            * `open` - Open
+            * `under_review` - Under Review
+            * `escalated` - Escalated
+            * `resolved` - Resolved
+          oneOf:
+          - $ref: '#/components/schemas/PaymentTransactionDisputeStatusEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        payment_method:
+          type: string
+          readOnly: true
+          nullable: true
+        chapa_transaction_id:
+          type: string
+          readOnly: true
+          nullable: true
+        owner_price:
+          type: string
+          readOnly: true
+        service_fee:
+          type: string
+          readOnly: true
+        tax_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,1}(?:\.\d{0,4})?$
+          readOnly: true
+        tax_liability_status:
+          type: string
+          readOnly: true
+        commission_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,1}(?:\.\d{0,4})?$
+          readOnly: true
+        commission_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          readOnly: true
+        vendor_payout_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          readOnly: true
+        metadata:
+          readOnly: true
+        dispute_note:
+          type: string
+          readOnly: true
+        dispute_opened_at:
+          type: string
+          format: date-time
+          readOnly: true
+        dispute_resolved_at:
+          type: string
+          format: date-time
+          readOnly: true
+        dispute_handled_by:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - amount
+      - booking_type
+      - chapa_transaction_id
+      - commission_amount
+      - commission_rate
+      - created_at
+      - currency
+      - dispute_handled_by
+      - dispute_note
+      - dispute_opened_at
+      - dispute_resolved_at
+      - dispute_status
+      - grand_total
+      - id
+      - listing_reference
+      - metadata
+      - owner_price
+      - payment_method
+      - payout_status
+      - service_fee
+      - status
+      - tax_amount
+      - tax_liability_status
+      - tax_rate
+      - tx_ref
+      - updated_at
+      - user_reference
+      - vendor_payout_amount
+    TransactionMonitorList:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        tx_ref:
+          type: string
+          readOnly: true
+        status:
+          allOf:
+          - $ref: '#/components/schemas/PaymentTransactionStatusEnum'
+          readOnly: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        currency:
+          type: string
+          readOnly: true
+        booking_type:
+          allOf:
+          - $ref: '#/components/schemas/PaymentTransactionBookingTypeEnum'
+          readOnly: true
+          description: |-
+            Discriminator for the type of booking
+
+            * `booking` - Hotel Room
+            * `guesthouse` - Guesthouse
+            * `eventspace` - Event Space
+            * `carrental` - Car Rental
+            * `propertyrental` - Property Rental
+            * `contact_reveal` - Contact Reveal
+        listing_reference:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        user_reference:
+          type: object
+          additionalProperties: {}
+          readOnly: true
+        payout_status:
+          allOf:
+          - $ref: '#/components/schemas/PayoutStatusEnum'
+          readOnly: true
+          description: |-
+            Status of the vendor payout split
+
+            * `pending` - Pending
+            * `paid` - Paid (Split Success)
+            * `failed` - Failed (Split Error)
+            * `na` - Not Applicable
+        tax_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          readOnly: true
+          nullable: true
+          description: Tax amount collected for eligible property rental transactions
+        grand_total:
+          type: string
+          readOnly: true
+        dispute_status:
+          readOnly: true
+          nullable: true
+          description: |-
+            Admin dispute triage status for this transaction
+
+            * `open` - Open
+            * `under_review` - Under Review
+            * `escalated` - Escalated
+            * `resolved` - Resolved
+          oneOf:
+          - $ref: '#/components/schemas/PaymentTransactionDisputeStatusEnum'
+          - $ref: '#/components/schemas/NullEnum'
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - amount
+      - booking_type
+      - created_at
+      - currency
+      - dispute_status
+      - grand_total
+      - id
+      - listing_reference
+      - payout_status
+      - status
+      - tax_amount
+      - tx_ref
+      - user_reference
     TransmissionEnum:
       enum:
       - manual
@@ -14525,6 +18523,13 @@ components:
           nullable: true
           title: Phone Number
           maxLength: 20
+    VerifyActionRequest:
+      type: object
+      properties:
+        verification_note:
+          type: string
+          nullable: true
+          maxLength: 500
     VerifyEmailChangeRequest:
       type: object
       properties:

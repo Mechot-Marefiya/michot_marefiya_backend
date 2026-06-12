@@ -1,15 +1,19 @@
 import logging
+import os
 import secrets
 from dataclasses import dataclass
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password, make_password
+from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.account.models import ListingImage, OtpChallenge
+from apps.account.models import IndividualOwnerProfile, ListingImage, OtpChallenge, OwnerComplianceAgreement
+from apps.account.tasks import OtpChallengeCache, send_otp_sms_task
 from apps.favorites.models import Favorite, GuestFavorite
 
 logger = logging.getLogger(__name__)
@@ -48,7 +52,7 @@ class OtpError(Exception):
 @dataclass(frozen=True)
 class OtpVerificationResult:
     challenge: OtpChallenge
-    user: object
+    user: object | None
     tokens: dict | None = None
 
 
@@ -73,9 +77,17 @@ class GuestBookingConversionResult:
 
 
 class OtpService:
-    DEFAULT_TTL_SECONDS = 300
+    DEFAULT_EXPIRY_SECONDS = 300
     DEFAULT_LENGTH = 6
     DEFAULT_MAX_ATTEMPTS = 5
+    DEFAULT_COOLDOWN_SECONDS = 60
+    GENERIC_VERIFY_ERROR = "Invalid OTP challenge or code."
+    BOOKING_PURPOSES = {
+        OtpChallenge.Purpose.GUEST_HOTEL_BOOKING,
+        OtpChallenge.Purpose.GUEST_GUESTHOUSE_BOOKING,
+        OtpChallenge.Purpose.GUEST_EVENTSPACE_BOOKING,
+        OtpChallenge.Purpose.GUEST_CAR_RENTAL_BOOKING,
+    }
 
     @staticmethod
     def normalize_phone(phone: str) -> str:
@@ -94,52 +106,93 @@ class OtpService:
         return str(secrets.randbelow(end - start + 1) + start)
 
     @classmethod
-    def _ttl_seconds(cls) -> int:
-        return int(getattr(settings, "OTP_TTL_SECONDS", cls.DEFAULT_TTL_SECONDS))
+    def _expiry_seconds(cls) -> int:
+        return int(
+            getattr(
+                settings,
+                "OTP_EXPIRY_SECONDS",
+                getattr(settings, "OTP_TTL_SECONDS", cls.DEFAULT_EXPIRY_SECONDS),
+            )
+        )
 
     @classmethod
     def _max_attempts(cls) -> int:
         return int(getattr(settings, "OTP_MAX_ATTEMPTS", cls.DEFAULT_MAX_ATTEMPTS))
 
     @classmethod
+    def _cooldown_seconds(cls) -> int:
+        return int(getattr(settings, "OTP_COOLDOWN_SECONDS", cls.DEFAULT_COOLDOWN_SECONDS))
+
+    @classmethod
+    def _message_for_purpose(cls, purpose: str) -> str:
+        minutes = max(cls._expiry_seconds() // 60, 1)
+        if purpose in cls.BOOKING_PURPOSES:
+            return f"Your Mechot Marefiya booking verification code is {{code}}. It expires in {minutes} minutes."
+        return f"Your Mechot Marefiya verification code is {{code}}. It expires in {minutes} minutes."
+
+    @classmethod
+    def _resolve_user(cls, *, normalized_phone: str, purpose: str):
+        User = get_user_model()
+        user_queryset = User.objects.filter(phone=normalized_phone)
+        if purpose == OtpChallenge.Purpose.SIGNUP:
+            return user_queryset.filter(is_active=False, phone_verified_at__isnull=True).first()
+        if purpose in cls.BOOKING_PURPOSES:
+            return None
+        return user_queryset.filter(is_active=True).first()
+
+    @classmethod
+    def _dispatch_sms_task(cls, challenge_id):
+        if os.environ.get("DJANGO_SETTINGS_MODULE") == "config.settings.test":
+            send_otp_sms_task.apply(args=[str(challenge_id)])
+            return
+        send_otp_sms_task.delay(str(challenge_id))
+
+    @classmethod
     def create_challenge(cls, *, phone: str, purpose: str = OtpChallenge.Purpose.LOGIN) -> OtpChallenge:
         normalized_phone = cls.normalize_phone(phone)
         if not normalized_phone:
             raise OtpError("Phone number is required.")
-
-        User = get_user_model()
-        user_queryset = User.objects.filter(phone=normalized_phone)
-        if purpose == OtpChallenge.Purpose.SIGNUP:
-            user = user_queryset.filter(is_active=False, phone_verified_at__isnull=True).first()
-        else:
-            user = user_queryset.filter(is_active=True).first()
+        user = cls._resolve_user(normalized_phone=normalized_phone, purpose=purpose)
         if not user:
             if purpose == OtpChallenge.Purpose.SIGNUP:
                 raise OtpError("No pending registration found for this phone number.")
-            raise OtpError("No active account found for this phone number.")
+            if purpose not in cls.BOOKING_PURPOSES:
+                raise OtpError("No active account found for this phone number.")
+
+        cooldown_key = OtpChallengeCache.cooldown_key(normalized_phone, purpose)
+        if cache.get(cooldown_key):
+            raise OtpError("Please wait before requesting another OTP.")
 
         code = cls.generate_code()
+        expires_at = timezone.now() + timezone.timedelta(seconds=cls._expiry_seconds())
+        OtpChallenge.objects.filter(
+            phone=normalized_phone,
+            purpose=purpose,
+            consumed_at__isnull=True,
+        ).update(consumed_at=timezone.now(), updated_at=timezone.now())
         challenge = OtpChallenge.objects.create(
             user=user,
             phone=normalized_phone,
             purpose=purpose,
             code_hash=make_password(code),
-            expires_at=timezone.now() + timezone.timedelta(seconds=cls._ttl_seconds()),
+            expires_at=expires_at,
             max_attempts=cls._max_attempts(),
         )
-
-        message = f"Your Mechot Marefiya verification code is {code}. It expires in {cls._ttl_seconds() // 60} minutes."
+        message = cls._message_for_purpose(purpose).format(code=code)
+        cache.set(
+            OtpChallengeCache.pending_key(challenge.id),
+            {"phone": normalized_phone, "message": message},
+            timeout=cls._expiry_seconds(),
+        )
+        cache.set(cooldown_key, str(challenge.id), timeout=cls._cooldown_seconds())
         try:
-            from services.sms import send_sms
-
-            send_sms(normalized_phone, message)
-        except Exception:
-            logger.exception("Failed to send OTP SMS to %s", normalized_phone)
+            cls._dispatch_sms_task(challenge.id)
+        except Exception as exc:
+            logger.exception("Failed to queue OTP SMS for %s", normalized_phone)
+            cache.delete(OtpChallengeCache.pending_key(challenge.id))
+            cache.delete(cooldown_key)
             challenge.delete()
-            raise
-
-        challenge.sent_at = timezone.now()
-        challenge.save(update_fields=["sent_at", "updated_at"])
+            raise OtpError("Could not send OTP. Please try again.") from exc
         return challenge
 
     @classmethod
@@ -161,29 +214,27 @@ class OtpService:
 
         challenge = queryset.first()
         if not challenge:
-            raise OtpError("Invalid OTP challenge.")
-        if challenge.is_consumed:
-            raise OtpError("OTP challenge has already been used.")
-        if challenge.is_expired:
-            raise OtpError("OTP challenge has expired.")
-        if challenge.attempts >= challenge.max_attempts:
-            raise OtpError("OTP attempt limit exceeded.")
+            raise OtpError(cls.GENERIC_VERIFY_ERROR)
+        if challenge.is_consumed or challenge.is_expired or challenge.attempts >= challenge.max_attempts:
+            raise OtpError(cls.GENERIC_VERIFY_ERROR)
 
         challenge.attempts += 1
         if not check_password(code, challenge.code_hash):
             challenge.save(update_fields=["attempts", "updated_at"])
-            raise OtpError("Invalid OTP code.")
+            raise OtpError(cls.GENERIC_VERIFY_ERROR)
 
         challenge.consumed_at = timezone.now()
         challenge.save(update_fields=["attempts", "consumed_at", "updated_at"])
+        cache.delete(OtpChallengeCache.cooldown_key(challenge.phone, challenge.purpose))
+        cache.delete(OtpChallengeCache.pending_key(challenge.id))
 
-        if purpose == OtpChallenge.Purpose.SIGNUP:
+        if purpose == OtpChallenge.Purpose.SIGNUP and challenge.user:
             challenge.user.is_active = True
             challenge.user.phone_verified_at = timezone.now()
             challenge.user.save(update_fields=["is_active", "phone_verified_at", "updated_at"])
 
         tokens = None
-        if issue_tokens:
+        if issue_tokens and challenge.user:
             refresh = RefreshToken.for_user(challenge.user)
             tokens = {
                 "refresh": str(refresh),
@@ -311,3 +362,75 @@ class GuestBookingConversionService:
             linked_counts=linked_counts,
             already_linked_counts=already_linked_counts,
         )
+
+
+def _assert_admin_actor(admin):
+    if admin is None or not getattr(admin, "is_authenticated", False):
+        raise ValidationError("An authenticated admin user is required.")
+    if not (
+        getattr(admin, "is_superuser", False)
+        or getattr(getattr(admin, "role", None), "code", None) == "admin"
+    ):
+        raise ValidationError("Only admins can manage owner compliance agreements.")
+
+
+def _assert_individual_owner(owner):
+    if not isinstance(owner, IndividualOwnerProfile):
+        raise ValidationError("Compliance agreements apply only to individual owners.")
+
+
+def get_latest_agreement(owner):
+    _assert_individual_owner(owner)
+    return owner.compliance_agreements.order_by("-created_at").first()
+
+
+def create_agreement(owner, admin, version, note=None) -> OwnerComplianceAgreement:
+    _assert_individual_owner(owner)
+    _assert_admin_actor(admin)
+    if not str(version or "").strip():
+        raise ValidationError({"agreement_version": "Agreement version is required."})
+
+    active_agreement = owner.compliance_agreements.filter(
+        status=OwnerComplianceAgreement.Status.SIGNED
+    ).first()
+    if active_agreement:
+        raise ValidationError("This owner already has an active signed compliance agreement.")
+
+    latest = get_latest_agreement(owner)
+    if latest and latest.status == OwnerComplianceAgreement.Status.PENDING:
+        raise ValidationError("This owner already has a pending compliance agreement.")
+
+    return OwnerComplianceAgreement.objects.create(
+        owner=owner,
+        status=OwnerComplianceAgreement.Status.PENDING,
+        agreement_version=str(version).strip(),
+        note=note or "",
+    )
+
+
+def sign_agreement(agreement, admin) -> OwnerComplianceAgreement:
+    _assert_admin_actor(admin)
+    if agreement.status == OwnerComplianceAgreement.Status.SIGNED:
+        return agreement
+
+    agreement.status = OwnerComplianceAgreement.Status.SIGNED
+    agreement.signed_at = timezone.now()
+    agreement.signed_by_admin = admin
+    agreement.save(update_fields=["status", "signed_at", "signed_by_admin", "updated_at"])
+    return agreement
+
+
+def revoke_agreement(agreement, admin, note=None) -> OwnerComplianceAgreement:
+    _assert_admin_actor(admin)
+    agreement.status = OwnerComplianceAgreement.Status.REVOKED
+    if note is not None:
+        agreement.note = note
+    agreement.save(update_fields=["status", "note", "updated_at"])
+    return agreement
+
+
+def is_agreement_active(owner) -> bool:
+    _assert_individual_owner(owner)
+    return owner.compliance_agreements.filter(
+        status=OwnerComplianceAgreement.Status.SIGNED
+    ).exists()

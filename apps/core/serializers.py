@@ -1,5 +1,5 @@
 from rest_framework import serializers
-from drf_spectacular.utils import extend_schema_field, OpenApiTypes
+from drf_spectacular.utils import extend_schema_field, inline_serializer, OpenApiTypes
 from apps.core.models import Address, Facility, CurrencyRate
 from decimal import Decimal
 import json
@@ -178,7 +178,21 @@ class FacilitySerializer(serializers.ModelSerializer):
             "name",
             
         ]
-@extend_schema_field(AddressSerializer)
+ADDRESS_SCHEMA = inline_serializer(
+    name="AddressSchema",
+    fields={
+        "city": serializers.CharField(),
+        "country": serializers.CharField(),
+        "sub_city": serializers.CharField(required=False, allow_blank=True, allow_null=True),
+        "street_line1": serializers.CharField(),
+        "latitude": serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True),
+        "longitude": serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True),
+        "state": serializers.CharField(required=False, allow_blank=True, allow_null=True),
+        "postal_code": serializers.CharField(required=False, allow_blank=True, allow_null=True),
+    },
+)
+
+@extend_schema_field(ADDRESS_SCHEMA)
 class FlexibleAddressField(serializers.Field):
 
     def to_internal_value(self, data):

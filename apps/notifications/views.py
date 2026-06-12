@@ -133,19 +133,37 @@ class NotificationViewSet(
     
     @extend_schema(
         summary="Retrieve a single notification",
-        description="Get details of a specific notification. Users can only access their own notifications."
+        description="Get details of a specific notification. Users can only access their own notifications.",
+        parameters=[
+            OpenApiParameter(
+                name='id',
+                type=OpenApiTypes.UUID,
+                location=OpenApiParameter.PATH,
+                description='Notification UUID'
+            )
+        ]
     )
     def retrieve(self, request, *args, **kwargs):
         return super().retrieve(request, *args, **kwargs)
     
     @extend_schema(
         summary="Delete a notification",
-        description="Permanently delete a specific notification. Users can only delete their own notifications."
+        description="Permanently delete a specific notification. Users can only delete their own notifications.",
+        parameters=[
+            OpenApiParameter(
+                name='id',
+                type=OpenApiTypes.UUID,
+                location=OpenApiParameter.PATH,
+                description='Notification UUID'
+            )
+        ]
     )
     def destroy(self, request, *args, **kwargs):
         return super().destroy(request, *args, **kwargs)
 
     def get_queryset(self):
+        if getattr(self, "swagger_fake_view", False):
+            return Notification.objects.none()
         return Notification.objects.filter(user=self.request.user)
 
     @extend_schema(
@@ -153,11 +171,7 @@ class NotificationViewSet(
         description="Marks a single notification as read and returns the updated notification.",
         responses={
             200: NotificationSerializer,
-            404: OpenApiExample(
-                'Not Found',
-                value={'success': False, 'error_code': 'NOTIFICATION_NOT_FOUND', 'message': 'Notification not found or access denied'},
-                response_only=True
-            )
+            404: OpenApiTypes.OBJECT,
         }
     )
     @action(detail=True, methods=['patch'], url_path='mark-read')
@@ -183,11 +197,7 @@ class NotificationViewSet(
         summary="Mark all notifications as read",
         description="Marks all unread notifications for the current user as read.",
         responses={
-            200: OpenApiExample(
-                'Success',
-                value={'success': True, 'message': 'Marked 5 notifications as read', 'data': {'count': 5}},
-                response_only=True
-            )
+            200: OpenApiTypes.OBJECT,
         }
     )
     @action(detail=False, methods=['post'], url_path='mark-all-read')
@@ -204,16 +214,8 @@ class NotificationViewSet(
         summary="Bulk delete notifications",
         description="Delete multiple notifications by ID (max 100).",
         responses={
-            200: OpenApiExample(
-                'Success',
-                value={'success': True, 'message': 'Deleted 3 notifications', 'data': {'count': 3}},
-                response_only=True
-            ),
-            400: OpenApiExample(
-                'Validation Error',
-                value={'success': False, 'error_code': 'VALIDATION_ERROR', 'message': 'Invalid input', 'errors': {}},
-                response_only=True
-            )
+            200: OpenApiTypes.OBJECT,
+            400: OpenApiTypes.OBJECT,
         }
     )
     @action(detail=False, methods=['delete'], url_path='bulk-delete')
@@ -240,11 +242,7 @@ class NotificationViewSet(
         summary="Get unread notification count",
         description="Returns the total number of unread notifications for the current user.",
         responses={
-            200: OpenApiExample(
-                'Success',
-                value={'success': True, 'data': {'unread_count': 5}},
-                response_only=True
-            )
+            200: OpenApiTypes.OBJECT,
         }
     )
     @action(detail=False, methods=['get'], url_path='unread-count')
@@ -260,11 +258,7 @@ class NotificationViewSet(
         summary="Batch mark notifications as read",
         description="Mark multiple specific notifications as read by ID (max 100).",
         responses={
-            200: OpenApiExample(
-                'Success',
-                value={'success': True, 'message': 'Marked 3 notifications as read', 'data': {'count': 3}},
-                response_only=True
-            )
+            200: OpenApiTypes.OBJECT,
         }
     )
     @action(detail=False, methods=['post'], url_path='mark-read-batch')
@@ -292,18 +286,7 @@ class NotificationViewSet(
         summary="Get notification summary",
         description="Returns aggregated notification statistics by type and priority.",
         responses={
-            200: OpenApiExample(
-                'Success',
-                value={
-                    'success': True,
-                    'data': {
-                        'total_unread': 8,
-                        'by_type': {'payment_success': 3, 'booking_confirmed': 5},
-                        'by_priority': {'high': 2, 'medium': 6}
-                    }
-                },
-                response_only=True
-            )
+            200: OpenApiTypes.OBJECT,
         }
     )
     @action(detail=False, methods=['get'], url_path='summary')
@@ -366,11 +349,7 @@ class NotificationPreferenceView(APIView):
         description="Update the current user's notification preferences.",
         responses={
             200: NotificationPreferenceSerializer,
-            400: OpenApiExample(
-                'Validation Error',
-                value={'success': False, 'error_code': 'VALIDATION_ERROR', 'message': 'Invalid input', 'errors': {}},
-                response_only=True
-            )
+            400: OpenApiTypes.OBJECT,
         }
     )
     def put(self, request):

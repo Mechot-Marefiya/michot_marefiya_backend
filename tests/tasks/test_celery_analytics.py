@@ -5,7 +5,8 @@ import pytest
 from django.conf import settings
 
 from apps.analytics.models import AnalyticsDirtyDate, CompanyDailyMetrics
-from apps.analytics.tasks import process_dirty_analytics_dates
+from apps.analytics import services as analytics_services
+from apps.analytics.tasks import precompute_analytics_cache, process_dirty_analytics_dates
 from apps.listing.models import Booking, BookingItem
 
 pytestmark = pytest.mark.django_db
@@ -54,3 +55,30 @@ def test_process_dirty_analytics_dates_materializes_metrics(company, user, room)
 def test_process_dirty_analytics_dates_beat_schedule_registered():
     schedule = settings.CELERY_BEAT_SCHEDULE["process-dirty-analytics-dates-every-10-minutes"]
     assert schedule["task"] == "apps.analytics.tasks.process_dirty_analytics_dates"
+
+
+def test_precompute_analytics_cache_warms_admin_cache():
+    analytics_services.invalidate_analytics_cache()
+
+    payload = precompute_analytics_cache()
+    overview = analytics_services.get_overview_metrics()
+    revenue = analytics_services.get_revenue_metrics()
+    payout_failures = analytics_services.get_payout_failure_metrics()
+
+    assert "overview" in payload
+    assert payload["overview"] == overview
+    assert payload["revenue"] == revenue
+    assert payload["payout_failures"] == payout_failures
+
+
+def test_precompute_analytics_cache_beat_schedule_registered():
+    schedule = settings.CELERY_BEAT_SCHEDULE["precompute-admin-analytics-cache-every-1-hour"]
+    assert schedule["task"] == "apps.analytics.tasks.precompute_analytics_cache"
+
+
+def test_invalidate_analytics_cache_rotates_cache_version():
+    before = analytics_services._analytics_cache_version()
+    analytics_services.invalidate_analytics_cache()
+    after = analytics_services._analytics_cache_version()
+
+    assert after == before + 1

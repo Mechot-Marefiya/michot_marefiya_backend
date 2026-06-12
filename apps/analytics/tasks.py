@@ -4,7 +4,7 @@ from config.celery import app
 from django.db import transaction
 
 from apps.analytics.models import AnalyticsDirtyDate
-from apps.analytics.services import materialize_company_daily_metrics
+from apps.analytics.services import materialize_company_daily_metrics, precompute_admin_analytics_cache
 
 logger = logging.getLogger(__name__)
 
@@ -32,3 +32,8 @@ def process_dirty_analytics_dates(limit=500):
             )
 
     return {"processed": processed, "remaining": AnalyticsDirtyDate.objects.filter(processed=False).count()}
+
+
+@app.task
+def precompute_analytics_cache():
+    return precompute_admin_analytics_cache()

@@ -2,9 +2,14 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import List, Dict, Tuple
 
+from django.core.cache import cache
+from django.db import models
 from django.db.models import Sum, Count, Avg, Q
 from django.db.models.functions import TruncDate, TruncMonth, TruncWeek
+from django.utils import timezone
 
+from apps.account.models import CompanyProfile, HotelProfile, User
+from apps.payment.models import PaymentTransaction
 from apps.listing.models import (
     Booking, 
     BookingItem, 
@@ -13,10 +18,27 @@ from apps.listing.models import (
     CarRentalItem,
     GuestHouseBooking,
     EventSpaceBooking,
+    EventSpaceListing,
+    GuestHouseProfile,
     RoomListing,
     GuestHouseRoom,
+    CarListing,
+    CarSaleListing,
+    PropertyListing,
+    PropertySaleListing,
 )
 from apps.analytics.models import CompanyDailyMetrics, ListingDailyMetrics
+
+
+ANALYTICS_CACHE_VERSION_KEY = "analytics:admin:version"
+ANALYTICS_CACHE_TTL = 3600
+SUCCESS_TRANSACTION_STATUSES = [PaymentTransaction.PaymentStatus.SUCCESS]
+FAILED_PAYOUT_STATUSES = [PaymentTransaction.PayoutStatus.FAILED]
+APPLICABLE_PAYOUT_STATUSES = [
+    PaymentTransaction.PayoutStatus.PENDING,
+    PaymentTransaction.PayoutStatus.PAID,
+    PaymentTransaction.PayoutStatus.FAILED,
+]
 
 
 def _sum_decimal(value):
@@ -795,4 +817,208 @@ def compute_front_desk_stats(workspace_id: str, workspace_type: str) -> Dict:
         "total_rooms": total_rooms,
         "occupancy_rate": round(occupancy_rate, 1),
         "available_units": max(0, total_rooms - in_house_today)
+    }
+
+
+def _analytics_cache_version() -> int:
+    version = cache.get(ANALYTICS_CACHE_VERSION_KEY)
+    if version is None:
+        version = 1
+        cache.set(ANALYTICS_CACHE_VERSION_KEY, version, timeout=None)
+    return int(version)
+
+
+def _analytics_cache_key(metric: str, date_from=None, date_to=None) -> str:
+    version = _analytics_cache_version()
+    if date_from is None and date_to is None:
+        suffix = "all"
+    else:
+        suffix = f"{date_from or 'none'}:{date_to or 'none'}"
+    return f"analytics:v{version}:{metric}:{suffix}"
+
+
+def invalidate_analytics_cache() -> None:
+    try:
+        cache.incr(ANALYTICS_CACHE_VERSION_KEY)
+    except ValueError:
+        cache.set(ANALYTICS_CACHE_VERSION_KEY, 2, timeout=None)
+
+
+def _apply_transaction_date_filters(queryset, date_from=None, date_to=None):
+    if date_from:
+        queryset = queryset.filter(created_at__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(created_at__date__lte=date_to)
+    return queryset
+
+
+def _apply_user_date_filters(queryset, date_from=None, date_to=None):
+    if date_from:
+        queryset = queryset.filter(created_at__date__gte=date_from)
+    if date_to:
+        queryset = queryset.filter(created_at__date__lte=date_to)
+    return queryset
+
+
+def _active_listing_counts():
+    listing_sources = [
+        ("hotels", HotelProfile.objects.filter(is_active=True)),
+        ("rooms", RoomListing.objects.filter(is_active=True)),
+        ("guesthouses", GuestHouseProfile.objects.filter(is_active=True)),
+        ("guesthouse_rooms", GuestHouseRoom.objects.filter(is_active=True)),
+        ("car_rentals", CarListing.objects.filter(is_active=True, listing_type=CarListing.ListingTypeChoices.RENT)),
+        ("car_sales", CarSaleListing.objects.filter(is_active=True)),
+        ("property_rentals", PropertyListing.objects.filter(is_active=True)),
+        ("property_sales", PropertySaleListing.objects.filter(is_active=True)),
+        ("event_spaces", EventSpaceListing.objects.filter(is_active=True)),
+    ]
+    return [
+        {"category": category, "count": queryset.count()}
+        for category, queryset in listing_sources
+    ]
+
+
+def _pending_listing_approvals_count() -> int:
+    pending_sources = [
+        HotelProfile.objects.filter(is_verified=False),
+        RoomListing.objects.filter(is_verified=False),
+        GuestHouseProfile.objects.filter(is_verified=False),
+        GuestHouseRoom.objects.filter(is_verified=False),
+        CarListing.objects.filter(is_verified=False),
+        CarSaleListing.objects.filter(is_verified=False),
+        PropertyListing.objects.filter(is_verified=False),
+        PropertySaleListing.objects.filter(is_verified=False),
+        EventSpaceListing.objects.filter(is_verified=False),
+    ]
+    return sum(queryset.count() for queryset in pending_sources)
+
+
+def get_overview_metrics(date_from=None, date_to=None) -> Dict:
+    cache_key = _analytics_cache_key("overview", date_from, date_to)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    success_transactions = _apply_transaction_date_filters(
+        PaymentTransaction.objects.filter(status__in=SUCCESS_TRANSACTION_STATUSES),
+        date_from=date_from,
+        date_to=date_to,
+    )
+    total_transactions_qs = _apply_transaction_date_filters(
+        PaymentTransaction.objects.all(),
+        date_from=date_from,
+        date_to=date_to,
+    )
+    users_qs = User.objects.all()
+    new_users_qs = _apply_user_date_filters(User.objects.all(), date_from=date_from, date_to=date_to)
+
+    overview = {
+        "total_revenue": float(success_transactions.aggregate(total=Sum("amount"))["total"] or Decimal("0")),
+        "total_transactions": total_transactions_qs.count(),
+        "pending_approvals": _pending_listing_approvals_count(),
+        "active_listings": _active_listing_counts(),
+        "total_users": users_qs.count(),
+        "new_users_in_range": new_users_qs.count() if (date_from or date_to) else users_qs.count(),
+    }
+    cache.set(cache_key, overview, timeout=ANALYTICS_CACHE_TTL)
+    return overview
+
+
+def _revenue_trunc(date_from=None, date_to=None):
+    if not date_from or not date_to:
+        return TruncMonth("created_at"), "%Y-%m-01"
+    if (date_to - date_from).days > 31:
+        return TruncMonth("created_at"), "%Y-%m-01"
+    return TruncDate("created_at"), "%Y-%m-%d"
+
+
+def get_revenue_metrics(date_from=None, date_to=None) -> Dict:
+    cache_key = _analytics_cache_key("revenue", date_from, date_to)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    success_transactions = _apply_transaction_date_filters(
+        PaymentTransaction.objects.filter(status__in=SUCCESS_TRANSACTION_STATUSES),
+        date_from=date_from,
+        date_to=date_to,
+    )
+    trunc_expression, date_format = _revenue_trunc(date_from=date_from, date_to=date_to)
+
+    revenue_by_period = list(
+        success_transactions.annotate(period_bucket=trunc_expression)
+        .values("period_bucket")
+        .annotate(amount=Sum("amount"))
+        .order_by("period_bucket")
+    )
+    revenue_by_category = list(
+        success_transactions.values("booking_type")
+        .annotate(amount=Sum("amount"))
+        .order_by("booking_type")
+    )
+    aggregates = success_transactions.aggregate(
+        average_transaction=Avg("amount"),
+        total_service_fees=Sum("commission_amount"),
+    )
+
+    payload = {
+        "revenue_by_period": [
+            {
+                "date": item["period_bucket"].strftime(date_format) if item["period_bucket"] else "",
+                "amount": float(item["amount"] or Decimal("0")),
+            }
+            for item in revenue_by_period
+        ],
+        "revenue_by_category": [
+            {
+                "category": item["booking_type"],
+                "amount": float(item["amount"] or Decimal("0")),
+            }
+            for item in revenue_by_category
+        ],
+        "average_transaction": float(aggregates["average_transaction"] or Decimal("0")),
+        "total_service_fees": float(aggregates["total_service_fees"] or Decimal("0")),
+    }
+    cache.set(cache_key, payload, timeout=ANALYTICS_CACHE_TTL)
+    return payload
+
+
+def get_payout_failure_metrics(date_from=None, date_to=None) -> Dict:
+    cache_key = _analytics_cache_key("payout_failures", date_from, date_to)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    applicable_payouts = _apply_transaction_date_filters(
+        PaymentTransaction.objects.filter(payout_status__in=APPLICABLE_PAYOUT_STATUSES),
+        date_from=date_from,
+        date_to=date_to,
+    )
+    failed_payouts = applicable_payouts.filter(payout_status__in=FAILED_PAYOUT_STATUSES)
+
+    applicable_count = applicable_payouts.count()
+    failed_count = failed_payouts.count()
+    failure_rate = 0.0
+    if applicable_count:
+        failure_rate = round((failed_count / applicable_count) * 100, 2)
+
+    payload = {
+        "total_failures": failed_count,
+        "failure_rate": failure_rate,
+        "failures_by_reason": [],
+        "total_failed_amount": float(
+            failed_payouts.aggregate(total=Sum("vendor_payout_amount"))["total"] or Decimal("0")
+        ),
+    }
+    cache.set(cache_key, payload, timeout=ANALYTICS_CACHE_TTL)
+    return payload
+
+
+def precompute_admin_analytics_cache() -> Dict:
+    invalidate_analytics_cache()
+    return {
+        "overview": get_overview_metrics(),
+        "revenue": get_revenue_metrics(),
+        "payout_failures": get_payout_failure_metrics(),
+        "computed_at": timezone.now().isoformat(),
     }

@@ -15,6 +15,7 @@ class Notification(AbstractBaseModel):
         
         PAYMENT_SUCCESS = 'payment_success', _('Payment Successful')
         PAYMENT_FAILED = 'payment_failed', _('Payment Failed')
+        CONTACT_REVEAL_UNLOCKED = 'contact_reveal_unlocked', _('Contact Reveal Unlocked')
         LISTING_DELETED = 'listing_deleted', _('Listing Deleted')
         
         COMPANY_APPROVED = 'company_approved', _('Company Approved')

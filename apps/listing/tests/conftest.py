@@ -5,9 +5,43 @@ from PIL import Image
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from rest_framework.test import APIClient
+from apps.account.enums import RoleCode
+from apps.account.models import Role
 from apps.core.models import Address
 from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile
 from apps.listing.models import Amenity
+
+
+@pytest.fixture
+def api_client():
+    return APIClient()
+
+
+@pytest.fixture
+def address():
+    return Address.objects.create(
+        street_line1="Test Street",
+        city="Addis Ababa",
+        country="Ethiopia",
+        sub_city="Bole",
+        state="Addis Ababa",
+        postal_code="1000",
+    )
+
+
+@pytest.fixture
+def admin_role():
+    return Role.objects.get_or_create(name="Admin", code=RoleCode.ADMIN.value)[0]
+
+
+@pytest.fixture
+def company_role():
+    return Role.objects.get_or_create(name="Company", code=RoleCode.COMPANY.value)[0]
+
+
+@pytest.fixture
+def normal_role():
+    return Role.objects.get_or_create(name="User", code=RoleCode.USER.value)[0]
 
 
 @pytest.fixture

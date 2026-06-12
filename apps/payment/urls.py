@@ -6,12 +6,14 @@ from .views import (
     verify_payment, 
     verify_payment_public,
     cancel_payment,
-    OwnerPaymentViewSet
+    OwnerPaymentViewSet,
+    AdminTransactionMonitorViewSet,
 )
 from rest_framework.routers import DefaultRouter
 
 router = DefaultRouter()
 router.register('ledger', OwnerPaymentViewSet, basename='owner-ledger')
+router.register('admin/transactions', AdminTransactionMonitorViewSet, basename='admin-transactions')
 
 urlpatterns = [
     path('initiate/', InitiatePaymentView.as_view(), name='initiate-payment'),

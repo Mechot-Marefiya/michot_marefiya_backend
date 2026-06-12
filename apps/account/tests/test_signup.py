@@ -4,23 +4,26 @@ import pytest
 from PIL import Image
 from django.urls import reverse
 from django.core.files.uploadedfile import SimpleUploadedFile
+from unittest.mock import patch
 
 
 @pytest.mark.django_db
-def test_user_creation(api_client, normal_role):
+@patch("services.sms.send_sms", return_value=True)
+def test_user_creation(mock_send_sms, api_client, normal_role):
     # * Having the normal_role here auto creates it
     # * and that helps our Role.objects.get() code in the serializer
     data = {
         "email": "test@example.com",
-        "password": "12345678",
-        "confirm_password": "12345678",
+        "password": "pass1234",
+        "confirm_password": "pass1234",
+        "phone": "0911000123",
     }
 
     res = api_client.post(reverse("users-list"), data, format="json")
 
     assert res.status_code == 201
     assert res.data["email"] == "test@example.com"
-    assert res.data["role"] == normal_role.id
+    assert res.data["role"]["id"] == str(normal_role.id)
 
 
 @pytest.mark.django_db
@@ -35,7 +38,7 @@ def test_serializer_raises_validation_error_on_password_mismatch(
 
     res = api_client.post(reverse("users-list"), data, format="json")
     assert res.status_code == 400
-    assert "Password does not match" in str(res.data)
+    assert "Passwords do not match" in str(res.data)
 
 
 def create_test_image(name="test.png", ext="PNG", size=(100, 100), color=(255, 0, 0)):
@@ -69,6 +72,10 @@ def test_company_registration(api_client, company_role):
 
     data = {
         "email": "company@example.com",
+        "first_name": "Company",
+        "last_name": "Owner",
+        "password": "pass1234",
+        "confirm_password": "pass1234",
         "name": "michot",
         "phone": "+25111121214",
         "license": license,

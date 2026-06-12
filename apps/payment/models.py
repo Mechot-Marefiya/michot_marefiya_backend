@@ -33,6 +33,8 @@ class PaymentTransaction(AbstractBaseModel):
             ('guesthouse', 'Guesthouse'),
             ('eventspace', 'Event Space'),
             ('carrental', 'Car Rental'),
+            ('propertyrental', 'Property Rental'),
+            ('contact_reveal', 'Contact Reveal'),
         ],
         default='booking',
         help_text="Discriminator for the type of booking"
@@ -79,6 +81,69 @@ class PaymentTransaction(AbstractBaseModel):
         null=True, 
         blank=True,
         help_text="Amount sent to the vendor subaccount"
+    )
+
+    class TaxLiabilityStatus(models.TextChoices):
+        APPLICABLE = "applicable", "Applicable"
+        NOT_APPLICABLE = "not_applicable", "Not Applicable"
+
+    tax_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Tax amount collected for eligible property rental transactions"
+    )
+    tax_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        help_text="Tax rate used for eligible property rental transactions"
+    )
+    tax_liability_status = models.CharField(
+        max_length=30,
+        choices=TaxLiabilityStatus.choices,
+        null=True,
+        blank=True,
+        help_text="Tax applicability status for this transaction"
+    )
+
+    class DisputeStatus(models.TextChoices):
+        OPEN = "open", "Open"
+        UNDER_REVIEW = "under_review", "Under Review"
+        ESCALATED = "escalated", "Escalated"
+        RESOLVED = "resolved", "Resolved"
+
+    dispute_status = models.CharField(
+        max_length=30,
+        choices=DisputeStatus.choices,
+        null=True,
+        blank=True,
+        help_text="Admin dispute triage status for this transaction"
+    )
+    dispute_note = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Latest admin note for transaction dispute triage"
+    )
+    dispute_opened_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When dispute triage was opened"
+    )
+    dispute_resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When dispute triage was resolved"
+    )
+    dispute_handled_by = models.ForeignKey(
+        'account.User',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='handled_payment_disputes',
+        help_text="Admin currently responsible for dispute triage"
     )
     
     class PayoutStatus(models.TextChoices):

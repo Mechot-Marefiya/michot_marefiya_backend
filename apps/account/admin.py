@@ -9,6 +9,7 @@ from apps.account.models import (
     CompanyProfile,
     IndividualOwnerProfile,
     OtpChallenge,
+    OwnerComplianceAgreement,
 )
 
 
@@ -39,6 +40,7 @@ class HotelProfileModelAdmin(admin.ModelAdmin):
 admin.site.register(Role)
 from django.utils import timezone
 from apps.account.enums import RoleCode
+from apps.account.services import revoke_agreement as revoke_owner_agreement_service, sign_agreement as sign_owner_agreement_service
 
 
 def approve_companies(modeladmin, request, queryset):
@@ -73,6 +75,32 @@ class CompanyProfileAdmin(admin.ModelAdmin):
 
 admin.site.register(IndividualOwnerProfile)
 admin.site.register(User)
+
+
+def sign_owner_agreement(modeladmin, request, queryset):
+    for agreement in queryset:
+        sign_owner_agreement_service(agreement, request.user)
+    modeladmin.message_user(request, f"Signed {queryset.count()} agreement(s).")
+
+
+def revoke_owner_agreement(modeladmin, request, queryset):
+    for agreement in queryset:
+        revoke_owner_agreement_service(agreement, request.user)
+    modeladmin.message_user(request, f"Revoked {queryset.count()} agreement(s).")
+
+
+@admin.register(OwnerComplianceAgreement)
+class OwnerComplianceAgreementAdmin(admin.ModelAdmin):
+    list_display = ("owner", "status", "signed_at", "signed_by_admin", "agreement_version")
+    list_filter = ("status",)
+    search_fields = (
+        "owner__first_name",
+        "owner__last_name",
+        "owner__phone",
+        "owner__staff_members__email",
+    )
+    readonly_fields = ("signed_at", "signed_by_admin")
+    actions = [sign_owner_agreement, revoke_owner_agreement]
 
 
 @admin.register(OtpChallenge)

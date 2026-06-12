@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Optional, Tuple,Any,List
 from rest_framework.exceptions import ValidationError
 from decimal import Decimal
-from apps.account.models import CompanyProfile, HotelProfile
+from apps.account.models import CompanyProfile, HotelProfile, OtpChallenge
 from apps.account.services import ImageCreationService, OtpService
 from apps.core.models import Address,Facility
 from apps.listing.exceptions import BookingConflict
@@ -25,6 +25,8 @@ from apps.listing.models import (
     BookingItem,
     GuestHouseBooking,
     GuestHouseBookingItem,
+    PropertyRentalAvailability,
+    PropertyRentalBooking,
     PropertyListing,
     RoomListing,
     StayAvailability,EventSpaceListing,
@@ -51,6 +53,41 @@ from services.sms import normalize_phone_number
 
 
 logger = logging.getLogger(__name__)
+_VERIFICATION_NOTE_UNSET = object()
+
+
+def verify_listing(listing, actor, verification_note=_VERIFICATION_NOTE_UNSET):
+    if actor is None or not getattr(actor, "is_authenticated", False):
+        raise ValidationError("Authenticated admin user is required for verification.")
+
+    listing.is_verified = True
+    listing.verified_at = timezone.now()
+    listing.verified_by = actor
+    update_fields = ["is_verified", "verified_at", "verified_by", "updated_at"]
+
+    if hasattr(listing, "verification_note") and verification_note is not _VERIFICATION_NOTE_UNSET:
+        listing.verification_note = verification_note
+        update_fields.append("verification_note")
+
+    listing.save(update_fields=update_fields)
+    return listing
+
+
+def unverify_listing(listing, actor):
+    if actor is None or not getattr(actor, "is_authenticated", False):
+        raise ValidationError("Authenticated admin user is required for verification.")
+
+    listing.is_verified = False
+    listing.verified_at = None
+    listing.verified_by = None
+    update_fields = ["is_verified", "verified_at", "verified_by", "updated_at"]
+
+    if hasattr(listing, "verification_note"):
+        listing.verification_note = None
+        update_fields.append("verification_note")
+
+    listing.save(update_fields=update_fields)
+    return listing
 
 
 class GuestBookingOtpError(Exception):
@@ -66,84 +103,55 @@ class GuestBookingOtpChallenge:
 
 
 class GuestBookingOtpService:
-    PURPOSE = "guest_booking"
-    VALID_BOOKING_TYPES = {"hotel", "guesthouse", "eventspace", "car_rental"}
+    PURPOSE_MAP = {
+        "hotel": OtpChallenge.Purpose.GUEST_HOTEL_BOOKING,
+        "guesthouse": OtpChallenge.Purpose.GUEST_GUESTHOUSE_BOOKING,
+        "eventspace": OtpChallenge.Purpose.GUEST_EVENTSPACE_BOOKING,
+        "car_rental": OtpChallenge.Purpose.GUEST_CAR_RENTAL_BOOKING,
+    }
 
     @classmethod
-    def _ttl_seconds(cls):
-        return int(getattr(settings, "OTP_TTL_SECONDS", OtpService.DEFAULT_TTL_SECONDS))
-
-    @classmethod
-    def _max_attempts(cls):
-        return int(getattr(settings, "OTP_MAX_ATTEMPTS", OtpService.DEFAULT_MAX_ATTEMPTS))
-
-    @staticmethod
-    def _challenge_key(challenge_id):
-        return f"guest_booking_otp:{challenge_id}"
+    def _purpose_for_booking_type(cls, booking_type: str) -> str:
+        purpose = cls.PURPOSE_MAP.get(booking_type)
+        if not purpose:
+            raise GuestBookingOtpError("Invalid booking type.")
+        return purpose
 
     @classmethod
     def create_challenge(cls, *, phone: str, booking_type: str) -> GuestBookingOtpChallenge:
-        normalized_phone = OtpService.normalize_phone(phone)
-        if not normalized_phone:
-            raise GuestBookingOtpError("Phone number is required.")
-        if booking_type not in cls.VALID_BOOKING_TYPES:
-            raise GuestBookingOtpError("Invalid booking type.")
-
-        code = OtpService.generate_code()
-        challenge_id = str(uuid4())
-        expires_at = timezone.now() + timezone.timedelta(seconds=cls._ttl_seconds())
-        cache.set(
-            cls._challenge_key(challenge_id),
-            {
-                "phone": normalized_phone,
-                "booking_type": booking_type,
-                "code_hash": make_password(code),
-                "attempts": 0,
-                "max_attempts": cls._max_attempts(),
-                "expires_at": expires_at.isoformat(),
-            },
-            timeout=cls._ttl_seconds(),
-        )
-
-        message = f"Your Mechot Marefiya booking verification code is {code}. It expires in {cls._ttl_seconds() // 60} minutes."
         try:
-            from services.sms import send_sms
-
-            send_sms(normalized_phone, message)
-        except Exception:
-            cache.delete(cls._challenge_key(challenge_id))
-            logger.exception("Failed to send guest booking OTP SMS to %s", normalized_phone)
-            raise
+            challenge = OtpService.create_challenge(
+                phone=phone,
+                purpose=cls._purpose_for_booking_type(booking_type),
+            )
+        except Exception as exc:
+            raise GuestBookingOtpError(str(exc)) from exc
 
         return GuestBookingOtpChallenge(
-            challenge_id=challenge_id,
-            phone=normalized_phone,
+            challenge_id=str(challenge.id),
+            phone=challenge.phone,
             booking_type=booking_type,
-            expires_at=expires_at,
+            expires_at=challenge.expires_at,
         )
 
     @classmethod
     def verify_challenge(cls, *, challenge_id, code: str, phone: str, booking_type: str):
-        data = cache.get(cls._challenge_key(challenge_id))
-        if not data:
-            raise GuestBookingOtpError("Invalid or expired guest booking OTP challenge.")
-        if data["booking_type"] != booking_type:
-            raise GuestBookingOtpError("OTP challenge does not match this booking type.")
-
-        normalized_phone = OtpService.normalize_phone(phone)
-        if data["phone"] != normalized_phone:
-            raise GuestBookingOtpError("OTP challenge does not match the guest phone number.")
-        if data["attempts"] >= data["max_attempts"]:
-            cache.delete(cls._challenge_key(challenge_id))
-            raise GuestBookingOtpError("OTP attempt limit exceeded.")
-
-        data["attempts"] += 1
-        if not check_password(code, data["code_hash"]):
-            cache.set(cls._challenge_key(challenge_id), data, timeout=cls._ttl_seconds())
-            raise GuestBookingOtpError("Invalid OTP code.")
-
-        cache.delete(cls._challenge_key(challenge_id))
-        return True
+        try:
+            challenge = OtpChallenge.objects.filter(id=challenge_id).only("phone").first()
+            normalized_phone = OtpService.normalize_phone(phone)
+            if not challenge or challenge.phone != normalized_phone:
+                raise GuestBookingOtpError(OtpService.GENERIC_VERIFY_ERROR)
+            OtpService.verify_challenge(
+                challenge_id=challenge_id,
+                code=code,
+                purpose=cls._purpose_for_booking_type(booking_type),
+                issue_tokens=False,
+            )
+            return True
+        except Exception as exc:
+            if isinstance(exc, GuestBookingOtpError):
+                raise
+            raise GuestBookingOtpError(str(exc)) from exc
 
 DEFAULT_PLATFORM_FEE_RATE = Decimal("0.05")
 BOOKING_PHONE_SOURCES = (
@@ -3039,6 +3047,258 @@ class GuestHouseBookingService:
         item_subtotals = [item.subtotal() for item in booking.items.all()]
         calculation = PriceCalculationService.calculate_totals(item_subtotals, fee_rate=fee_rate)
         return calculation["grand_total"]
+
+
+class PropertyRentalAvailabilityService:
+    @staticmethod
+    def create_availability(property_listing, days=90, start_date=None):
+        start = start_date or timezone.now().date()
+        objs = []
+        for i in range(1, days + 1):
+            objs.append(
+                PropertyRentalAvailability(
+                    property_listing=property_listing,
+                    date=start + timedelta(days=i),
+                    available_units=1,
+                    price=None,
+                )
+            )
+        PropertyRentalAvailability.objects.bulk_create(objs, batch_size=1000, ignore_conflicts=True)
+
+    @staticmethod
+    def validate_availability(property_listing, start_date, end_date, lock=True):
+        dates = [start_date + timedelta(days=i) for i in range((end_date - start_date).days)]
+        queryset = PropertyRentalAvailability.objects.filter(
+            property_listing=property_listing,
+            date__in=dates,
+        )
+        if lock:
+            queryset = queryset.select_for_update()
+
+        availability_map = {availability.date: availability for availability in queryset}
+        for date_value in dates:
+            availability = availability_map.get(date_value)
+            if not availability:
+                raise BookingConflict(
+                    f"Availability has not been released for {property_listing.title} on {date_value}. "
+                    "Please choose closer dates."
+                )
+            if availability.available_units < 1:
+                raise BookingConflict(f"{property_listing.title} is not available on {date_value}.")
+
+    @staticmethod
+    def update_availability(property_listing, start_date, end_date, increment=False):
+        dates = [start_date + timedelta(days=i) for i in range((end_date - start_date).days)]
+        with transaction.atomic():
+            for date_value in dates:
+                queryset = PropertyRentalAvailability.objects.select_for_update().filter(
+                    property_listing=property_listing,
+                    date=date_value,
+                )
+                if increment:
+                    queryset.update(available_units=F("available_units") + 1)
+                else:
+                    queryset.update(available_units=F("available_units") - 1)
+
+    @staticmethod
+    def price_details(property_listing, start_date, end_date, payment_currency=None):
+        dates = [start_date + timedelta(days=i) for i in range((end_date - start_date).days)]
+        inventories = {
+            availability.date: availability
+            for availability in PropertyRentalAvailability.objects.filter(
+                property_listing=property_listing,
+                date__in=dates,
+            )
+        }
+        native_currency = property_listing.currency
+        target_currency = payment_currency or native_currency
+        details = []
+        for date_value in dates:
+            availability = inventories.get(date_value)
+            if availability and availability.price is not None:
+                native_price = Decimal(availability.price).quantize(Decimal("0.01"))
+                detail = {
+                    "date": date_value,
+                    "price": native_price,
+                    "price_per_unit": native_price,
+                    "source": "availability",
+                    "rate_id": None,
+                    "note": None,
+                    "is_discounted": native_price < Decimal(property_listing.base_price),
+                }
+            else:
+                detail = PriceService.resolve_price_detail(property_listing, date_value)
+                detail["date"] = date_value
+                native_price = Decimal(detail["price_per_unit"])
+
+            if target_currency != native_currency:
+                converted = convert_currency(native_price, native_currency, target_currency)
+                detail["price"] = converted
+                detail["price_per_unit"] = converted
+                detail["currency"] = target_currency
+            else:
+                detail["currency"] = native_currency
+            details.append(detail)
+        return details
+
+
+class PropertyRentalBookingService:
+    @staticmethod
+    def _build_snapshot(booking):
+        listing = booking.property_listing
+        return {
+            "property_listing": {
+                "id": str(listing.id),
+                "title": listing.title,
+                "description": listing.description,
+                "property_type": listing.property_type,
+                "base_price": str(listing.base_price),
+                "currency": listing.currency,
+                "address": {
+                    "street_line1": listing.address.street_line1,
+                    "country": listing.address.country,
+                    "city": listing.address.city,
+                    "sub_city": listing.address.sub_city,
+                    "state": listing.address.state,
+                    "postal_code": listing.address.postal_code,
+                } if listing.address_id else None,
+            },
+            "start_date": booking.start_date.isoformat(),
+            "end_date": booking.end_date.isoformat(),
+            "total_price": str(booking.total_price),
+            "currency": booking.currency,
+        }
+
+    @staticmethod
+    def calculate_price_preview(property_listing, start_date, end_date, *, payment_currency=None, guest_phone=None, display_currency=None):
+        currency = payment_currency or property_listing.currency
+        price_details = PropertyRentalAvailabilityService.price_details(
+            property_listing,
+            start_date,
+            end_date,
+            payment_currency=currency,
+        )
+        item_subtotal = sum(Decimal(str(detail["price_per_unit"])) for detail in price_details)
+        total_items = [{
+            "id": str(property_listing.id),
+            "title": property_listing.title,
+            "units": 1,
+            "price_per_unit": f"{(price_details[0]['price_per_unit'] if price_details else property_listing.base_price):.2f}",
+            "subtotal": f"{item_subtotal:.2f}",
+            "breakdown": price_details,
+        }]
+        return {
+            "nights": (end_date - start_date).days,
+            "items": total_items,
+            **PriceCalculationService.calculate_preview_totals(
+                [item_subtotal],
+                currency,
+                display_currency,
+                items=total_items,
+                fee_rate=get_effective_platform_fee_rate(phone=guest_phone),
+            ),
+        }
+
+    @transaction.atomic()
+    @staticmethod
+    def create_booking(validated_data, user=None):
+        guest_email = validated_data.get("guest_email")
+        if not user and not guest_email and not validated_data.get("renter"):
+            raise ValidationError("Either a user account or guest email is required to complete the booking.")
+
+        property_listing = validated_data["property_listing"]
+        if property_listing.individual_owner_id:
+            from apps.account.services import is_agreement_active
+
+            if not is_agreement_active(property_listing.individual_owner):
+                raise ValidationError("Owner has not completed compliance agreement.")
+        start_date = validated_data["start_date"]
+        end_date = validated_data["end_date"]
+        terms_accepted = validated_data.pop("terms_accepted", False)
+        terms_version = validated_data.pop("terms_version", "")
+        payment_currency = validated_data.pop("payment_currency", property_listing.currency)
+
+        PropertyRentalAvailabilityService.validate_availability(
+            property_listing,
+            start_date,
+            end_date,
+            lock=True,
+        )
+
+        terms_data = TermsService.validate_and_snapshot_terms(
+            content_object=property_listing,
+            terms_version=terms_version,
+            terms_accepted=terms_accepted,
+        )
+        if user:
+            validated_data["renter"] = user
+
+        preview = PropertyRentalBookingService.calculate_price_preview(
+            property_listing,
+            start_date,
+            end_date,
+            payment_currency=payment_currency,
+            guest_phone=validated_data.get("guest_phone") or getattr(user, "phone", None),
+        )
+        booking = PropertyRentalBooking.objects.create(
+            total_price=Decimal(str(preview["totals"]["grand_total"])),
+            currency=payment_currency,
+            terms_accepted=True,
+            terms_version=terms_data["version"],
+            terms_accepted_at=terms_data["accepted_at"],
+            terms_content_snapshot=terms_data["content_snapshot"],
+            **validated_data,
+        )
+        booking.snapshot = PropertyRentalBookingService._build_snapshot(booking)
+        booking.save(update_fields=["snapshot", "updated_at"])
+
+        PropertyRentalAvailabilityService.update_availability(
+            property_listing,
+            start_date,
+            end_date,
+            increment=False,
+        )
+        return booking
+
+    @staticmethod
+    def cancel_booking(booking):
+        if booking.status == booking.RentStatus.CANCELLED:
+            logger.info("PropertyRentalBooking %s is already CANCELLED.", booking.id)
+            return booking
+        if booking.status in [booking.RentStatus.PENDING, booking.RentStatus.CONFIRMED]:
+            PropertyRentalAvailabilityService.update_availability(
+                booking.property_listing,
+                booking.start_date,
+                booking.end_date,
+                increment=True,
+            )
+        booking.status = booking.RentStatus.CANCELLED
+        booking.save(update_fields=["status", "updated_at"])
+        return booking
+
+    @staticmethod
+    def confirm_booking(booking):
+        if booking.status == booking.RentStatus.CONFIRMED:
+            return booking
+        if booking.status == booking.RentStatus.CANCELLED:
+            raise BookingConflict(f"PropertyRentalBooking {booking.id} was cancelled.")
+
+        if not booking.terms_accepted or not booking.terms_version or not booking.terms_content_snapshot:
+            logger.error("CRITICAL: PropertyRentalBooking %s confirmed without T&C snapshot.", booking.id)
+            if not booking.is_legacy:
+                raise ValidationError("Legal integrity check failed: Missing T&C snapshot.")
+
+        booking.status = booking.RentStatus.CONFIRMED
+        booking.save(update_fields=["status", "updated_at"])
+        return booking
+
+    @staticmethod
+    def get_booking_total(booking, fee_rate=None):
+        if fee_rate is None:
+            fee_rate = get_effective_platform_fee_rate(booking=booking)
+        nights = (booking.end_date - booking.start_date).days
+        item_subtotal = Decimal(booking.property_listing.base_price) * Decimal(nights)
+        return PriceCalculationService.calculate_totals([item_subtotal], fee_rate=fee_rate)["grand_total"]
 
 
 class CarRentalService:

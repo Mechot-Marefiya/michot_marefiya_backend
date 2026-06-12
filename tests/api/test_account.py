@@ -7,13 +7,16 @@ import pytest
 import json
 
 from datetime import date, timedelta
+from rest_framework.exceptions import ValidationError
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.hashers import make_password
+from django.core.cache import cache
 from django.utils import timezone
 from unittest.mock import patch
 
 from apps.account.enums import RoleCode
-from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile, OtpChallenge, Role, User
+from apps.account.services import create_agreement
+from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile, OtpChallenge, OwnerComplianceAgreement, Role, User
 from apps.core.models import Address
 from apps.favorites.models import Favorite, GuestFavorite
 from apps.notifications.models import Notification
@@ -42,12 +45,14 @@ def _address_payload():
     }
 
 
-def _assert_verification_fields(payload, *, expected_verified=False, expected_verified_by=None):
+def _assert_verification_fields(payload, *, expected_verified=False, expected_verified_by=None, expected_note=None):
     assert "is_verified" in payload
     assert "verified_at" in payload
     assert "verified_by" in payload
+    assert "verification_note" in payload
     assert payload["is_verified"] is expected_verified
     assert payload["verified_by"] == expected_verified_by
+    assert payload["verification_note"] == expected_note
 
 
 def _individual_owner_payload(phone="0911444555", national_id_number=1234567890):
@@ -625,6 +630,174 @@ def test_get_individual_owner_detail_public_contract(api_client, individual_owne
     assert "address" in data
 
 
+def test_post_owner_agreement_create_admin_success(admin_client, individual_owner):
+    response = admin_client.post(
+        f"/api/v1/account/individual-owners/{individual_owner.id}/agreement/",
+        {"agreement_version": "v1", "note": "Initial agreement"},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["status"] == OwnerComplianceAgreement.Status.PENDING
+    assert data["agreement_version"] == "v1"
+    assert data["note"] == "Initial agreement"
+
+
+def test_post_owner_agreement_sign_admin_success(admin_client, admin_user, individual_owner):
+    agreement = OwnerComplianceAgreement.objects.create(
+        owner=individual_owner,
+        agreement_version="v1",
+    )
+
+    response = admin_client.post(
+        f"/api/v1/account/individual-owners/{individual_owner.id}/agreement/sign/",
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == OwnerComplianceAgreement.Status.SIGNED
+    assert data["signed_by_admin"] == str(admin_user.id)
+    agreement.refresh_from_db()
+    assert agreement.status == OwnerComplianceAgreement.Status.SIGNED
+    assert agreement.signed_at is not None
+    assert agreement.signed_by_admin == admin_user
+
+
+def test_post_owner_agreement_revoke_admin_success(admin_client, admin_user, individual_owner):
+    agreement = OwnerComplianceAgreement.objects.create(
+        owner=individual_owner,
+        agreement_version="v1",
+        status=OwnerComplianceAgreement.Status.SIGNED,
+        signed_at=timezone.now(),
+        signed_by_admin=admin_user,
+    )
+
+    response = admin_client.post(
+        f"/api/v1/account/individual-owners/{individual_owner.id}/agreement/revoke/",
+        {"note": "Revoked by admin"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == OwnerComplianceAgreement.Status.REVOKED
+    assert data["note"] == "Revoked by admin"
+    agreement.refresh_from_db()
+    assert agreement.status == OwnerComplianceAgreement.Status.REVOKED
+    assert agreement.note == "Revoked by admin"
+
+
+def test_owner_agreement_non_admin_forbidden(individual_owner_client, individual_owner):
+    create_response = individual_owner_client.post(
+        f"/api/v1/account/individual-owners/{individual_owner.id}/agreement/",
+        {"agreement_version": "v1"},
+        format="json",
+    )
+    assert create_response.status_code == 403
+
+    agreement = OwnerComplianceAgreement.objects.create(
+        owner=individual_owner,
+        agreement_version="v1",
+    )
+
+    sign_response = individual_owner_client.post(
+        f"/api/v1/account/individual-owners/{individual_owner.id}/agreement/sign/",
+        format="json",
+    )
+    revoke_response = individual_owner_client.post(
+        f"/api/v1/account/individual-owners/{individual_owner.id}/agreement/revoke/",
+        format="json",
+    )
+
+    assert sign_response.status_code == 403
+    assert revoke_response.status_code == 403
+    agreement.refresh_from_db()
+    assert agreement.status == OwnerComplianceAgreement.Status.PENDING
+
+
+def test_owner_agreement_unauthenticated_requires_auth(api_client, individual_owner):
+    response = api_client.post(
+        f"/api/v1/account/individual-owners/{individual_owner.id}/agreement/",
+        {"agreement_version": "v1"},
+        format="json",
+    )
+
+    assert response.status_code == 401
+
+
+def test_create_owner_agreement_for_non_individual_owner_rejected(admin_user, company):
+    with pytest.raises(ValidationError):
+        create_agreement(company, admin_user, "v1")
+
+
+def test_owner_reads_own_agreement_safe_fields_only(individual_owner_client, individual_owner, admin_user):
+    OwnerComplianceAgreement.objects.create(
+        owner=individual_owner,
+        agreement_version="v1",
+        status=OwnerComplianceAgreement.Status.SIGNED,
+        signed_at=timezone.now(),
+        signed_by_admin=admin_user,
+        note="Hidden note",
+    )
+
+    response = individual_owner_client.get("/api/v1/account/profile/agreement/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert set(data.keys()) == {"status", "signed_at", "agreement_version"}
+    assert data["status"] == OwnerComplianceAgreement.Status.SIGNED
+    assert data["agreement_version"] == "v1"
+
+
+def test_owner_cannot_read_another_owner_agreement(individual_owner_client, admin_user):
+    other_owner = IndividualOwnerProfile.objects.create(
+        first_name="Other",
+        last_name="Owner",
+        phone="0911888777",
+        national_id_number=1234509876,
+        address=Address.objects.create(**_address_payload()),
+    )
+    OwnerComplianceAgreement.objects.create(
+        owner=other_owner,
+        agreement_version="v2",
+        status=OwnerComplianceAgreement.Status.SIGNED,
+        signed_at=timezone.now(),
+        signed_by_admin=admin_user,
+    )
+
+    response = individual_owner_client.get(
+        f"/api/v1/account/individual-owners/{other_owner.id}/agreement/"
+    )
+
+    assert response.status_code == 403
+
+
+def test_owner_profile_response_embeds_agreement_status(api_client, individual_owner, admin_user):
+    OwnerComplianceAgreement.objects.create(
+        owner=individual_owner,
+        agreement_version="v1",
+        status=OwnerComplianceAgreement.Status.SIGNED,
+        signed_at=timezone.now(),
+        signed_by_admin=admin_user,
+    )
+
+    response = api_client.get(f"/api/v1/account/individual-owners/{individual_owner.id}/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["agreement_status"]["status"] == OwnerComplianceAgreement.Status.SIGNED
+    assert data["agreement_status"]["signed_at"] is not None
+
+
+def test_owner_profile_response_embeds_null_agreement_when_absent(api_client, individual_owner):
+    response = api_client.get(f"/api/v1/account/individual-owners/{individual_owner.id}/")
+
+    assert response.status_code == 200
+    assert response.json()["agreement_status"] is None
+
+
 def test_get_company_list_public_contract(api_client, company):
     response = api_client.get("/api/v1/account/companies/")
 
@@ -636,6 +809,7 @@ def test_get_company_list_public_contract(api_client, company):
 
 
 def test_get_company_detail_public_contract(api_client, company):
+    cache.clear()
     response = api_client.get(f"/api/v1/account/companies/{company.id}/")
 
     assert response.status_code == 200
@@ -972,17 +1146,23 @@ def test_get_hotel_featured_public_contract(api_client, hotel):
 
 
 def test_post_hotel_verify_success(admin_client, admin_user, hotel):
-    response = admin_client.post(f"/api/v1/account/hotels/{hotel.id}/verify/")
+    response = admin_client.post(
+        f"/api/v1/account/hotels/{hotel.id}/verify/",
+        {"verification_note": "Inspected in person"},
+        format="json",
+    )
 
     assert response.status_code == 200
     hotel.refresh_from_db()
     assert hotel.is_verified is True
     assert hotel.verified_by == admin_user
     assert hotel.verified_at is not None
+    assert hotel.verification_note == "Inspected in person"
     _assert_verification_fields(
         response.json(),
         expected_verified=True,
         expected_verified_by=str(admin_user.id),
+        expected_note="Inspected in person",
     )
 
 
@@ -990,15 +1170,21 @@ def test_post_hotel_unverify_success(admin_client, hotel, admin_user):
     hotel.is_verified = True
     hotel.verified_at = timezone.now()
     hotel.verified_by = admin_user
-    hotel.save(update_fields=["is_verified", "verified_at", "verified_by"])
+    hotel.verification_note = "Old note"
+    hotel.save(update_fields=["is_verified", "verified_at", "verified_by", "verification_note"])
 
-    response = admin_client.post(f"/api/v1/account/hotels/{hotel.id}/unverify/")
+    response = admin_client.post(
+        f"/api/v1/account/hotels/{hotel.id}/unverify/",
+        {"verification_note": "ignored"},
+        format="json",
+    )
 
     assert response.status_code == 200
     hotel.refresh_from_db()
     assert hotel.is_verified is False
     assert hotel.verified_at is None
     assert hotel.verified_by is None
+    assert hotel.verification_note is None
     _assert_verification_fields(response.json())
 
 

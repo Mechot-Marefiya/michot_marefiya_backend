@@ -6,6 +6,7 @@ from rest_framework import status
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes
 
 from apps.account.permissions import (
+    IsAdmin,
     IsCompany, 
     IsCompanyOrIndividualOwner, 
     IsCompanyOrFrontDesk, 
@@ -13,7 +14,11 @@ from apps.account.permissions import (
 )
 from apps.analytics import services
 from apps.analytics.serializers import (
+    DateRangeQuerySerializer,
     OverviewSerializer,
+    OverviewMetricsSerializer,
+    PayoutFailureMetricsSerializer,
+    RevenueMetricsSerializer,
     TimeseriesItemSerializer,
     FrontDeskStatsSerializer,
     FrontDeskAvailabilityRowSerializer,
@@ -37,6 +42,12 @@ def _parse_analytics_date_range(request, default_days=30):
         )
 
     return start_date, end_date, None
+
+
+def _validate_admin_metrics_query_params(request):
+    serializer = DateRangeQuerySerializer(data=request.query_params)
+    serializer.is_valid(raise_exception=True)
+    return serializer.validated_data
 
 
 def _resolve_company_target(user, company_id):
@@ -273,3 +284,54 @@ class FrontDeskAvailabilityView(APIView):
             return Response(data)
         except Exception as e:
             return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+@extend_schema(tags=["Analytics"])
+class AdminOverviewMetricsView(APIView):
+    permission_classes = [IsAdmin]
+
+    @extend_schema(
+        parameters=[DateRangeQuerySerializer],
+        responses=OverviewMetricsSerializer,
+    )
+    def get(self, request):
+        params = _validate_admin_metrics_query_params(request)
+        data = services.get_overview_metrics(
+            date_from=params.get("date_from"),
+            date_to=params.get("date_to"),
+        )
+        return Response(OverviewMetricsSerializer(data).data)
+
+
+@extend_schema(tags=["Analytics"])
+class AdminRevenueMetricsView(APIView):
+    permission_classes = [IsAdmin]
+
+    @extend_schema(
+        parameters=[DateRangeQuerySerializer],
+        responses=RevenueMetricsSerializer,
+    )
+    def get(self, request):
+        params = _validate_admin_metrics_query_params(request)
+        data = services.get_revenue_metrics(
+            date_from=params.get("date_from"),
+            date_to=params.get("date_to"),
+        )
+        return Response(RevenueMetricsSerializer(data).data)
+
+
+@extend_schema(tags=["Analytics"])
+class AdminPayoutFailureMetricsView(APIView):
+    permission_classes = [IsAdmin]
+
+    @extend_schema(
+        parameters=[DateRangeQuerySerializer],
+        responses=PayoutFailureMetricsSerializer,
+    )
+    def get(self, request):
+        params = _validate_admin_metrics_query_params(request)
+        data = services.get_payout_failure_metrics(
+            date_from=params.get("date_from"),
+            date_to=params.get("date_to"),
+        )
+        return Response(PayoutFailureMetricsSerializer(data).data)

@@ -14,8 +14,8 @@ from django.core.cache import cache
 from django.contrib.contenttypes.models import ContentType
 from django.utils import timezone
 
-from apps.account.models import HotelProfile
-from apps.core.models import CurrencyRate
+from apps.account.models import HotelProfile, OwnerComplianceAgreement
+from apps.core.models import Address, CurrencyRate
 from apps.favorites.models import Favorite
 from apps.listing.models import (
     AddonOffering,
@@ -24,6 +24,13 @@ from apps.listing.models import (
     BookingItem,
     CarAvailability,
     CarListing,
+    CarSaleListing,
+    ContactRevealRequest,
+    PropertyContactRevealRequest,
+    PropertyRentalAvailability,
+    PropertyRentalBooking,
+    PropertyListing,
+    PropertySaleListing,
     CarRental,
     CarRentalItem,
     EventSpaceAvailability,
@@ -41,6 +48,8 @@ from apps.listing.models import (
     StayAvailability,
     TermsAndConditions,
 )
+from apps.payment.models import PaymentTransaction
+from apps.payment.services import ContactRevealPaymentService
 from apps.notifications.models import Notification
 from apps.account.models import User
 from apps.listing.services import ListingService, BookingService
@@ -80,6 +89,72 @@ def _create_car_availability(car_listing, start_date, end_date, available_units=
             date=start_date + timedelta(days=offset),
             available_units=available_units,
         )
+
+
+def _create_car_sale_listing(company, **overrides):
+    defaults = {
+        "company": company,
+        "title": "Toyota Vitz for sale",
+        "description": "Clean private sale listing",
+        "base_price": Decimal("850000.00"),
+        "currency": "ETB",
+        "brand": CarListing.CarBrandChoices.TOYOTA,
+        "model": "Vitz",
+        "year": 2018,
+        "mileage": 65000,
+        "fuel_type": CarListing.FuelTypeChoices.PETROL,
+        "transmission": CarListing.TransmissionChoices.AUTOMATIC,
+        "condition": CarListing.ConditionChoices.USED,
+        "car_class": CarListing.CarClassChoices.NORMAL,
+        "seats": 5,
+        "seller_contact_name": "Seller One",
+        "seller_phone": "0911777888",
+        "seller_email": "seller@example.com",
+        "reveal_fee": Decimal("100.00"),
+        "is_active": True,
+    }
+    defaults.update(overrides)
+    return CarSaleListing.objects.create(**defaults)
+
+
+def _create_property_sale_listing(company, **overrides):
+    address = overrides.pop("address", None) or Address.objects.create(**_listing_address_payload())
+    defaults = {
+        "company": company,
+        "address": address,
+        "title": "Bole villa for sale",
+        "description": "Connector listing for a private property sale",
+        "base_price": Decimal("4500000.00"),
+        "currency": "ETB",
+        "property_type": PropertySaleListing.PropertyTypeChoices.VILLA,
+        "bedrooms": 4,
+        "bathrooms": 3,
+        "square_meters": Decimal("240.00"),
+        "land_size_square_meters": Decimal("320.00"),
+        "is_furnished": True,
+        "seller_contact_name": "Property Seller",
+        "seller_phone": "0911222333",
+        "seller_email": "property-seller@example.com",
+        "reveal_fee": Decimal("150.00"),
+        "is_active": True,
+    }
+    defaults.update(overrides)
+    return PropertySaleListing.objects.create(**defaults)
+
+
+def _mock_contact_reveal_chapa(settings, monkeypatch):
+    settings.CHAPA_CALLBACK_URL = "https://api.example.com/payment/callback"
+    settings.FRONTEND_URL = "https://app.example.com"
+    settings.CHAPA_SECRET_KEY = "test-secret"
+
+    class DummyResponse:
+        def json(self):
+            return {
+                "status": "success",
+                "data": {"checkout_url": "https://checkout.example.com/contact"},
+            }
+
+    monkeypatch.setattr("apps.payment.services.requests.post", lambda *args, **kwargs: DummyResponse())
 
 
 def _create_guesthouse_inventory(room, start_date, end_date, available_rooms=None):
@@ -144,12 +219,39 @@ def _create_terms(content_object, version="1"):
     )
 
 
-def _assert_verification_fields(payload, *, expected_verified=False, expected_verified_by=None):
+def _create_property_rental_availability(property_listing, start_date, end_date, *, available_units=1, price=None):
+    for day_offset in range((end_date - start_date).days):
+        PropertyRentalAvailability.objects.update_or_create(
+            property_listing=property_listing,
+            date=start_date + timedelta(days=day_offset),
+            defaults={"available_units": available_units, "price": price},
+        )
+
+
+def _property_rental_booking_payload(property_listing, start_date, end_date, **overrides):
+    payload = {
+        "property_listing": str(property_listing.id),
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "guest_first_name": "Rental",
+        "guest_last_name": "Guest",
+        "guest_email": "property-rental@example.com",
+        "guest_phone": "0911555666",
+        "terms_accepted": True,
+        "terms_version": "1",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def _assert_verification_fields(payload, *, expected_verified=False, expected_verified_by=None, expected_note=None):
     assert "is_verified" in payload
     assert "verified_at" in payload
     assert "verified_by" in payload
+    assert "verification_note" in payload
     assert payload["is_verified"] is expected_verified
     assert payload["verified_by"] == expected_verified_by
+    assert payload["verification_note"] == expected_note
 
 
 def _prepare_guest_booking_otp(monkeypatch):
@@ -174,6 +276,627 @@ def test_get_amenities_public_list_success(api_client):
     assert "count" in data
     assert "results" in data
     assert data["results"][0]["name"] == "WiFi"
+
+
+def test_car_sales_happy_path_all_four_endpoints(api_client, auth_client, user, company, settings, monkeypatch):
+    listing = _create_car_sale_listing(company)
+
+    list_response = api_client.get("/api/v1/listing/car-sales/")
+    assert list_response.status_code == 200
+    list_item = list_response.json()["results"][0]
+    assert list_item["id"] == str(listing.id)
+    assert "seller_phone" not in list_item
+    assert "seller_email" not in list_item
+    assert "seller_contact_name" not in list_item
+
+    detail_response = api_client.get(f"/api/v1/listing/car-sales/{listing.id}/")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["id"] == str(listing.id)
+    assert detail["reveal_state"] is None
+    assert "seller_phone" not in detail
+
+    _mock_contact_reveal_chapa(settings, monkeypatch)
+    request_response = auth_client.post(
+        f"/api/v1/listing/car-sales/{listing.id}/request-contact/",
+        {"buyer_note": "I want to inspect it.", "buyer_phone": user.phone},
+        format="json",
+    )
+    assert request_response.status_code == 201
+    request_data = request_response.json()
+    assert request_data["checkout_url"] == "https://checkout.example.com/contact"
+    assert request_data["reveal_request"]["status"] == ContactRevealRequest.RevealStatus.PAYMENT_INITIATED
+    assert PaymentTransaction.objects.filter(
+        tx_ref=request_data["tx_ref"],
+        booking_type="contact_reveal",
+    ).exists()
+    assert "seller_phone" not in request_data
+
+    blocked_contact = auth_client.get(f"/api/v1/listing/car-sales/{listing.id}/contact/")
+    assert blocked_contact.status_code == 403
+
+    reveal_request = ContactRevealRequest.objects.get(id=request_data["reveal_request"]["id"])
+    reveal_request.status = ContactRevealRequest.RevealStatus.PAID_REVEALED
+    reveal_request.unlocked_at = timezone.now()
+    reveal_request.contact_snapshot = {
+        "seller_contact_name": listing.seller_contact_name,
+        "seller_phone": listing.seller_phone,
+        "seller_email": listing.seller_email,
+        "off_platform_notice": "The sale closes off-platform.",
+    }
+    reveal_request.save(update_fields=["status", "unlocked_at", "contact_snapshot", "updated_at"])
+
+    contact_response = auth_client.get(f"/api/v1/listing/car-sales/{listing.id}/contact/")
+    assert contact_response.status_code == 200
+    contact = contact_response.json()
+    assert contact["seller_phone"] == listing.seller_phone
+    assert contact["seller_email"] == listing.seller_email
+    assert "off_platform_notice" in contact
+
+
+def test_car_sales_create_success_for_company_owner(company_client):
+    response = company_client.post(
+        "/api/v1/listing/car-sales/",
+        {
+            "title": "Sale Corolla",
+            "description": "Ready for transfer",
+            "base_price": "900000.00",
+            "currency": "ETB",
+            "brand": CarListing.CarBrandChoices.TOYOTA,
+            "model": "Corolla",
+            "year": 2020,
+            "mileage": 40000,
+            "fuel_type": CarListing.FuelTypeChoices.PETROL,
+            "transmission": CarListing.TransmissionChoices.AUTOMATIC,
+            "condition": CarListing.ConditionChoices.USED,
+            "car_class": CarListing.CarClassChoices.NORMAL,
+            "seats": 5,
+            "seller_contact_name": "Fleet Seller",
+            "seller_phone": "0911222000",
+            "seller_email": "fleet@example.com",
+            "reveal_fee": "100.00",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["title"] == "Sale Corolla"
+    assert data["is_active"] is False
+    assert "seller_phone" not in data
+
+
+def test_car_sales_auth_errors_and_wrong_role(api_client, auth_client, company):
+    listing = _create_car_sale_listing(company)
+
+    assert api_client.post(f"/api/v1/listing/car-sales/{listing.id}/request-contact/", {}, format="json").status_code == 401
+    assert api_client.get(f"/api/v1/listing/car-sales/{listing.id}/contact/").status_code == 401
+
+    response = auth_client.post(
+        "/api/v1/listing/car-sales/",
+        {
+            "title": "Unauthorized Sale",
+            "base_price": "900000.00",
+            "currency": "ETB",
+            "brand": CarListing.CarBrandChoices.TOYOTA,
+            "model": "Corolla",
+            "year": 2020,
+            "mileage": 40000,
+            "fuel_type": CarListing.FuelTypeChoices.PETROL,
+            "transmission": CarListing.TransmissionChoices.AUTOMATIC,
+            "condition": CarListing.ConditionChoices.USED,
+            "seller_phone": "0911222000",
+            "reveal_fee": "100.00",
+        },
+        format="json",
+    )
+    assert response.status_code == 403
+
+
+def test_car_sales_owner_cannot_request_own_contact(company_client, company):
+    listing = _create_car_sale_listing(company)
+
+    response = company_client.post(
+        f"/api/v1/listing/car-sales/{listing.id}/request-contact/",
+        {},
+        format="json",
+    )
+
+    assert response.status_code == 403
+
+
+def test_car_sales_validation_errors(company_client):
+    response = company_client.post(
+        "/api/v1/listing/car-sales/",
+        {
+            "title": "Bad Sale",
+            "base_price": "0.00",
+            "currency": "ETB",
+            "brand": CarListing.CarBrandChoices.TOYOTA,
+            "model": "Corolla",
+            "year": 2020,
+            "mileage": 40000,
+            "fuel_type": CarListing.FuelTypeChoices.PETROL,
+            "transmission": CarListing.TransmissionChoices.AUTOMATIC,
+            "condition": CarListing.ConditionChoices.USED,
+            "seller_phone": "",
+            "reveal_fee": "0.00",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+
+
+def _property_sale_payload(**overrides):
+    payload = {
+        "title": "Bole villa sale",
+        "description": "Property sale connector listing",
+        "base_price": "4500000.00",
+        "currency": "ETB",
+        "address": _listing_address_payload(),
+        "property_type": PropertySaleListing.PropertyTypeChoices.VILLA,
+        "bedrooms": 4,
+        "bathrooms": 3,
+        "square_meters": "240.00",
+        "land_size_square_meters": "320.00",
+        "is_furnished": True,
+        "seller_contact_name": "Property Seller",
+        "seller_phone": "0911222333",
+        "seller_email": "property-seller@example.com",
+        "reveal_fee": "150.00",
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_property_sales_happy_path_all_three_endpoints(api_client, auth_client, user, company, settings, monkeypatch):
+    _mock_contact_reveal_chapa(settings, monkeypatch)
+    listing = _create_property_sale_listing(company)
+
+    list_response = api_client.get("/api/v1/listing/property-sales/")
+    assert list_response.status_code == 200
+    list_data = list_response.json()["results"]
+    assert len(list_data) >= 1
+    assert "seller_phone" not in list_data[0]
+    assert "seller_email" not in list_data[0]
+
+    detail_response = api_client.get(f"/api/v1/listing/property-sales/{listing.id}/")
+    assert detail_response.status_code == 200
+    detail_data = detail_response.json()
+    assert detail_data["id"] == str(listing.id)
+    assert detail_data["reveal_state"] is None
+    assert "seller_phone" not in detail_data
+
+    request_response = auth_client.post(
+        f"/api/v1/listing/property-sales/{listing.id}/request-contact/",
+        {"buyer_note": "I want to schedule a visit", "buyer_phone": "0911999888"},
+        format="json",
+    )
+    assert request_response.status_code == 201
+    request_data = request_response.json()
+    assert request_data["success"] is True
+    assert request_data["checkout_url"] == "https://checkout.example.com/contact"
+    assert request_data["reveal_request"]["status"] == PropertyContactRevealRequest.RevealStatus.PAYMENT_INITIATED
+    assert "contact" not in request_data
+    assert "seller_phone" not in json.dumps(request_data)
+
+    reveal_request = PropertyContactRevealRequest.objects.get(id=request_data["reveal_request"]["id"])
+    assert reveal_request.listing == listing
+    assert reveal_request.buyer == user
+    assert reveal_request.amount == listing.reveal_fee
+    assert PaymentTransaction.objects.filter(
+        object_id=reveal_request.id,
+        booking_type="contact_reveal",
+        tx_ref=request_data["tx_ref"],
+    ).exists()
+
+
+def test_property_sales_create_success_for_company_owner(company_client):
+    response = company_client.post(
+        "/api/v1/listing/property-sales/",
+        _property_sale_payload(),
+        format="json",
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["title"] == "Bole villa sale"
+    assert data["property_type"] == PropertySaleListing.PropertyTypeChoices.VILLA
+    assert data["is_active"] is False
+    assert "seller_phone" not in data
+    assert PropertySaleListing.objects.filter(title="Bole villa sale").exists()
+
+
+def test_property_sales_auth_errors_and_wrong_role(api_client, auth_client, company):
+    listing = _create_property_sale_listing(company)
+
+    assert api_client.post(f"/api/v1/listing/property-sales/{listing.id}/request-contact/", {}, format="json").status_code == 401
+
+    response = auth_client.post(
+        "/api/v1/listing/property-sales/",
+        _property_sale_payload(title="Wrong role property"),
+        format="json",
+    )
+    assert response.status_code == 403
+
+
+def test_property_sales_owner_cannot_request_own_contact(company_client, company):
+    listing = _create_property_sale_listing(company)
+
+    response = company_client.post(
+        f"/api/v1/listing/property-sales/{listing.id}/request-contact/",
+        {},
+        format="json",
+    )
+
+    assert response.status_code == 403
+
+
+def test_property_sales_validation_errors(company_client):
+    response = company_client.post(
+        "/api/v1/listing/property-sales/",
+        _property_sale_payload(base_price="-1.00", reveal_fee="0.00", seller_phone=""),
+        format="json",
+    )
+
+    assert response.status_code == 400
+
+
+def test_property_sales_reveal_blocked_before_payment_success(auth_client, company, settings, monkeypatch):
+    _mock_contact_reveal_chapa(settings, monkeypatch)
+    listing = _create_property_sale_listing(company)
+
+    request_response = auth_client.post(
+        f"/api/v1/listing/property-sales/{listing.id}/request-contact/",
+        {},
+        format="json",
+    )
+
+    assert request_response.status_code == 201
+    assert "seller_phone" not in json.dumps(request_response.json())
+    detail_response = auth_client.get(f"/api/v1/listing/property-sales/{listing.id}/")
+    assert detail_response.status_code == 200
+    detail_data = detail_response.json()
+    assert detail_data["reveal_state"]["status"] == PropertyContactRevealRequest.RevealStatus.PAYMENT_INITIATED
+    assert "seller_phone" not in detail_data
+
+
+def test_property_sales_notification_task_fires_after_reveal(
+    django_capture_on_commit_callbacks,
+    monkeypatch,
+    user,
+    company,
+):
+    listing = _create_property_sale_listing(company)
+    reveal_request = PropertyContactRevealRequest.objects.create(
+        listing=listing,
+        buyer=user,
+        amount=listing.reveal_fee,
+        currency=listing.currency,
+        status=PropertyContactRevealRequest.RevealStatus.PAYMENT_INITIATED,
+        expires_at=timezone.now() + timedelta(minutes=30),
+    )
+    payment_tx = PaymentTransaction.objects.create(
+        content_type=ContentType.objects.get_for_model(PropertyContactRevealRequest),
+        object_id=reveal_request.id,
+        booking_type="contact_reveal",
+        tx_ref="PROPERTY-CONTACT-1",
+        amount=reveal_request.amount,
+        currency=reveal_request.currency,
+    )
+    delay_calls = []
+    monkeypatch.setattr(
+        "apps.listing.tasks.send_contact_reveal_unlocked_notification.delay",
+        lambda reveal_request_id: delay_calls.append(reveal_request_id),
+    )
+
+    with django_capture_on_commit_callbacks(execute=True):
+        result = ContactRevealPaymentService.unlock_contact_reveal(
+            payment_tx,
+            {
+                "amount": str(reveal_request.amount),
+                "currency": reveal_request.currency,
+                "id": "chapa-property-contact",
+                "method": "test",
+            },
+        )
+
+    reveal_request.refresh_from_db()
+    assert result["success"] is True
+    assert reveal_request.status == PropertyContactRevealRequest.RevealStatus.PAID_REVEALED
+    assert delay_calls == [reveal_request.id]
+
+
+def test_property_rental_booking_happy_path_all_four_endpoints(auth_client, property_listing):
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    _create_terms(property_listing)
+    _create_property_rental_availability(property_listing, start_date, end_date, price=Decimal("3000.00"))
+
+    preview_response = auth_client.post(
+        "/api/v1/listing/property-rentals/bookings/price-preview/",
+        {
+            "property_listing": str(property_listing.id),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "guest_phone": "0911555601",
+        },
+        format="json",
+    )
+    assert preview_response.status_code == 200
+    preview = preview_response.json()
+    assert preview["nights"] == 2
+    assert preview["items"][0]["units"] == 1
+    assert Decimal(preview["totals"]["items_subtotal"]) == Decimal("6000.00")
+
+    create_response = auth_client.post(
+        "/api/v1/listing/property-rentals/bookings/",
+        _property_rental_booking_payload(property_listing, start_date, end_date, guest_phone="0911555601"),
+        format="json",
+    )
+    assert create_response.status_code == 201
+    booking_data = create_response.json()
+    assert booking_data["booking_reference"].startswith("P")
+    assert booking_data["status"] == PropertyRentalBooking.RentStatus.PENDING
+
+    booking = PropertyRentalBooking.objects.get(id=booking_data["id"])
+    for availability in PropertyRentalAvailability.objects.filter(property_listing=property_listing, date__gte=start_date, date__lt=end_date):
+        assert availability.available_units == 0
+
+    detail_response = auth_client.get(f"/api/v1/listing/property-rentals/bookings/{booking.id}/")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["id"] == str(booking.id)
+
+    cancel_response = auth_client.post(f"/api/v1/listing/property-rentals/bookings/{booking.id}/cancel/")
+    assert cancel_response.status_code == 200
+    assert cancel_response.json()["status"] == PropertyRentalBooking.RentStatus.CANCELLED
+    for availability in PropertyRentalAvailability.objects.filter(property_listing=property_listing, date__gte=start_date, date__lt=end_date):
+        assert availability.available_units == 1
+
+
+def test_property_rental_booking_unauthenticated_detail_and_cancel(api_client, property_listing):
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    booking = PropertyRentalBooking.objects.create(
+        property_listing=property_listing,
+        start_date=start_date,
+        end_date=end_date,
+        total_price=Decimal("6000.00"),
+        currency="ETB",
+        status=PropertyRentalBooking.RentStatus.PENDING,
+        guest_first_name="Unauth",
+        guest_last_name="Guest",
+        guest_email="property-rental-unauth@example.com",
+        guest_phone="0911555602",
+        terms_accepted=True,
+        terms_version="1",
+        terms_accepted_at=timezone.now(),
+        terms_content_snapshot="Terms",
+    )
+
+    assert api_client.get(f"/api/v1/listing/property-rentals/bookings/{booking.id}/").status_code == 401
+    assert api_client.post(f"/api/v1/listing/property-rentals/bookings/{booking.id}/cancel/").status_code == 401
+
+
+def test_property_rental_booking_forbidden_for_wrong_user_and_owner(company_client, api_client, django_user_model, property_listing):
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    renter = django_user_model.objects.create_user(
+        email="property-rental-owner-renter@example.com",
+        password="pass1234",
+        phone="0911555603",
+    )
+    other = django_user_model.objects.create_user(
+        email="property-rental-other@example.com",
+        password="pass1234",
+        phone="0911555604",
+    )
+    booking = PropertyRentalBooking.objects.create(
+        property_listing=property_listing,
+        renter=renter,
+        start_date=start_date,
+        end_date=end_date,
+        total_price=Decimal("6000.00"),
+        currency="ETB",
+        status=PropertyRentalBooking.RentStatus.PENDING,
+        guest_first_name="Rental",
+        guest_last_name="Guest",
+        guest_email=renter.email,
+        guest_phone=renter.phone,
+        terms_accepted=True,
+        terms_version="1",
+        terms_accepted_at=timezone.now(),
+        terms_content_snapshot="Terms",
+    )
+
+    api_client.force_authenticate(user=other)
+    assert api_client.get(f"/api/v1/listing/property-rentals/bookings/{booking.id}/").status_code == 403
+
+    _create_terms(property_listing)
+    _create_property_rental_availability(property_listing, start_date, end_date)
+    owner_response = company_client.post(
+        "/api/v1/listing/property-rentals/bookings/",
+        _property_rental_booking_payload(property_listing, start_date, end_date, guest_email="owner-booking@example.com"),
+        format="json",
+    )
+    assert owner_response.status_code == 403
+
+
+def test_property_rental_booking_validation_errors(auth_client, property_listing):
+    start_date = date.today() + timedelta(days=5)
+    response = auth_client.post(
+        "/api/v1/listing/property-rentals/bookings/",
+        _property_rental_booking_payload(
+            property_listing,
+            start_date,
+            start_date,
+            terms_accepted=False,
+            guest_email="property-rental-invalid@example.com",
+        ),
+        format="json",
+    )
+    assert response.status_code == 400
+
+
+def test_property_rental_booking_rejects_availability_conflict(auth_client, property_listing):
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    _create_terms(property_listing)
+    _create_property_rental_availability(property_listing, start_date, end_date, available_units=0)
+
+    response = auth_client.post(
+        "/api/v1/listing/property-rentals/bookings/",
+        _property_rental_booking_payload(property_listing, start_date, end_date, guest_email="property-rental-conflict@example.com"),
+        format="json",
+    )
+
+    assert response.status_code == 409
+    assert not PropertyRentalBooking.objects.filter(guest_email="property-rental-conflict@example.com").exists()
+
+
+def test_property_rental_price_preview_returns_correct_calculation(auth_client, property_listing):
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=3)
+    _create_property_rental_availability(property_listing, start_date, end_date, price=Decimal("1250.00"))
+
+    response = auth_client.post(
+        "/api/v1/listing/property-rentals/bookings/price-preview/",
+        {
+            "property_listing": str(property_listing.id),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "guest_phone": "0911555605",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["nights"] == 3
+    assert Decimal(data["totals"]["items_subtotal"]) == Decimal("3750.00")
+    assert Decimal(data["totals"]["grand_total"]) == Decimal("3750.00")
+
+
+def test_property_rental_forward_booking_window_rejection(auth_client, property_listing):
+    property_listing.booking_forward_window_days = 1
+    property_listing.save(update_fields=["booking_forward_window_days"])
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    _create_terms(property_listing)
+    _create_property_rental_availability(property_listing, start_date, end_date)
+
+    response = auth_client.post(
+        "/api/v1/listing/property-rentals/bookings/",
+        _property_rental_booking_payload(property_listing, start_date, end_date, guest_email="property-rental-window@example.com"),
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "start_date" in response.json()
+
+
+def test_property_rental_booking_terms_snapshot_preserved(auth_client, property_listing):
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    terms = _create_terms(property_listing)
+    terms.content = "Original rental terms"
+    terms.save(update_fields=["content"])
+    _create_property_rental_availability(property_listing, start_date, end_date)
+
+    response = auth_client.post(
+        "/api/v1/listing/property-rentals/bookings/",
+        _property_rental_booking_payload(property_listing, start_date, end_date, guest_email="property-rental-snapshot@example.com"),
+        format="json",
+    )
+
+    assert response.status_code == 201
+    booking = PropertyRentalBooking.objects.get(id=response.json()["id"])
+    terms.content = "Updated rental terms"
+    terms.save(update_fields=["content"])
+    booking.refresh_from_db()
+    assert booking.terms_content_snapshot == "Original rental terms"
+
+
+def test_property_rental_booking_requires_signed_owner_agreement(api_client, individual_owner):
+    property_listing = PropertyListing.objects.create(
+        company=None,
+        individual_owner=individual_owner,
+        title="Owner rental property",
+        description="Individual-owner rental requiring compliance agreement",
+        base_price=Decimal("3000.00"),
+        currency="ETB",
+        property_type=PropertyListing.PropertyTypeChoices.VILLA,
+        bedrooms=3,
+        bathrooms=2,
+        square_meters=Decimal("140.00"),
+        is_furnished=True,
+        address=Address.objects.create(**_listing_address_payload()),
+    )
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    _create_terms(property_listing)
+    _create_property_rental_availability(property_listing, start_date, end_date)
+
+    response = api_client.post(
+        "/api/v1/listing/property-rentals/bookings/",
+        _property_rental_booking_payload(property_listing, start_date, end_date, guest_email="owner-agreement-missing@example.com"),
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "Owner has not completed compliance agreement." in response.json()[0]
+
+
+def test_property_rental_booking_allows_signed_owner_agreement(api_client, admin_user, individual_owner):
+    property_listing = PropertyListing.objects.create(
+        company=None,
+        individual_owner=individual_owner,
+        title="Compliant owner rental",
+        description="Individual-owner rental with signed agreement",
+        base_price=Decimal("3000.00"),
+        currency="ETB",
+        property_type=PropertyListing.PropertyTypeChoices.VILLA,
+        bedrooms=3,
+        bathrooms=2,
+        square_meters=Decimal("140.00"),
+        is_furnished=True,
+        address=Address.objects.create(**_listing_address_payload()),
+    )
+    OwnerComplianceAgreement.objects.create(
+        owner=individual_owner,
+        agreement_version="v1",
+        status=OwnerComplianceAgreement.Status.SIGNED,
+        signed_at=timezone.now(),
+        signed_by_admin=admin_user,
+    )
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    _create_terms(property_listing)
+    _create_property_rental_availability(property_listing, start_date, end_date)
+
+    response = api_client.post(
+        "/api/v1/listing/property-rentals/bookings/",
+        _property_rental_booking_payload(property_listing, start_date, end_date, guest_email="owner-agreement-present@example.com"),
+        format="json",
+    )
+
+    assert response.status_code == 201
+
+
+def test_property_rental_booking_company_owner_unaffected_by_agreement_gate(api_client, property_listing):
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    _create_terms(property_listing)
+    _create_property_rental_availability(property_listing, start_date, end_date)
+
+    response = api_client.post(
+        "/api/v1/listing/property-rentals/bookings/",
+        _property_rental_booking_payload(property_listing, start_date, end_date, guest_email="company-owner-unaffected@example.com"),
+        format="json",
+    )
+
+    assert response.status_code == 201
 
 
 def test_post_amenity_admin_create_success(admin_client):
@@ -745,12 +1468,14 @@ def test_delete_car_listing_notifies_saved_users(mock_send_sms, company_client, 
 
 
 def test_post_car_check_availability_success(api_client, car_listing):
-    CarAvailability.objects.create(car_listing=car_listing, date=date(2026, 6, 10), available_units=1)
-    CarAvailability.objects.create(car_listing=car_listing, date=date(2026, 6, 11), available_units=1)
+    start_date = date.today() + timedelta(days=1)
+    end_date = start_date + timedelta(days=2)
+    CarAvailability.objects.create(car_listing=car_listing, date=start_date, available_units=1)
+    CarAvailability.objects.create(car_listing=car_listing, date=start_date + timedelta(days=1), available_units=1)
 
     response = api_client.post(
         f"/api/v1/listing/cars/{car_listing.id}/check_availability/",
-        {"quantity": 1, "start_date": "2026-06-10", "end_date": "2026-06-12"},
+        {"quantity": 1, "start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
         format="json",
     )
 
@@ -2358,7 +3083,9 @@ def test_delete_property_success(company_client, property_listing):
 @pytest.mark.parametrize(
     ("fixture_name", "path_template"),
     [
+        ("room", "/api/v1/listing/rooms/{id}/verify/"),
         ("guest_house", "/api/v1/listing/guest-houses/{id}/verify/"),
+        ("guest_house_room", "/api/v1/listing/guest-house-rooms/{id}/verify/"),
         ("car_listing", "/api/v1/listing/cars/{id}/verify/"),
         ("property_listing", "/api/v1/listing/properties/{id}/verify/"),
         ("event_space", "/api/v1/listing/event-spaces/{id}/verify/"),
@@ -2366,25 +3093,30 @@ def test_delete_property_success(company_client, property_listing):
 )
 def test_post_listing_verify_success(admin_client, admin_user, request, fixture_name, path_template):
     listing = request.getfixturevalue(fixture_name)
+    note = "Verified on-site by admin"
 
-    response = admin_client.post(path_template.format(id=listing.id))
+    response = admin_client.post(path_template.format(id=listing.id), {"verification_note": note}, format="json")
 
     assert response.status_code == 200
     listing.refresh_from_db()
     assert listing.is_verified is True
     assert listing.verified_by == admin_user
     assert listing.verified_at is not None
+    assert listing.verification_note == note
     _assert_verification_fields(
         response.json(),
         expected_verified=True,
         expected_verified_by=str(admin_user.id),
+        expected_note=note,
     )
 
 
 @pytest.mark.parametrize(
     ("fixture_name", "path_template"),
     [
+        ("room", "/api/v1/listing/rooms/{id}/unverify/"),
         ("guest_house", "/api/v1/listing/guest-houses/{id}/unverify/"),
+        ("guest_house_room", "/api/v1/listing/guest-house-rooms/{id}/unverify/"),
         ("car_listing", "/api/v1/listing/cars/{id}/unverify/"),
         ("property_listing", "/api/v1/listing/properties/{id}/unverify/"),
         ("event_space", "/api/v1/listing/event-spaces/{id}/unverify/"),
@@ -2395,16 +3127,105 @@ def test_post_listing_unverify_success(admin_client, admin_user, request, fixtur
     listing.is_verified = True
     listing.verified_at = timezone.now()
     listing.verified_by = admin_user
-    listing.save(update_fields=["is_verified", "verified_at", "verified_by"])
+    listing.verification_note = "Previously verified"
+    listing.save(update_fields=["is_verified", "verified_at", "verified_by", "verification_note"])
 
-    response = admin_client.post(path_template.format(id=listing.id))
+    response = admin_client.post(path_template.format(id=listing.id), {"verification_note": "ignored"}, format="json")
 
     assert response.status_code == 200
     listing.refresh_from_db()
     assert listing.is_verified is False
     assert listing.verified_at is None
     assert listing.verified_by is None
+    assert listing.verification_note is None
     _assert_verification_fields(response.json())
+
+
+def test_post_car_sale_listing_verify_success(admin_client, admin_user, company):
+    listing = CarSaleListing.objects.create(
+        company=company,
+        title="Verify Car Sale",
+        description="Needs admin verification",
+        base_price=Decimal("850000.00"),
+        currency="ETB",
+        brand=CarListing.CarBrandChoices.TOYOTA,
+        model="Corolla",
+        year=2020,
+        mileage=45000,
+        fuel_type=CarListing.FuelTypeChoices.PETROL,
+        transmission=CarListing.TransmissionChoices.AUTOMATIC,
+        condition=CarListing.ConditionChoices.USED,
+        car_class=CarListing.CarClassChoices.NORMAL,
+        seats=5,
+        seller_contact_name="Seller",
+        seller_phone="0911222333",
+        reveal_fee=Decimal("100.00"),
+    )
+
+    response = admin_client.post(
+        f"/api/v1/listing/car-sales/{listing.id}/verify/",
+        {"verification_note": "Physical inspection completed"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    listing.refresh_from_db()
+    assert listing.is_verified is True
+    assert listing.verified_by == admin_user
+    assert listing.verification_note == "Physical inspection completed"
+    _assert_verification_fields(
+        response.json(),
+        expected_verified=True,
+        expected_verified_by=str(admin_user.id),
+        expected_note="Physical inspection completed",
+    )
+
+
+def test_post_property_sale_listing_verify_success(admin_client, admin_user, company):
+    address = Address.objects.create(
+        street_line1="Kazanchis",
+        country="Ethiopia",
+        city="Addis Ababa",
+        sub_city="Kirkos",
+        state="Addis Ababa",
+        postal_code="1000",
+        latitude="9.03",
+        longitude="38.74",
+    )
+    listing = PropertySaleListing.objects.create(
+        company=company,
+        address=address,
+        title="Verify Property Sale",
+        description="Needs admin verification",
+        base_price=Decimal("4500000.00"),
+        currency="ETB",
+        property_type=PropertySaleListing.PropertyTypeChoices.APARTMENT,
+        bedrooms=3,
+        bathrooms=2,
+        square_meters=Decimal("180.00"),
+        is_furnished=False,
+        seller_contact_name="Property Seller",
+        seller_phone="0911666777",
+        reveal_fee=Decimal("150.00"),
+    )
+
+    response = admin_client.post(
+        f"/api/v1/listing/property-sales/{listing.id}/verify/",
+        {"verification_note": "Documents reviewed"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    listing.refresh_from_db()
+    assert listing.is_verified is True
+    assert listing.verified_by == admin_user
+    assert listing.verification_note == "Documents reviewed"
+    _assert_verification_fields(
+        response.json(),
+        expected_verified=True,
+        expected_verified_by=str(admin_user.id),
+        expected_note="Documents reviewed",
+    )
 
 
 def test_post_guesthouse_verify_forbidden_for_owner(company_client, guest_house):

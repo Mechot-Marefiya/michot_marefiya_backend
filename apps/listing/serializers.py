@@ -38,9 +38,9 @@ from apps.listing.models import (
     Amenity,
     Booking,BookingRating,
     BookingItem,StayAvailability,GuestHouseInventory,BookingAddon,AddonOffering,
-    CarListing,CarAvailability,
+    CarListing,CarAvailability,CarSaleListing,ContactRevealRequest,
     GuestHouseProfile, GuestHouseRoom,
-    PropertyListing,
+    PropertyListing,PropertyRentalBooking,PropertySaleListing,PropertyContactRevealRequest,
     RoomListing,EventSpaceListing,
     CarRental,CarRentalItem,GuestHouseBookingItem,GuestHouseBooking,
     TermsAndConditions,
@@ -118,7 +118,46 @@ class CurrencyConversionMixin(metaclass=serializers.SerializerMetaclass):
 class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
     price_quote = serializers.SerializerMethodField(help_text="Complete pricing breakdown including platform fees. Populated only when check_in/check_out dates are provided.")
 
-    def get_price_quote(self, obj):
+    @extend_schema_field(inline_serializer(
+        name="ListingPriceQuote",
+        fields={
+            "breakdown": inline_serializer(
+                name="ListingPriceQuoteBreakdownItem",
+                fields={
+                    "date": serializers.DateField(),
+                    "price_per_unit": serializers.CharField(),
+                    "units": serializers.IntegerField(),
+                    "daily_total": serializers.CharField(),
+                    "source": serializers.CharField(),
+                    "is_discounted": serializers.BooleanField(),
+                },
+                many=True,
+            ),
+            "daily_breakdown": inline_serializer(
+                name="ListingPriceQuoteDailyBreakdownItem",
+                fields={
+                    "date": serializers.DateField(),
+                    "price_per_unit": serializers.CharField(),
+                    "units": serializers.IntegerField(),
+                    "daily_total": serializers.CharField(),
+                    "source": serializers.CharField(),
+                    "is_discounted": serializers.BooleanField(),
+                },
+                many=True,
+            ),
+            "items_subtotal": serializers.CharField(),
+            "subtotal": serializers.CharField(),
+            "base_total": serializers.CharField(),
+            "platform_fee": serializers.CharField(),
+            "platform_fee_percentage": serializers.CharField(),
+            "total": serializers.CharField(),
+            "currency": serializers.CharField(),
+            "has_discount": serializers.BooleanField(),
+            "min_price_per_unit": serializers.CharField(),
+            "min_nightly_price": serializers.CharField(),
+        },
+    ))
+    def get_price_quote(self, obj) -> dict | None:
         request = self.context.get('request')
         if not request:
             return None
@@ -262,6 +301,8 @@ class SanitizeGuestDetailsMixin:
 
     def _is_guest_booking_request(self):
         request = self.context.get("request")
+        if request is None:
+            return False
         user = getattr(request, "user", None)
         return not user or not user.is_authenticated
 
@@ -328,10 +369,20 @@ class AmenityResponseSSerializer(serializers.ModelSerializer):
         fields = ["id", "name", "icon"]
 
 
+class VerifyActionSerializer(serializers.Serializer):
+    verification_note = serializers.CharField(
+        max_length=500,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
+
+
 class RoomListingResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     amenities = AmenityResponseSSerializer(many=True)
     available_units = serializers.SerializerMethodField()
+    verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
 
     class Meta:
         model = RoomListing
@@ -352,11 +403,16 @@ class RoomListingResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin, se
             "children_allowed",
             "refundable",
             "available_units",
+            "is_verified",
+            "verified_at",
+            "verified_by",
+            "verification_note",
             "conversion",
             "price_quote",
         ]
 
-    def get_available_units(self, obj):
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_available_units(self, obj) -> int | None:
         availability_map = self.context.get("availability_map")
         if availability_map is None:
             return None
@@ -369,10 +425,14 @@ class RoomListingResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin, se
         if ret.get("price_quote") is None:
             ret.pop("price_quote", None)
         return ret
+@extend_schema_field(AddressSerializer)
+class RoomAddressField(FlexibleAddressField):
+    """Schema-only override for room listing addresses."""
+    pass
 
 
 class RoomListingSerializer(serializers.ModelSerializer):
-    address = FlexibleAddressField(required=False)
+    address = RoomAddressField(required=False)
     images = serializers.ListField(child=serializers.ImageField())
     amenities = StringArrayField(
         child=serializers.PrimaryKeyRelatedField(
@@ -457,6 +517,7 @@ class GuestHouseRoomResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin,
     images = ListingImageSerializer(many=True)
     available_units = serializers.SerializerMethodField()
     amenities = AmenityResponseSSerializer(many=True)
+    verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
     
     class Meta:
         model = GuestHouseRoom
@@ -473,11 +534,16 @@ class GuestHouseRoomResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin,
             "available_units",
             "bed_type",
             "room_size_sqm",
+            "is_verified",
+            "verified_at",
+            "verified_by",
+            "verification_note",
             "conversion",
             "price_quote",
         ]
         
-    def get_available_units(self, obj):
+    @extend_schema_field(OpenApiTypes.INT)
+    def get_available_units(self, obj) -> int:
         availability_map = self.context.get("availability_map")
         if availability_map:
             return availability_map.get(obj.id, 0)
@@ -514,15 +580,24 @@ class GuestHouseProfileResponseSerializer(serializers.ModelSerializer):
             "is_verified",
             "verified_at",
             "verified_by",
+            "verification_note",
         ]
 
-    def get_is_favorite(self, obj):
+    @extend_schema_field(OpenApiTypes.BOOL)
+    def get_is_favorite(self, obj) -> bool:
         fav_ids = self.context.get("favorite_object_ids")
         if not fav_ids:
             return False
         return str(obj.id) in fav_ids
     
-    def get_facility(self, obj):
+    @extend_schema_field(inline_serializer(
+        name="GuestHouseFacilityPayload",
+        fields={
+            "name": serializers.CharField(),
+        },
+        many=True,
+    ))
+    def get_facility(self, obj) -> list[dict]:
         try:
             facilities = obj.facility.all()
             return [{"name": f.name} for f in facilities]
@@ -601,10 +676,16 @@ class GuestHouseRoomSerializer(serializers.ModelSerializer):
             instance, context=self.context
         ).to_representation(instance)
 
+@extend_schema_field(serializers.ListField(child=serializers.UUIDField()))
+class GuestHouseAmenitiesField(JsonSerializerField):
+    """Schema-only override for guest house amenity ID lists."""
+    pass
+
+
 class GuestHouseProfileSerializer(serializers.ModelSerializer):
     address = FlexibleAddressField()
     images = serializers.ListField(child=serializers.ImageField())
-    amenities = JsonSerializerField()
+    amenities = GuestHouseAmenitiesField()
     facility = serializers.PrimaryKeyRelatedField(
         many=True, 
         queryset=Facility.objects.all(),
@@ -719,10 +800,11 @@ class GuestHouseBookingItemSerializer(serializers.ModelSerializer):
     def get_nightly_rate(self, obj) -> str:
         return f"{obj.price_per_unit:.2f}"
 
-    def get_stay_total(self, obj):
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_stay_total(self, obj) -> str:
         return f"{obj.subtotal():.2f}"
 
-    def get_subtotal(self, obj):
+    def get_subtotal(self, obj) -> str:
         return self.get_stay_total(obj)
 class GuestHouseBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, CurrencyConversionMixin, serializers.ModelSerializer):
     guest_booking_type = "guesthouse"
@@ -1096,9 +1178,17 @@ class CarListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, ser
             "is_verified",
             "verified_at",
             "verified_by",
+            "verification_note",
         ]
     
-    def get_current_availability(self, obj):
+    @extend_schema_field(inline_serializer(
+        name="CarListingCurrentAvailability",
+        fields={
+            "date": serializers.DateField(),
+            "available_units": serializers.IntegerField(),
+        },
+    ))
+    def get_current_availability(self, obj) -> dict | None:
         """
         Return today's available units if exists.
         """
@@ -1114,6 +1204,401 @@ class CarListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, ser
             "date": availability.date,
             "available_units": availability.available_units
         }
+
+
+class ContactRevealRequestResponseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ContactRevealRequest
+        fields = [
+            "id",
+            "listing",
+            "status",
+            "amount",
+            "currency",
+            "tx_ref",
+            "expires_at",
+            "unlocked_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class CarSaleListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
+    images = ListingImageSerializer(many=True, read_only=True)
+    verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
+    reveal_state = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CarSaleListing
+        fields = [
+            "id",
+            "title",
+            "description",
+            "images",
+            "base_price",
+            "currency",
+            "brand",
+            "model",
+            "year",
+            "mileage",
+            "fuel_type",
+            "transmission",
+            "condition",
+            "car_class",
+            "seats",
+            "company",
+            "individual_owner",
+            "reveal_fee",
+            "is_active",
+            "is_verified",
+            "verified_at",
+            "verified_by",
+            "verification_note",
+            "reveal_state",
+            "conversion",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    @extend_schema_field(inline_serializer(
+        name="CarSaleRevealState",
+        fields={
+            "status": serializers.CharField(allow_null=True),
+            "request_id": serializers.UUIDField(allow_null=True),
+            "tx_ref": serializers.CharField(allow_blank=True),
+            "expires_at": serializers.DateTimeField(allow_null=True),
+            "unlocked_at": serializers.DateTimeField(allow_null=True),
+        },
+    ))
+    def get_reveal_state(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return None
+
+        reveal = obj.contact_reveal_requests.filter(buyer=user).order_by("-created_at").first()
+        if not reveal:
+            return None
+
+        status_value = reveal.status
+        if reveal.is_expired:
+            status_value = ContactRevealRequest.RevealStatus.EXPIRED
+
+        return {
+            "status": status_value,
+            "request_id": reveal.id,
+            "tx_ref": reveal.tx_ref,
+            "expires_at": reveal.expires_at,
+            "unlocked_at": reveal.unlocked_at,
+        }
+
+
+class CarSaleListingSerializer(serializers.ModelSerializer):
+    images = serializers.ListField(
+        child=serializers.ImageField(),
+        write_only=True,
+        required=False,
+    )
+    seller_email = serializers.EmailField(required=False, allow_blank=True)
+
+    class Meta:
+        model = CarSaleListing
+        fields = [
+            "title",
+            "description",
+            "images",
+            "base_price",
+            "currency",
+            "company",
+            "individual_owner",
+            "brand",
+            "model",
+            "year",
+            "mileage",
+            "fuel_type",
+            "transmission",
+            "condition",
+            "car_class",
+            "seats",
+            "seller_contact_name",
+            "seller_phone",
+            "seller_email",
+            "reveal_fee",
+        ]
+
+    def validate_currency(self, value):
+        value = value.upper()
+        if len(value) != 3:
+            raise serializers.ValidationError("Currency must be a 3-letter ISO code.")
+        return value
+
+    def validate(self, data):
+        request = self.context.get("request")
+        request_user = getattr(request, "user", None)
+        request_company = getattr(request_user, "company", None) or getattr(request_user, "profile", None)
+        request_individual_owner = getattr(request_user, "individual_owner", None) or getattr(
+            request_user, "individual_owner_profile", None
+        )
+
+        company = data.get("company", getattr(self.instance, "company", None) or request_company)
+        individual_owner = data.get(
+            "individual_owner",
+            getattr(self.instance, "individual_owner", None) or request_individual_owner,
+        )
+
+        if company and individual_owner:
+            raise serializers.ValidationError("Only one owner type allowed.")
+        if not company and not individual_owner:
+            raise serializers.ValidationError("An owner is required.")
+
+        if company:
+            company_obj = company if isinstance(company, CompanyProfile) else get_object_or_404(CompanyProfile, id=company)
+            if company_obj.status != CompanyProfile.StatusChoice.APPROVED:
+                raise serializers.ValidationError({"company": "Company profile is not approved."})
+
+        base_price = data.get("base_price", getattr(self.instance, "base_price", None))
+        if base_price is not None and base_price <= 0:
+            raise serializers.ValidationError({"base_price": "Sale price must be greater than 0."})
+
+        reveal_fee = data.get("reveal_fee", getattr(self.instance, "reveal_fee", Decimal("0.00")))
+        if reveal_fee <= 0:
+            raise serializers.ValidationError({"reveal_fee": "Reveal fee must be greater than 0."})
+
+        return data
+
+    @transaction.atomic
+    def create(self, validated_data):
+        images = validated_data.pop("images", [])
+        validated_data.setdefault("is_active", False)
+        instance = CarSaleListing.objects.create(**validated_data)
+        if images:
+            ImageCreationService.create_images(instance, images)
+        return instance
+
+    def to_representation(self, instance):
+        return CarSaleListingResponseSerializer(instance, context=self.context).data
+
+
+class ContactRevealRequestSerializer(serializers.Serializer):
+    buyer_note = serializers.CharField(required=False, allow_blank=True)
+    buyer_phone = serializers.CharField(required=False, allow_blank=True, max_length=20)
+
+
+class CarSaleContactSerializer(serializers.Serializer):
+    listing_id = serializers.UUIDField()
+    request_id = serializers.UUIDField()
+    status = serializers.CharField()
+    seller_contact_name = serializers.CharField(allow_blank=True)
+    seller_phone = serializers.CharField()
+    seller_email = serializers.EmailField(allow_blank=True, required=False)
+    off_platform_notice = serializers.CharField()
+
+
+class PropertyContactRevealRequestResponseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PropertyContactRevealRequest
+        fields = [
+            "id",
+            "listing",
+            "status",
+            "amount",
+            "currency",
+            "tx_ref",
+            "expires_at",
+            "unlocked_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class PropertySaleListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
+    images = ListingImageSerializer(many=True, read_only=True)
+    address = AddressSerializer(read_only=True)
+    verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
+    reveal_state = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PropertySaleListing
+        fields = [
+            "id",
+            "title",
+            "description",
+            "images",
+            "base_price",
+            "currency",
+            "company",
+            "individual_owner",
+            "address",
+            "property_type",
+            "bedrooms",
+            "bathrooms",
+            "square_meters",
+            "land_size_square_meters",
+            "is_furnished",
+            "reveal_fee",
+            "is_active",
+            "is_verified",
+            "verified_at",
+            "verified_by",
+            "verification_note",
+            "reveal_state",
+            "conversion",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    @extend_schema_field(inline_serializer(
+        name="PropertySaleRevealState",
+        fields={
+            "status": serializers.CharField(allow_null=True),
+            "request_id": serializers.UUIDField(allow_null=True),
+            "tx_ref": serializers.CharField(allow_blank=True),
+            "expires_at": serializers.DateTimeField(allow_null=True),
+            "unlocked_at": serializers.DateTimeField(allow_null=True),
+        },
+    ))
+    def get_reveal_state(self, obj):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return None
+
+        reveal = obj.contact_reveal_requests.filter(buyer=user).order_by("-created_at").first()
+        if not reveal:
+            return None
+
+        status_value = reveal.status
+        if reveal.is_expired:
+            status_value = PropertyContactRevealRequest.RevealStatus.EXPIRED
+
+        return {
+            "status": status_value,
+            "request_id": reveal.id,
+            "tx_ref": reveal.tx_ref,
+            "expires_at": reveal.expires_at,
+            "unlocked_at": reveal.unlocked_at,
+        }
+
+
+class PropertySaleListingSerializer(serializers.ModelSerializer):
+    address = FlexibleAddressField()
+    images = serializers.ListField(
+        child=serializers.ImageField(),
+        write_only=True,
+        required=False,
+    )
+    seller_email = serializers.EmailField(required=False, allow_blank=True)
+
+    class Meta:
+        model = PropertySaleListing
+        fields = [
+            "title",
+            "description",
+            "images",
+            "base_price",
+            "currency",
+            "company",
+            "individual_owner",
+            "address",
+            "property_type",
+            "bedrooms",
+            "bathrooms",
+            "square_meters",
+            "land_size_square_meters",
+            "is_furnished",
+            "seller_contact_name",
+            "seller_phone",
+            "seller_email",
+            "reveal_fee",
+        ]
+        extra_kwargs = {
+            "company": {"required": False, "allow_null": True},
+            "individual_owner": {"required": False, "allow_null": True},
+            "seller_contact_name": {"required": False, "allow_blank": True},
+        }
+
+    def validate_currency(self, value):
+        if not value:
+            return value
+        value = value.upper()
+        if len(value) != 3:
+            raise serializers.ValidationError("Currency must be a 3-letter ISO code.")
+        return value
+
+    def validate(self, data):
+        request = self.context.get("request")
+        request_user = getattr(request, "user", None)
+        request_company = getattr(request_user, "company", None) or getattr(request_user, "profile", None)
+        request_individual_owner = getattr(request_user, "individual_owner", None) or getattr(
+            request_user, "individual_owner_profile", None
+        )
+
+        company = data.get("company") or (getattr(self.instance, "company", None) if self.instance else None)
+        individual_owner = data.get("individual_owner") or (
+            getattr(self.instance, "individual_owner", None) if self.instance else None
+        )
+
+        if not company and not individual_owner:
+            company = request_company
+            individual_owner = request_individual_owner
+
+        if company and individual_owner:
+            raise serializers.ValidationError("Only one owner type can be set.")
+        if not company and not individual_owner:
+            raise serializers.ValidationError("An owner is required.")
+
+        if company:
+            company_obj = company if isinstance(company, CompanyProfile) else get_object_or_404(CompanyProfile, id=company)
+            if company_obj.status != CompanyProfile.StatusChoice.APPROVED:
+                raise serializers.ValidationError({"company": "Company profile is not approved."})
+
+        base_price = data.get("base_price", getattr(self.instance, "base_price", None))
+        if base_price is not None and base_price <= 0:
+            raise serializers.ValidationError({"base_price": "Sale price must be greater than 0."})
+
+        reveal_fee = data.get("reveal_fee", getattr(self.instance, "reveal_fee", Decimal("0.00")))
+        if reveal_fee <= 0:
+            raise serializers.ValidationError({"reveal_fee": "Reveal fee must be greater than 0."})
+
+        return data
+
+    @transaction.atomic
+    def create(self, validated_data):
+        images = validated_data.pop("images", [])
+        address_data = validated_data.pop("address")
+        request = self.context.get("request")
+        request_user = getattr(request, "user", None)
+
+        if not validated_data.get("company") and not validated_data.get("individual_owner"):
+            request_company = getattr(request_user, "company", None) or getattr(request_user, "profile", None)
+            request_individual_owner = getattr(request_user, "individual_owner", None) or getattr(
+                request_user, "individual_owner_profile", None
+            )
+            if request_company:
+                validated_data["company"] = request_company
+            elif request_individual_owner:
+                validated_data["individual_owner"] = request_individual_owner
+
+        address = Address.objects.create(**address_data)
+        validated_data["address"] = address
+        validated_data.setdefault("is_active", False)
+        instance = PropertySaleListing.objects.create(**validated_data)
+        if images:
+            ImageCreationService.create_images(instance, images)
+        return instance
+
+    def to_representation(self, instance):
+        return PropertySaleListingResponseSerializer(instance, context=self.context).data
+
+
+@extend_schema_field(serializers.ListField(child=serializers.UUIDField()))
+class EventSpaceAmenitiesField(JsonSerializerField):
+    """Schema-only override for event space amenity ID lists."""
+    pass
 
 class CarListingSerializer(serializers.ModelSerializer):
     images = serializers.ListField(
@@ -1672,11 +2157,18 @@ class PropertyListingResponseSerializer(CurrencyConversionMixin, serializers.Mod
             "is_verified",
             "verified_at",
             "verified_by",
+            "verification_note",
         ]
 
 
+@extend_schema_field(AddressSerializer)
+class PropertyAddressField(FlexibleAddressField):
+    """Schema-only override for property listing addresses."""
+    pass
+
+
 class PropertyListingSerializer(serializers.ModelSerializer):
-    address = FlexibleAddressField()
+    address = PropertyAddressField()
     images = serializers.ListField(child=serializers.ImageField())
 
     class Meta:
@@ -1757,6 +2249,152 @@ class PropertyListingSerializer(serializers.ModelSerializer):
         return PropertyListingResponseSerializer(
             instance, context=self.context
         ).to_representation(instance)
+
+
+class PropertyRentalBookingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
+    property_listing = PropertyListingResponseSerializer(read_only=True)
+    total_item_cost = serializers.SerializerMethodField()
+    is_legacy = serializers.BooleanField(read_only=True)
+
+    class Meta:
+        model = PropertyRentalBooking
+        fields = [
+            "id",
+            "renter",
+            "booking_reference",
+            "property_listing",
+            "start_date",
+            "end_date",
+            "total_price",
+            "total_item_cost",
+            "currency",
+            "status",
+            "conversion",
+            "terms_accepted",
+            "terms_version",
+            "terms_accepted_at",
+            "terms_content_snapshot",
+            "is_legacy",
+            "guest_first_name",
+            "guest_last_name",
+            "guest_email",
+            "guest_phone",
+            "special_requests",
+            "snapshot",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_total_item_cost(self, obj):
+        nights = (obj.end_date - obj.start_date).days
+        return f"{(obj.total_price if nights else Decimal('0.00')):.2f}"
+
+
+class PropertyRentalBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, CurrencyConversionMixin, serializers.ModelSerializer):
+    guest_booking_type = "property_rental"
+    property_listing = serializers.PrimaryKeyRelatedField(queryset=PropertyListing.objects.filter(is_active=True))
+    terms_accepted = serializers.BooleanField(required=True, write_only=True)
+    terms_version = serializers.CharField(required=True, write_only=True)
+    guest_first_name = serializers.CharField(max_length=100, required=False)
+    guest_last_name = serializers.CharField(max_length=100, required=False)
+    guest_email = serializers.EmailField(required=False)
+    guest_phone = serializers.CharField(max_length=20, required=False)
+    special_requests = serializers.CharField(required=False, allow_blank=True)
+    payment_currency = serializers.ChoiceField(choices=["USD", "ETB"], required=False, write_only=True)
+
+    class Meta:
+        model = PropertyRentalBooking
+        fields = [
+            "property_listing",
+            "start_date",
+            "end_date",
+            "currency",
+            "status",
+            "terms_accepted",
+            "terms_version",
+            "guest_first_name",
+            "guest_last_name",
+            "guest_email",
+            "guest_phone",
+            "special_requests",
+            "payment_currency",
+        ]
+        read_only_fields = ["status", "currency"]
+
+    def validate_terms_accepted(self, value):
+        if not value:
+            raise serializers.ValidationError("You must accept the terms and conditions to proceed with booking.")
+        return value
+
+    def validate(self, data):
+        start = data.get("start_date")
+        end = data.get("end_date")
+        listing = data.get("property_listing")
+
+        if start and end and end <= start:
+            raise serializers.ValidationError({"end_date": "End date must be after start date."})
+
+        if listing:
+            self.validate_forward_booking_window(
+                start,
+                field_name="start_date",
+                label="Start date",
+                listings=[listing],
+            )
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        guest_email = data.get("guest_email")
+        if (not user or not user.is_authenticated) and not guest_email:
+            raise serializers.ValidationError("Either log in or provide guest email.")
+
+        if user and user.is_authenticated and listing:
+            company = getattr(user, "company", None) or getattr(user, "profile", None)
+            individual_owner = getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)
+            is_admin = user.is_superuser or getattr(user, "role", None) and user.role.code == RoleCode.ADMIN.value
+            is_owner = (company and listing.company_id == company.id) or (
+                individual_owner and listing.individual_owner_id == individual_owner.id
+            )
+            if is_owner and not is_admin:
+                raise PermissionDenied("Listing owners cannot book their own property rental.")
+
+        return data
+
+    def create(self, validated_data):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            user = None
+        from apps.listing.services import PropertyRentalBookingService
+
+        return PropertyRentalBookingService.create_booking(validated_data, user=user)
+
+    def to_representation(self, instance):
+        return PropertyRentalBookingResponseSerializer(instance, context=self.context).data
+
+
+class PropertyRentalBookingPreviewSerializer(ForwardBookingWindowMixin, serializers.Serializer):
+    property_listing = serializers.PrimaryKeyRelatedField(queryset=PropertyListing.objects.filter(is_active=True))
+    start_date = serializers.DateField(help_text="Arrival date. Must be within the configured forward booking window.")
+    end_date = serializers.DateField(help_text="Departure date")
+    guest_phone = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, data):
+        start = data.get("start_date")
+        end = data.get("end_date")
+        listing = data.get("property_listing")
+        if start and end and end <= start:
+            raise serializers.ValidationError("End date must be after start date.")
+        if listing:
+            self.validate_forward_booking_window(
+                start,
+                field_name="start_date",
+                label="Start date",
+                listings=[listing],
+            )
+        return data
 
 
 class AddonOfferingSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
@@ -2093,6 +2731,8 @@ class BookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, se
         check_in = data.get("check_in_date")
         check_out = data.get("check_out_date")
         items = data.get("items", [])
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
         
         if check_in and check_out:
             if check_out <= check_in:
@@ -2113,14 +2753,22 @@ class BookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, se
                 {"items": "At least one booking item is required."}
             )
 
-        user = self.context['request'].user
-        guest_email = data.get('guest_email')
-        if (not user or not user.is_authenticated) and not guest_email:
-             raise serializers.ValidationError("Either log in or provide guest email.")
-        self.validate_guest_booking_otp(data)
-        
         is_privileged = False
-        if user and user.is_authenticated:
+        if not data.get("terms_accepted"):
+            raise serializers.ValidationError({"terms_accepted": "You must accept the terms and conditions."})
+
+        terms_version = data.get("terms_version")
+        if not terms_version:
+            raise serializers.ValidationError({"terms_version": "Terms version is required."})
+
+        if request and (not user or not user.is_authenticated):
+            guest_email = data.get("guest_email")
+            if not guest_email:
+                raise serializers.ValidationError("Either log in or provide guest email.")
+
+        self.validate_guest_booking_otp(data)
+
+        if request and user and user.is_authenticated:
             is_walk_in = self.context.get("is_walk_in", False)
             
             if items:
@@ -2133,33 +2781,24 @@ class BookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, se
                          raise PermissionDenied("You do not have permission to perform a walk-in booking for this listing.")
                      is_privileged = True
 
-        if not is_privileged:
-            terms_accepted = data.get("terms_accepted")
-            if not terms_accepted:
-                 raise serializers.ValidationError({"terms_accepted": "You must accept the terms and conditions."})
+        if not is_privileged and terms_version and items:
+            from django.contrib.contenttypes.models import ContentType
+            first_room = items[0]["room"]
+            hotel = first_room.hotel
             
-            terms_version = data.get("terms_version")
-            if not terms_version:
-                 raise serializers.ValidationError({"terms_version": "Terms version is required."})
-
-            if terms_version and items:
-                from django.contrib.contenttypes.models import ContentType
-                first_room = items[0]["room"]
-                hotel = first_room.hotel
+            if hotel:
+                ct = ContentType.objects.get_for_model(hotel)
+                tc_exists = TermsAndConditions.objects.filter(
+                    content_type=ct,
+                    object_id=hotel.id,
+                    version=terms_version,
+                    is_active=True
+                ).exists()
                 
-                if hotel:
-                    ct = ContentType.objects.get_for_model(hotel)
-                    tc_exists = TermsAndConditions.objects.filter(
-                        content_type=ct,
-                        object_id=hotel.id,
-                        version=terms_version,
-                        is_active=True
-                    ).exists()
-                    
-                    if not tc_exists:
-                        raise serializers.ValidationError(
-                            {"terms_version": f"Invalid or inactive T&C version: {terms_version}. Please refresh and accept the latest terms."}
-                        )
+                if not tc_exists:
+                    raise serializers.ValidationError(
+                        {"terms_version": f"Invalid or inactive T&C version: {terms_version}. Please refresh and accept the latest terms."}
+                    )
         
         return data
 
@@ -2218,6 +2857,7 @@ class SearchResultSerializer(CurrencyConversionMixin, serializers.Serializer):
     is_favorite = serializers.SerializerMethodField(help_text="True if the current user has favorited this hotel")
     rooms = SearchRoomSerializer(many=True, help_text="Available room types in this hotel for the period")
 
+    @extend_schema_field(OpenApiTypes.BOOL)
     def get_is_favorite(self, obj):
         # pure serializer logic; expects `favorite_object_ids` in context
         fav_ids = self.context.get("favorite_object_ids") if self.context is not None else None
@@ -2262,13 +2902,14 @@ class EventSpaceListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMix
             "is_verified",
             "verified_at",
             "verified_by",
+            "verification_note",
         ]
 class EventSpaceListingSerializer(serializers.ModelSerializer):
     """Serializer used for POST/PUT operations, relying on the service layer."""
     
     address = FlexibleAddressField(required=False)
     images = serializers.ListField(child=serializers.ImageField(), required=False) 
-    amenities = JsonSerializerField(required=False) 
+    amenities = EventSpaceAmenitiesField(required=False) 
 
     company_id = serializers.UUIDField()
 
@@ -2373,11 +3014,13 @@ class EventSpaceBookingItemResponseSerializer(serializers.ModelSerializer):
         return f"{obj.price_per_unit:.2f}"
 
     @extend_schema_field(OpenApiTypes.STR)
-    def get_stay_total(self, obj):
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_stay_total(self, obj) -> str:
         return f"{obj.subtotal():.2f}"
 
     @extend_schema_field(OpenApiTypes.STR)
-    def get_subtotal(self, obj):
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_subtotal(self, obj) -> str:
         return self.get_stay_total(obj)
 
 
@@ -2739,7 +3382,8 @@ class SeasonalRateSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['company', 'hotel', 'individual_owner'] 
 
-    def get_target_name(self, obj):
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_target_name(self, obj) -> str:
         if obj.room:
             return f"Room: {obj.room.title}"
         if obj.hotel:

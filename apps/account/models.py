@@ -188,12 +188,18 @@ class OtpChallenge(AbstractBaseModel):
         LOGIN = "login", _("Login")
         SIGNUP = "signup", _("Signup")
         PASSWORD_CHANGE = "password_change", _("Password Change")
+        GUEST_HOTEL_BOOKING = "guest_hotel_booking", _("Guest Hotel Booking")
+        GUEST_GUESTHOUSE_BOOKING = "guest_guesthouse_booking", _("Guest Guesthouse Booking")
+        GUEST_EVENTSPACE_BOOKING = "guest_eventspace_booking", _("Guest Event Space Booking")
+        GUEST_CAR_RENTAL_BOOKING = "guest_car_rental_booking", _("Guest Car Rental Booking")
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="otp_challenges",
         verbose_name=_("User"),
+        null=True,
+        blank=True,
     )
     phone = models.CharField(max_length=20, verbose_name=_("Phone Number"))
     purpose = models.CharField(
@@ -416,6 +422,57 @@ class IndividualOwnerProfile(AbstractBaseModel):
     )
 
 
+class OwnerComplianceAgreement(AbstractBaseModel):
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        SIGNED = "signed", _("Signed")
+        REVOKED = "revoked", _("Revoked")
+
+    owner = models.ForeignKey(
+        "IndividualOwnerProfile",
+        on_delete=models.PROTECT,
+        related_name="compliance_agreements",
+        verbose_name=_("Individual Owner"),
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+        verbose_name=_("Status"),
+    )
+    signed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Signed At"),
+    )
+    signed_by_admin = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="signed_owner_compliance_agreements",
+        verbose_name=_("Signed By Admin"),
+    )
+    agreement_version = models.CharField(
+        max_length=50,
+        verbose_name=_("Agreement Version"),
+    )
+    note = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("Note"),
+    )
+
+    class Meta:
+        verbose_name = _("Owner Compliance Agreement")
+        verbose_name_plural = _("Owner Compliance Agreements")
+        db_table = "owner_compliance_agreements"
+        ordering = ("-created_at",)
+
+    def __str__(self) -> str:
+        return f"{self.owner}::{self.status}::{self.agreement_version}"
+
+
 class HotelProfile(AbstractBaseModel):
     # class CategoryChoice(models.TextChoices):
     #     HOTEL = "hotel", _("Hotel")
@@ -472,6 +529,14 @@ class HotelProfile(AbstractBaseModel):
         related_name="+",
         verbose_name=_("Verified By"),
         help_text=_("Administrator who last verified this hotel."),
+    )
+
+    verification_note = models.CharField(
+        max_length=500,
+        null=True,
+        blank=True,
+        verbose_name=_("Verification Note"),
+        help_text=_("Optional note recorded by an administrator during verification."),
     )
 
     # category = models.CharField(

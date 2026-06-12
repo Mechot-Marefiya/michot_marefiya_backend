@@ -10,6 +10,7 @@ from apps.account.services import (
     ImageCreationService,
     OtpError,
     OtpService,
+    get_latest_agreement,
 )
 from apps.account.enums import RoleCode
 from apps.account.models import (
@@ -19,6 +20,7 @@ from apps.account.models import (
     IndividualOwnerProfile,
     ListingImage,
     OtpChallenge,
+    OwnerComplianceAgreement,
     Role,
     normalize_phone_number,
 )
@@ -921,6 +923,7 @@ class CompanyApplicationSerializer(serializers.ModelSerializer):
 
 class IndividualOwnerProfileResponseSerializer(serializers.ModelSerializer):
     address = AddressSerializer()
+    agreement_status = serializers.SerializerMethodField()
 
     class Meta:
         model = IndividualOwnerProfile
@@ -931,8 +934,24 @@ class IndividualOwnerProfileResponseSerializer(serializers.ModelSerializer):
             "last_name",
             "address",
             "phone",
+            "agreement_status",
             # "category"
         ]
+
+    @extend_schema_field(
+        inline_serializer(
+            "IndividualOwnerAgreementStatus",
+            fields={
+                "status": serializers.ChoiceField(choices=OwnerComplianceAgreement.Status.choices),
+                "signed_at": serializers.DateTimeField(allow_null=True),
+            },
+        )
+    )
+    def get_agreement_status(self, instance):
+        agreement = get_latest_agreement(instance)
+        if not agreement:
+            return None
+        return AgreementStatusSerializer(agreement).data
 
 
 class IndividualOwnerProfileSerializer(serializers.ModelSerializer):
@@ -967,6 +986,50 @@ class IndividualOwnerProfileSerializer(serializers.ModelSerializer):
         ).to_representation(instance)
 
 
+class AgreementStatusSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OwnerComplianceAgreement
+        fields = ["status", "signed_at"]
+        read_only_fields = fields
+
+
+class OwnerComplianceAgreementReadSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OwnerComplianceAgreement
+        fields = ["status", "signed_at", "agreement_version"]
+        read_only_fields = fields
+
+
+class OwnerComplianceAgreementSerializer(serializers.ModelSerializer):
+    signed_by_admin = serializers.UUIDField(source="signed_by_admin_id", read_only=True, allow_null=True)
+
+    class Meta:
+        model = OwnerComplianceAgreement
+        fields = [
+            "id",
+            "status",
+            "signed_at",
+            "signed_by_admin",
+            "agreement_version",
+            "note",
+        ]
+        read_only_fields = ["id", "signed_at", "signed_by_admin"]
+
+
+class OwnerComplianceAgreementCreateSerializer(serializers.Serializer):
+    agreement_version = serializers.CharField(max_length=50)
+    note = serializers.CharField(required=False, allow_blank=True)
+
+
+class OwnerComplianceAgreementPatchSerializer(serializers.Serializer):
+    agreement_version = serializers.CharField(max_length=50, required=False)
+    note = serializers.CharField(required=False, allow_blank=True)
+
+
+class OwnerComplianceAgreementRevokeSerializer(serializers.Serializer):
+    note = serializers.CharField(required=False, allow_blank=True)
+
+
 class HotelProfileResponseSerializer(serializers.ModelSerializer):
     company = CompanyProfileResponseSerializer()
     images = ListingImageSerializer(many=True)
@@ -991,6 +1054,7 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
             "is_verified",
             "verified_at",
             "verified_by",
+            "verification_note",
         ]
 
     def to_representation(self, instance):
@@ -1287,11 +1351,8 @@ class OtpRequestSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         purpose = attrs.get("purpose", OtpChallenge.Purpose.LOGIN)
-        if purpose not in {
-            OtpChallenge.Purpose.LOGIN,
-            OtpChallenge.Purpose.SIGNUP,
-            OtpChallenge.Purpose.PASSWORD_CHANGE,
-        }:
+        allowed_purposes = {choice for choice, _label in OtpChallenge.Purpose.choices}
+        if purpose not in allowed_purposes:
             raise serializers.ValidationError({"purpose": "Unsupported OTP purpose."})
         return attrs
 
@@ -1306,8 +1367,19 @@ class OtpRequestSerializer(serializers.Serializer):
         return self.challenge
 
 
-class OtpVerifySerializer(serializers.Serializer):
+class OtpResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
     challenge_id = serializers.UUIDField()
+    challenge_token = serializers.UUIDField()
+    purpose = serializers.CharField()
+    expires_at = serializers.DateTimeField()
+    cooldown_seconds = serializers.IntegerField()
+    phone = serializers.CharField()
+
+
+class OtpVerifySerializer(serializers.Serializer):
+    challenge_id = serializers.UUIDField(required=False)
+    challenge_token = serializers.UUIDField(required=False)
     code = serializers.CharField(max_length=12, trim_whitespace=True)
     purpose = serializers.ChoiceField(
         choices=OtpChallenge.Purpose.choices,
@@ -1316,6 +1388,9 @@ class OtpVerifySerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
+        challenge_id = attrs.get("challenge_id") or attrs.get("challenge_token")
+        if not challenge_id:
+            raise serializers.ValidationError({"challenge_token": "challenge_id or challenge_token is required."})
         purpose = attrs.get("purpose", OtpChallenge.Purpose.LOGIN)
         issue_tokens = purpose in {
             OtpChallenge.Purpose.LOGIN,
@@ -1323,11 +1398,12 @@ class OtpVerifySerializer(serializers.Serializer):
         }
         try:
             self.result = OtpService.verify_challenge(
-                challenge_id=attrs["challenge_id"],
+                challenge_id=challenge_id,
                 code=attrs["code"],
                 purpose=purpose,
                 issue_tokens=issue_tokens,
             )
         except OtpError as exc:
             raise serializers.ValidationError({"detail": str(exc)})
+        attrs["challenge_id"] = challenge_id
         return attrs

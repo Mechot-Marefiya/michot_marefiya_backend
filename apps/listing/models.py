@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from decimal import Decimal
 from drf_spectacular.utils import extend_schema_field, OpenApiTypes
 from django.utils.timezone import now
 from django.db.models import Q, F
@@ -65,6 +66,14 @@ class BaseListing(AbstractBaseModel):
         related_name="+",
         verbose_name=_("Verified By"),
         help_text=_("Administrator who last verified this listing."),
+    )
+
+    verification_note = models.CharField(
+        max_length=500,
+        null=True,
+        blank=True,
+        verbose_name=_("Verification Note"),
+        help_text=_("Optional note recorded by an administrator during verification."),
     )
 
     title = models.CharField(
@@ -294,6 +303,141 @@ class CarListing(BaseListing):
 
     def __str__(self):
         return f"{self.brand}::{self.model}"
+
+
+class CarSaleListing(BaseListing):
+    company = models.ForeignKey(
+        CompanyProfile,
+        on_delete=models.CASCADE,
+        related_name="car_sale_listings",
+        verbose_name=_("Company"),
+        null=True,
+        blank=True,
+    )
+    individual_owner = models.ForeignKey(
+        IndividualOwnerProfile,
+        on_delete=models.CASCADE,
+        related_name="car_sale_listings",
+        verbose_name=_("Individual Owner"),
+        null=True,
+        blank=True,
+    )
+    brand = models.CharField(
+        max_length=100,
+        choices=CarListing.CarBrandChoices.choices,
+        verbose_name=_("Brand"),
+    )
+    model = models.CharField(max_length=100, verbose_name=_("Model"))
+    year = models.PositiveIntegerField(verbose_name=_("Year"))
+    mileage = models.PositiveIntegerField(verbose_name=_("Mileage (km)"))
+    fuel_type = models.CharField(
+        max_length=50,
+        choices=CarListing.FuelTypeChoices.choices,
+        verbose_name=_("Engine Type"),
+    )
+    transmission = models.CharField(
+        max_length=50,
+        choices=CarListing.TransmissionChoices.choices,
+        verbose_name=_("Transmission"),
+    )
+    condition = models.CharField(
+        max_length=200,
+        choices=CarListing.ConditionChoices.choices,
+        verbose_name=_("Condition"),
+    )
+    car_class = models.CharField(
+        max_length=200,
+        choices=CarListing.CarClassChoices.choices,
+        default=CarListing.CarClassChoices.NORMAL,
+        verbose_name=_("Class Category"),
+    )
+    seats = models.PositiveSmallIntegerField(default=3)
+    seller_contact_name = models.CharField(max_length=150, blank=True, default="")
+    seller_phone = models.CharField(max_length=20)
+    seller_email = models.EmailField(blank=True, default="")
+    reveal_fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("100.00"))
+
+    class Meta:
+        verbose_name = _("Car Sale Listing")
+        verbose_name_plural = _("Car Sale Listings")
+        db_table = "car_sale_listings"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    (Q(individual_owner__isnull=False) & Q(company__isnull=True))
+                    | (Q(individual_owner__isnull=True) & Q(company__isnull=False))
+                ),
+                name="car_sale_owner_must_exist",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.brand}::{self.model} sale"
+
+
+class ContactRevealRequest(AbstractBaseModel):
+    class RevealStatus(models.TextChoices):
+        REQUESTED = "reveal_requested", _("Reveal Requested")
+        PAYMENT_INITIATED = "payment_initiated", _("Payment Initiated")
+        PAID_REVEALED = "paid_revealed", _("Paid Revealed")
+        EXPIRED = "expired", _("Expired")
+
+    listing = models.ForeignKey(
+        CarSaleListing,
+        on_delete=models.CASCADE,
+        related_name="contact_reveal_requests",
+    )
+    buyer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="contact_reveal_requests",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=RevealStatus.choices,
+        default=RevealStatus.REQUESTED,
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3, default="ETB")
+    buyer_note = models.TextField(blank=True, default="")
+    buyer_phone = models.CharField(max_length=20, blank=True, default="")
+    tx_ref = models.CharField(max_length=255, blank=True, default="")
+    expires_at = models.DateTimeField()
+    unlocked_at = models.DateTimeField(null=True, blank=True)
+    contact_snapshot = models.JSONField(default=dict, blank=True)
+    payment_transactions = GenericRelation(
+        "payment.PaymentTransaction",
+        content_type_field="content_type",
+        object_id_field="object_id",
+        related_query_name="contact_reveal_requests",
+    )
+
+    class Meta:
+        verbose_name = _("Contact Reveal Request")
+        verbose_name_plural = _("Contact Reveal Requests")
+        db_table = "contact_reveal_requests"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["buyer", "listing", "status"]),
+            models.Index(fields=["tx_ref"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    @property
+    def is_unlocked(self):
+        return self.status == self.RevealStatus.PAID_REVEALED
+
+    @property
+    def is_expired(self):
+        return self.status != self.RevealStatus.PAID_REVEALED and self.expires_at <= now()
+
+    def mark_expired(self):
+        if self.status != self.RevealStatus.PAID_REVEALED:
+            self.status = self.RevealStatus.EXPIRED
+            self.save(update_fields=["status", "updated_at"])
+
+    def __str__(self):
+        return f"Reveal {self.listing_id} for {self.buyer_id} - {self.status}"
 class CarRental(AbstractBaseModel):
     class RentStatus(models.TextChoices):
         PENDING = "pending", _("Pending")
@@ -657,6 +801,255 @@ class PropertyListing(BaseListing):
 
     def __str__(self):
         return self.property_type
+
+
+class PropertyRentalAvailability(AbstractBaseModel):
+    property_listing = models.ForeignKey(
+        PropertyListing,
+        on_delete=models.CASCADE,
+        related_name="rental_availabilities",
+    )
+    date = models.DateField(db_index=True)
+    available_units = models.PositiveIntegerField(default=1)
+    price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text=_("Price for this date; falls back to property base price if null."),
+    )
+
+    class Meta:
+        verbose_name = _("Property Rental Availability")
+        verbose_name_plural = _("Property Rental Availabilities")
+        db_table = "property_rental_availabilities"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["property_listing", "date"],
+                name="property_rental_listing_date_unique",
+            ),
+            models.CheckConstraint(
+                condition=Q(available_units__gte=0),
+                name="property_rental_availability_non_negative",
+            ),
+        ]
+        indexes = [models.Index(fields=["property_listing", "date"])]
+
+    def __str__(self):
+        return f"{self.property_listing} - {self.date}: {self.available_units} available"
+
+
+class PropertyRentalBooking(AbstractBaseModel):
+    class RentStatus(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        CONFIRMED = "confirmed", _("Confirmed")
+        CANCELLED = "cancelled", _("Cancelled")
+
+    property_listing = models.ForeignKey(
+        PropertyListing,
+        on_delete=models.CASCADE,
+        related_name="rental_bookings",
+    )
+    renter = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        verbose_name=_("Renter Account"),
+    )
+    start_date = models.DateField()
+    end_date = models.DateField()
+    total_price = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3, default="ETB")
+    status = models.CharField(max_length=20, choices=RentStatus.choices, default=RentStatus.PENDING)
+    guest_first_name = models.CharField(max_length=100, blank=True, default="")
+    guest_last_name = models.CharField(max_length=100, blank=True, default="")
+    guest_email = models.EmailField(blank=True, default="")
+    guest_phone = models.CharField(max_length=20, blank=True, default="")
+    special_requests = models.TextField(blank=True, default="")
+    booking_reference = models.CharField(
+        max_length=10,
+        unique=True,
+        editable=False,
+        db_index=True,
+        blank=True,
+        default="",
+        verbose_name=_("Booking Reference"),
+    )
+    snapshot = models.JSONField(null=True, blank=True)
+    terms_accepted = models.BooleanField(default=False)
+    terms_version = models.CharField(max_length=50, blank=True)
+    terms_accepted_at = models.DateTimeField(null=True, blank=True)
+    terms_content_snapshot = models.TextField(null=True, blank=True)
+
+    @property
+    def is_legacy(self):
+        return not self.terms_accepted and not self.terms_version
+
+    @property
+    def guest_full_name(self):
+        return f"{self.guest_first_name} {self.guest_last_name}".strip()
+
+    @property
+    def contact_email(self):
+        return self.guest_email or (self.renter.email if self.renter else None)
+
+    def save(self, *args, **kwargs):
+        if not self.booking_reference:
+            self.booking_reference = generate_booking_reference(prefix="P", model_class=PropertyRentalBooking)
+        super().save(*args, **kwargs)
+
+    class Meta:
+        verbose_name = _("Property Rental Booking")
+        verbose_name_plural = _("Property Rental Bookings")
+        db_table = "property_rental_bookings"
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(start_date__lt=F("end_date")),
+                name="property_rental_booking_valid_dates",
+            ),
+            models.CheckConstraint(
+                condition=Q(renter__isnull=False) | Q(guest_email__isnull=False),
+                name="property_rental_booking_must_have_renter_or_guest",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Booking {self.booking_reference} - {self.property_listing}"
+
+
+class PropertySaleListing(BaseListing):
+    class PropertyTypeChoices(models.TextChoices):
+        APARTMENT = "apartment", _("Apartment")
+        CONDO = "condo", _("Condo")
+        VILLA = "villa", _("Villa")
+        HOUSE = "house", _("House")
+        LAND = "land", _("Land")
+        COMMERCIAL = "commercial", _("Commercial")
+        OTHER = "other", _("Other")
+
+    company = models.ForeignKey(
+        CompanyProfile,
+        on_delete=models.CASCADE,
+        related_name="property_sale_listings",
+        verbose_name=_("Company"),
+        null=True,
+        blank=True,
+    )
+    individual_owner = models.ForeignKey(
+        IndividualOwnerProfile,
+        on_delete=models.CASCADE,
+        related_name="property_sale_listings",
+        verbose_name=_("Individual Owner"),
+        null=True,
+        blank=True,
+    )
+    address = models.OneToOneField(
+        Address,
+        on_delete=models.RESTRICT,
+        related_name="property_sale_listing",
+        verbose_name=_("Address"),
+    )
+    property_type = models.CharField(
+        max_length=50,
+        choices=PropertyTypeChoices.choices,
+        verbose_name=_("Property Type"),
+    )
+    bedrooms = models.PositiveIntegerField(default=0)
+    bathrooms = models.PositiveIntegerField(default=0)
+    square_meters = models.DecimalField(max_digits=10, decimal_places=2)
+    land_size_square_meters = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+    )
+    is_furnished = models.BooleanField(default=False)
+    seller_contact_name = models.CharField(max_length=150, blank=True, default="")
+    seller_phone = models.CharField(max_length=20)
+    seller_email = models.EmailField(blank=True, default="")
+    reveal_fee = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("100.00"))
+
+    class Meta:
+        verbose_name = _("Property Sale Listing")
+        verbose_name_plural = _("Property Sale Listings")
+        db_table = "property_sale_listings"
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    (Q(individual_owner__isnull=False) & Q(company__isnull=True))
+                    | (Q(individual_owner__isnull=True) & Q(company__isnull=False))
+                ),
+                name="property_sale_owner_must_exist",
+            )
+        ]
+
+    def __str__(self):
+        return f"{self.title} property sale"
+
+
+class PropertyContactRevealRequest(AbstractBaseModel):
+    class RevealStatus(models.TextChoices):
+        REQUESTED = "reveal_requested", _("Reveal Requested")
+        PAYMENT_INITIATED = "payment_initiated", _("Payment Initiated")
+        PAID_REVEALED = "paid_revealed", _("Paid Revealed")
+        EXPIRED = "expired", _("Expired")
+
+    listing = models.ForeignKey(
+        PropertySaleListing,
+        on_delete=models.CASCADE,
+        related_name="contact_reveal_requests",
+    )
+    buyer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="property_contact_reveal_requests",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=RevealStatus.choices,
+        default=RevealStatus.REQUESTED,
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2)
+    currency = models.CharField(max_length=3, default="ETB")
+    buyer_note = models.TextField(blank=True, default="")
+    buyer_phone = models.CharField(max_length=20, blank=True, default="")
+    tx_ref = models.CharField(max_length=255, blank=True, default="")
+    expires_at = models.DateTimeField()
+    unlocked_at = models.DateTimeField(null=True, blank=True)
+    contact_snapshot = models.JSONField(default=dict, blank=True)
+    payment_transactions = GenericRelation(
+        "payment.PaymentTransaction",
+        content_type_field="content_type",
+        object_id_field="object_id",
+        related_query_name="property_contact_reveal_requests",
+    )
+
+    class Meta:
+        verbose_name = _("Property Contact Reveal Request")
+        verbose_name_plural = _("Property Contact Reveal Requests")
+        db_table = "property_contact_reveal_requests"
+        indexes = [
+            models.Index(fields=["listing", "buyer", "status"]),
+            models.Index(fields=["tx_ref"]),
+            models.Index(fields=["expires_at"]),
+        ]
+
+    @property
+    def is_unlocked(self):
+        return self.status == self.RevealStatus.PAID_REVEALED
+
+    @property
+    def is_expired(self):
+        return self.status != self.RevealStatus.PAID_REVEALED and self.expires_at <= now()
+
+    def mark_expired(self):
+        if self.status != self.RevealStatus.PAID_REVEALED:
+            self.status = self.RevealStatus.EXPIRED
+            self.save(update_fields=["status", "updated_at"])
+
+    def __str__(self):
+        return f"{self.buyer_id} -> {self.listing_id} ({self.status})"
 
 
 class GuestHouseProfile(BaseListing):
