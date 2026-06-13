@@ -15,6 +15,46 @@ class AbstractBaseModel(models.Model):
         abstract = True
 
 
+class GeoLocatedModel(AbstractBaseModel):
+    latitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        verbose_name=_("Latitude"),
+    )
+    longitude = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        verbose_name=_("Longitude"),
+    )
+    formatted_address = models.CharField(
+        max_length=500,
+        null=True,
+        blank=True,
+        verbose_name=_("Formatted Address"),
+    )
+    place_id = models.CharField(
+        max_length=300,
+        null=True,
+        blank=True,
+        verbose_name=_("Place ID"),
+    )
+    address_components = models.JSONField(
+        null=True,
+        blank=True,
+        verbose_name=_("Address Components"),
+    )
+
+    class Meta:
+        abstract = True
+        indexes = [
+            models.Index(fields=["latitude", "longitude"], name="%(class)s_lat_lng_idx"),
+        ]
+
+
 class Address(AbstractBaseModel):
     street_line1 = models.CharField(max_length=255)
 

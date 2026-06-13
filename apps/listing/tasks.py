@@ -1,5 +1,6 @@
 import logging
 from datetime import timedelta
+from django.apps import apps
 from django.utils import timezone
 from apps.listing.services import StayAvailabilityService
 from django.db import transaction
@@ -16,8 +17,36 @@ from apps.listing.services import BookingService, GuestHouseBookingService, Prop
 from apps.notifications.models import Notification
 from apps.notifications.services import NotificationService
 from services.sms import send_sms
+from services.maps import GeocodingError, geocode_address
 
 logger = logging.getLogger(__name__)
+GEOCODING_RETRY_DELAYS = (30, 120, 300)
+
+
+def _build_address_text(address) -> str:
+    if not address:
+        return ""
+
+    parts = [
+        getattr(address, "street_line1", None),
+        getattr(address, "sub_city", None),
+        getattr(address, "city", None),
+        getattr(address, "state", None),
+        getattr(address, "postal_code", None),
+        getattr(address, "country", None),
+    ]
+    return ", ".join(str(part).strip() for part in parts if part and str(part).strip())
+
+
+def _resolve_model(model_label: str):
+    if not model_label or "." not in model_label:
+        return None
+
+    app_label, model_name = model_label.split(".", 1)
+    try:
+        return apps.get_model(app_label, model_name)
+    except LookupError:
+        return None
 
 def track_availability(days_ahead=180):
     hotel_created = StayAvailabilityService.ensure_future_availability(days_ahead=days_ahead)
@@ -200,4 +229,76 @@ def send_contact_reveal_unlocked_notification(reveal_request_id):
                 notification.metadata = metadata
                 notification.save(update_fields=["metadata"])
 
+    return True
+
+
+@app.task(bind=True, max_retries=3)
+def geocode_listing_async(self, listing_id, model_label):
+    model = _resolve_model(model_label)
+    if model is None:
+        logger.warning("Geocoding skipped for unknown model label %s", model_label)
+        return False
+
+    queryset = model.objects.all()
+    if any(field.name == "address" for field in model._meta.get_fields()):
+        queryset = queryset.select_related("address")
+
+    try:
+        listing = queryset.get(id=listing_id)
+    except model.DoesNotExist:
+        logger.warning(
+            "Geocoding skipped because listing %s was not found for %s.",
+            listing_id,
+            model_label,
+        )
+        return False
+
+    if getattr(listing, "latitude", None) is not None:
+        logger.debug("Skipping geocoding for %s because coordinates already exist.", listing_id)
+        return False
+
+    address_text = _build_address_text(getattr(listing, "address", None))
+    if not address_text:
+        logger.warning(
+            "Geocoding skipped for %s because no address text could be built.",
+            listing_id,
+        )
+        return False
+
+    try:
+        geocoded = geocode_address(address_text)
+    except GeocodingError as exc:
+        retry_count = getattr(self.request, "retries", 0)
+        if retry_count < len(GEOCODING_RETRY_DELAYS):
+            countdown = GEOCODING_RETRY_DELAYS[retry_count]
+            logger.warning(
+                "Geocoding retry scheduled for %s (%s) in %s seconds.",
+                listing_id,
+                model_label,
+                countdown,
+            )
+            raise self.retry(exc=exc, countdown=countdown)
+
+        logger.error(
+            "Geocoding failed permanently for %s (%s): %s",
+            listing_id,
+            model_label,
+            exc,
+        )
+        return False
+
+    listing.latitude = geocoded.get("lat")
+    listing.longitude = geocoded.get("lng")
+    listing.formatted_address = geocoded.get("formatted_address")
+    listing.place_id = geocoded.get("place_id")
+    listing.address_components = geocoded.get("components")
+    listing.save(
+        update_fields=[
+            "latitude",
+            "longitude",
+            "formatted_address",
+            "place_id",
+            "address_components",
+        ]
+    )
     return True

@@ -1,5 +1,25 @@
 # API Contract Changelog
 
+[2026-06-12] TASK-402 - Add Coordinates To All Listing Models
+Modified models: apps.core.GeoLocatedModel, apps.listing.BaseListing subclasses,
+                 apps.account.HotelProfile, apps.account.User
+New fields exposed read-only on listing detail/list serializers:
+latitude, longitude, formatted_address, place_id
+Change type: NON-BREAKING additive model and serializer update
+Flutter action required: yes - handle null map coordinates in listing cards/details
+React action required: yes - handle null map coordinates in listing cards/details
+
+[2026-06-12] TASK-401 - Google Maps Service Layer
+New shared service: services/maps.py
+Settings added: GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_GEOCODING_URL,
+                GOOGLE_MAPS_PLACES_AUTOCOMPLETE_URL,
+                GOOGLE_MAPS_PLACE_DETAIL_URL,
+                DEFAULT_PROXIMITY_RADIUS_KM, MAX_PROXIMITY_RADIUS_KM,
+                GEOCODING_CACHE_TTL, PROXIMITY_CACHE_TTL, MAP_PINS_CACHE_TTL
+Change type: NEW shared backend integration layer
+Flutter action required: yes - consume backend map helpers and proximity data
+React action required: yes - consume backend map helpers and proximity data
+
 [2026-06-11] TASK-308 - Platform Admin Dashboard Metrics
 New endpoints: GET /api/v1/analytics/admin/overview/
                GET /api/v1/analytics/admin/revenue/
@@ -40,6 +60,17 @@ New endpoints: GET/POST /api/v1/promotions/campaigns/
 Change type: NEW additive module
 Flutter action required: yes - render promoted listing slots in search and category screens
 React action required: yes - admin campaign and placement management, render promoted slots
+
+[2026-06-13] TASK-406 - Search Improvement With Radius Support
+New endpoints: GET /api/v1/listing/search/
+               GET /api/v1/listing/search/suggestions/
+Change type: NON-BREAKING additive search/discovery fields
+New fields: distance_km, latitude, longitude, formatted_address,
+            search_center, applied_radius_km
+Approach: Haversine formula with DecimalField lat/lng; no PostGIS or GeoDjango
+Google API status: implemented; live geocoding/backfill pending valid billing-enabled API key
+Flutter action required: yes - use unified search and suggestions with optional map context
+React action required: yes - use unified search and suggestions with optional map context
 
 [2026-06-11] TASK-306 - Admin Listing Verification Actions
 Modified: all listing and hotel detail/list responses
@@ -107,3 +138,17 @@ New endpoints: POST /api/v1/listing/property-rentals/bookings/
                POST /api/v1/listing/property-rentals/bookings/price-preview/
 Flutter action required: yes — property rental booking screens
 React action required: yes — property rental booking page
+[2026-06-12] TASK-403 — Async Geocoding On Listing Save
+Changed: existing listing save flows now enqueue async geocoding
+         for address-bearing listings after successful save
+New artifact: `apps/listing/management/commands/geocode_existing_listings.py`
+Flutter action required: yes — handle asynchronously populated coordinates
+React action required: yes — handle asynchronously populated coordinates
+
+[2026-06-12] TASK-404 — Proximity And Discovery Endpoints
+New endpoints: GET /api/v1/listing/nearby/
+               GET /api/v1/listing/within-bounds/
+               GET /api/v1/listing/map-pins/
+               GET /api/v1/listing/feed/
+Flutter action required: yes — render proximity, viewport, map pin, and feed discovery states
+React action required: yes — render proximity, viewport, map pin, and feed discovery states

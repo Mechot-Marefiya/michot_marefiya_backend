@@ -35,6 +35,7 @@ from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.conf import settings
+from services.maps import GeocodingError, get_place_detail
 
 from apps.core.models import Facility
 from apps.core.serializers import (
@@ -47,6 +48,42 @@ from drf_spectacular.utils import extend_schema_field, inline_serializer
 
 
 User = get_user_model()
+
+
+class PlaceResolutionMixin(metaclass=serializers.SerializerMetaclass):
+    place_id = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    session_token = serializers.CharField(required=False, allow_blank=True, write_only=True)
+
+    def _resolve_place_detail(self, data):
+        place_id = (data.get("place_id") or "").strip()
+        session_token = (data.get("session_token") or "").strip()
+
+        if not place_id:
+            return data
+
+        if not session_token:
+            raise serializers.ValidationError(
+                {"session_token": "This field is required when place_id is provided."}
+            )
+
+        try:
+            detail = get_place_detail(place_id, session_token)
+        except GeocodingError as exc:
+            raise serializers.ValidationError({"place_id": str(exc)}) from exc
+
+        data["latitude"] = detail.get("lat")
+        data["longitude"] = detail.get("lng")
+        data["formatted_address"] = detail.get("formatted_address")
+        data["place_id"] = detail.get("place_id") or place_id
+        data["address_components"] = detail.get("components") or {}
+        data["_skip_async_geocoding"] = True
+        return data
+
+    def _pop_session_token(self, validated_data):
+        validated_data.pop("session_token", None)
+
+    def _pop_skip_async_geocoding(self, validated_data) -> bool:
+        return bool(validated_data.pop("_skip_async_geocoding", False))
 
 WORKSPACE_INFO_SCHEMA = inline_serializer(
     name="WorkspaceInfo",
@@ -381,6 +418,10 @@ class UserResponseSerializer(serializers.ModelSerializer):
             "phone",
             "phone_verified",
             "phone_verified_at",
+            "last_known_lat",
+            "last_known_lng",
+            "location_updated_at",
+            "location_permission_granted",
             "is_active",
             "role",
             "workspace",
@@ -513,8 +554,48 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             
         return instance
 
+
+class UserLocationSerializer(serializers.Serializer):
+    lat = serializers.DecimalField(max_digits=9, decimal_places=6)
+    lng = serializers.DecimalField(max_digits=9, decimal_places=6)
+    permission_granted = serializers.BooleanField(write_only=True)
+    location_updated_at = serializers.DateTimeField(read_only=True)
+    location_permission_granted = serializers.BooleanField(read_only=True)
+
+    def validate_lat(self, value):
+        if value < -90 or value > 90:
+            raise serializers.ValidationError("Latitude must be between -90 and 90.")
+        return value
+
+    def validate_lng(self, value):
+        if value < -180 or value > 180:
+            raise serializers.ValidationError("Longitude must be between -180 and 180.")
+        return value
+
+    def save(self, **kwargs):
+        user = kwargs["user"]
+        user.last_known_lat = self.validated_data["lat"]
+        user.last_known_lng = self.validated_data["lng"]
+        user.location_permission_granted = self.validated_data["permission_granted"]
+        user.location_updated_at = timezone.now()
+        user.save(
+            update_fields=[
+                "last_known_lat",
+                "last_known_lng",
+                "location_permission_granted",
+                "location_updated_at",
+                "updated_at",
+            ]
+        )
+        return user
+
     def to_representation(self, instance):
-        return UserResponseSerializer(instance, self.context).to_representation(instance)
+        return {
+            "lat": instance.last_known_lat,
+            "lng": instance.last_known_lng,
+            "location_updated_at": instance.location_updated_at,
+            "location_permission_granted": instance.location_permission_granted,
+        }
 
 
 class ChangePasswordSerializer(serializers.Serializer):
@@ -1046,6 +1127,10 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
             "company",
             "images",
             "logo",
+            "latitude",
+            "longitude",
+            "formatted_address",
+            "place_id",
             "stars",
             "featured",
             "is_active",
@@ -1246,7 +1331,7 @@ class IndividualOwnerRegistrationSerializer(serializers.ModelSerializer):
         return IndividualOwnerProfileResponseSerializer(instance, context=self.context).to_representation(instance)
 
 
-class HotelProfileSerializer(serializers.ModelSerializer):
+class HotelProfileSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     facilities = JsonSerializerField()
     images = serializers.ListField(child=serializers.ImageField(), required=False) 
     address = FlexibleAddressField()
@@ -1267,12 +1352,17 @@ class HotelProfileSerializer(serializers.ModelSerializer):
             "featured",
             "facilities",
             "images", 
+            "place_id",
+            "session_token",
         ]
 
     def validate_address(self, attr):
         serializer = AddressSerializer(data=attr)
         serializer.is_valid(raise_exception=True)
         return serializer.validated_data
+
+    def validate(self, data):
+        return self._resolve_place_detail(data)
 
     @transaction.atomic()
     def create(self, validated_data):
@@ -1289,6 +1379,8 @@ class HotelProfileSerializer(serializers.ModelSerializer):
         address_data = validated_data.pop("address")
         facilities = validated_data.pop("facilities", [])
         images = validated_data.pop("images", [])
+        self._pop_session_token(validated_data)
+        skip_async_geocoding = self._pop_skip_async_geocoding(validated_data)
         validated_data.setdefault("is_active", False)
         
         address = ListingService.get_or_create_address(address_data)
@@ -1305,10 +1397,13 @@ class HotelProfileSerializer(serializers.ModelSerializer):
         if images:
             ImageCreationService.create_images(hotel, images)
 
+        ListingService.schedule_geocoding(hotel, should_dispatch=not skip_async_geocoding)
+
         return hotel
 
     @transaction.atomic()
     def update(self, instance, validated_data):
+        self._pop_session_token(validated_data)
         kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
         
         if kept_image_ids is None and "kept_image_ids" in self.initial_data:

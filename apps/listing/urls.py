@@ -24,6 +24,12 @@ from apps.listing.views import (
     SeasonViewSet,
     SeasonalRateViewSet,
     InventoryGridView,
+    NearbyListingsView,
+    WithinBoundsListingsView,
+    MapPinsView,
+    FeedListingsView,
+    ListingSearchView,
+    ListingSearchSuggestionsView,
 )
 
 router = DefaultRouter()
@@ -57,6 +63,12 @@ urlpatterns = [
     path("car-availabilities/by-car-and-date/", CarAvailabilityByCarAndDateView.as_view(),  name="car-availability-by-car-and-date"),
     path("car-availabilities/by-dates/", CarAvailabilityByDateRangeView.as_view(), name="car-availability-by-date-range"),
     path("inventory/grid/", InventoryGridView.as_view(), name="inventory-grid"),
+    path("nearby/", NearbyListingsView.as_view(), name="listing-nearby"),
+    path("within-bounds/", WithinBoundsListingsView.as_view(), name="listing-within-bounds"),
+    path("map-pins/", MapPinsView.as_view(), name="listing-map-pins"),
+    path("feed/", FeedListingsView.as_view(), name="listing-feed"),
+    path("search/", ListingSearchView.as_view(), name="listing-search"),
+    path("search/suggestions/", ListingSearchSuggestionsView.as_view(), name="listing-search-suggestions"),
 ]
 
 urlpatterns += router.urls

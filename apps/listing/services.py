@@ -56,6 +56,26 @@ logger = logging.getLogger(__name__)
 _VERIFICATION_NOTE_UNSET = object()
 
 
+class ListingGeocodingService:
+    @staticmethod
+    def schedule(instance, should_dispatch: bool = True) -> bool:
+        if not should_dispatch or instance is None:
+            return False
+
+        address = getattr(instance, "address", None)
+        if address is None:
+            return False
+
+        from apps.listing.tasks import geocode_listing_async
+
+        model_label = f"{instance._meta.app_label}.{instance._meta.model_name}"
+
+        transaction.on_commit(
+            lambda: geocode_listing_async.delay(instance.pk, model_label)
+        )
+        return True
+
+
 def verify_listing(listing, actor, verification_note=_VERIFICATION_NOTE_UNSET):
     if actor is None or not getattr(actor, "is_authenticated", False):
         raise ValidationError("Authenticated admin user is required for verification.")
@@ -230,9 +250,14 @@ def get_effective_platform_fee_rate(*, booking=None, user=None, phone: Optional[
 
 class ListingService:
     @staticmethod
+    def schedule_geocoding(instance, should_dispatch: bool = True) -> bool:
+        return ListingGeocodingService.schedule(instance, should_dispatch=should_dispatch)
+
+    @staticmethod
     @transaction.atomic()
     def create_room_listing(validated_data: dict):
         validated_data.setdefault("is_active", False)
+        skip_async_geocoding = bool(validated_data.pop("_skip_async_geocoding", False))
         hotel_id = validated_data.pop("hotel_id")
         images = validated_data.pop("images")
         address_data = validated_data.pop("address", None)
@@ -265,6 +290,8 @@ class ListingService:
             room_listing_instance.total_units
         )
 
+        ListingGeocodingService.schedule(room_listing_instance, should_dispatch=not skip_async_geocoding)
+
         return room_listing_instance
 
     @staticmethod
@@ -272,6 +299,7 @@ class ListingService:
     @transaction.atomic()
     def create_guest_house_listing(validated_data: dict):
         validated_data.setdefault("is_active", False)
+        skip_async_geocoding = bool(validated_data.pop("_skip_async_geocoding", False))
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
         amenity_ids = validated_data.pop("amenities", [])
@@ -309,6 +337,8 @@ class ListingService:
         
         ImageCreationService.create_images(guest_house_profile, images)
 
+        ListingGeocodingService.schedule(guest_house_profile, should_dispatch=not skip_async_geocoding)
+
         return guest_house_profile
 
 
@@ -316,6 +346,7 @@ class ListingService:
     @transaction.atomic()
     def create_property_listing(validated_data: dict):
         validated_data.setdefault("is_active", False)
+        skip_async_geocoding = bool(validated_data.pop("_skip_async_geocoding", False))
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
         
@@ -338,12 +369,15 @@ class ListingService:
 
         ImageCreationService.create_images(property_listing_instance, images)
 
+        ListingGeocodingService.schedule(property_listing_instance, should_dispatch=not skip_async_geocoding)
+
         return property_listing_instance
 
     @staticmethod
     @transaction.atomic()
     def create_event_space_listing(validated_data: dict):
         validated_data.setdefault("is_active", False)
+        skip_async_geocoding = bool(validated_data.pop("_skip_async_geocoding", False))
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
         amenity_ids = validated_data.pop("amenities", [])
@@ -372,6 +406,8 @@ class ListingService:
         EventSpaceAvailabilityService.create_availability(
             instance, instance.total_units
         )
+
+        ListingGeocodingService.schedule(instance, should_dispatch=not skip_async_geocoding)
 
         return instance
 
@@ -445,6 +481,7 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def update_room_listing(instance: RoomListing, validated_data: dict, kept_image_ids: list = None):
+        skip_async_geocoding = bool(validated_data.pop("_skip_async_geocoding", False))
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
         amenity_ids = validated_data.pop("amenities", None)
@@ -455,7 +492,8 @@ class ListingService:
         
         if address_data:
             ListingService._update_address(instance, address_data)
-            
+            ListingGeocodingService.schedule(instance, should_dispatch=not skip_async_geocoding)
+              
         if amenity_ids is not None:
             instance.amenities.set(amenity_ids)
             
@@ -466,6 +504,7 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def update_guest_house_profile(instance: GuestHouseProfile, validated_data: dict, kept_image_ids: list = None):
+        skip_async_geocoding = bool(validated_data.pop("_skip_async_geocoding", False))
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
         amenity_ids = validated_data.pop("amenities", None)
@@ -477,6 +516,7 @@ class ListingService:
         
         if address_data:
             ListingService._update_address(instance, address_data)
+            ListingGeocodingService.schedule(instance, should_dispatch=not skip_async_geocoding)
         
         if amenity_ids is not None:
             instance.amenities.set(Amenity.objects.filter(id__in=amenity_ids))
@@ -490,6 +530,7 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def update_event_space_listing(instance: EventSpaceListing, validated_data: dict, kept_image_ids: list = None):
+        skip_async_geocoding = bool(validated_data.pop("_skip_async_geocoding", False))
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
         amenity_ids = validated_data.pop("amenities", None)
@@ -500,7 +541,8 @@ class ListingService:
         
         if address_data:
             ListingService._update_address(instance, address_data)
-            
+            ListingGeocodingService.schedule(instance, should_dispatch=not skip_async_geocoding)
+              
         if amenity_ids is not None:
             instance.amenities.set(Amenity.objects.filter(id__in=amenity_ids))
             
@@ -510,6 +552,7 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def update_property_listing(instance: PropertyListing, validated_data: dict, kept_image_ids: list = None):
+        skip_async_geocoding = bool(validated_data.pop("_skip_async_geocoding", False))
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
         
@@ -519,14 +562,17 @@ class ListingService:
         
         if address_data:
             ListingService._update_address(instance, address_data)
-            
+            ListingGeocodingService.schedule(instance, should_dispatch=not skip_async_geocoding)
+              
         ListingService._update_images(instance, images, kept_image_ids)
         return instance
     
     @staticmethod
     @transaction.atomic()
     def update_hotel_profile(instance: HotelProfile, validated_data: dict, kept_image_ids: list = None):        
+        skip_async_geocoding = bool(validated_data.pop("_skip_async_geocoding", False))
         company_data = validated_data.pop("company", {})
+        address_data = validated_data.pop("address", None)
         images = validated_data.pop("images", [])
         facility_ids = validated_data.pop("facilities", None)
         
@@ -536,17 +582,21 @@ class ListingService:
         
         if company_data:
             company = instance.company
-            address_data = company_data.pop("address", None)
+            company_address_data = company_data.pop("address", None)
             
             for attr, value in company_data.items():
                 setattr(company, attr, value)
             company.save()
             
-            if address_data:
-                 ListingService._update_address(company, address_data)
+            if company_address_data:
+                 ListingService._update_address(company, company_address_data)
+
+        if address_data:
+            ListingService._update_address(instance, address_data)
+            ListingGeocodingService.schedule(instance, should_dispatch=not skip_async_geocoding)
 
         if facility_ids is not None:
-             instance.facilities.set(Facility.objects.filter(id__in=facility_ids))
+               instance.facilities.set(Facility.objects.filter(id__in=facility_ids))
              
         ListingService._update_images(instance, images, kept_image_ids)
         

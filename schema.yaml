@@ -896,6 +896,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/OwnerComplianceAgreement'
           description: ''
+  /api/v1/account/location/:
+    post:
+      operationId: v1_account_location_create
+      description: Persist the latest client-reported location for proximity-aware
+        experiences.
+      summary: Store user location
+      tags:
+      - Account
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserLocationRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/UserLocationRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UserLocationRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserLocation'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/account/password-reset/:
     post:
       operationId: v1_account_password_reset_create
@@ -4886,6 +4929,44 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaginatedEventSpaceListingList'
           description: ''
+  /api/v1/listing/feed/:
+    get:
+      operationId: v1_listing_feed_retrieve
+      summary: Get standard or proximity feed
+      parameters:
+      - in: query
+        name: listing_type
+        schema:
+          type: string
+          enum:
+          - all
+          - car_sales
+          - guesthouse
+          - hotel
+          - property_rental
+      - in: query
+        name: page
+        schema:
+          type: integer
+      tags:
+      - Listings
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FeedListingsResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/listing/guest-house-rooms/:
     get:
       operationId: v1_listing_guest_house_rooms_list
@@ -5904,6 +5985,122 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/v1/listing/map-pins/:
+    get:
+      operationId: v1_listing_map_pins_list
+      summary: Get lightweight map pins
+      parameters:
+      - in: query
+        name: east
+        schema:
+          type: number
+      - in: query
+        name: lat
+        schema:
+          type: number
+      - in: query
+        name: listing_type
+        schema:
+          type: string
+          enum:
+          - all
+          - car_sales
+          - guesthouse
+          - hotel
+          - property_rental
+      - in: query
+        name: lng
+        schema:
+          type: number
+      - in: query
+        name: north
+        schema:
+          type: number
+      - in: query
+        name: radius_km
+        schema:
+          type: number
+      - in: query
+        name: south
+        schema:
+          type: number
+      - in: query
+        name: west
+        schema:
+          type: number
+      tags:
+      - Listings
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MapPin'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/listing/nearby/:
+    get:
+      operationId: v1_listing_nearby_retrieve
+      summary: Find listings nearby
+      parameters:
+      - in: query
+        name: lat
+        schema:
+          type: number
+        required: true
+      - in: query
+        name: listing_type
+        schema:
+          type: string
+          enum:
+          - all
+          - car_sales
+          - guesthouse
+          - hotel
+          - property_rental
+      - in: query
+        name: lng
+        schema:
+          type: number
+        required: true
+      - in: query
+        name: page
+        schema:
+          type: integer
+      - in: query
+        name: radius_km
+        schema:
+          type: number
+      tags:
+      - Listings
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NearbyListingsResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/listing/properties/:
     get:
       operationId: v1_listing_properties_list
@@ -6795,6 +6992,123 @@ paths:
               schema:
                 $ref: '#/components/schemas/RoomListing'
           description: ''
+  /api/v1/listing/search/:
+    get:
+      operationId: v1_listing_search_retrieve
+      summary: Search listings with optional radius context
+      parameters:
+      - in: query
+        name: lat
+        schema:
+          type: number
+      - in: query
+        name: listing_type
+        schema:
+          type: string
+          enum:
+          - all
+          - car_sales
+          - guesthouse
+          - hotel
+          - property_rental
+      - in: query
+        name: lng
+        schema:
+          type: number
+      - in: query
+        name: page
+        schema:
+          type: integer
+      - in: query
+        name: q
+        schema:
+          type: string
+      - in: query
+        name: radius_km
+        schema:
+          type: number
+      - in: query
+        name: sort_by
+        schema:
+          type: string
+          enum:
+          - distance
+          - newest
+          - price
+          - rating
+          - relevance
+      tags:
+      - Listings
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListingSearchResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/listing/search/suggestions/:
+    get:
+      operationId: v1_listing_search_suggestions_list
+      summary: Search suggestions for listing discovery
+      parameters:
+      - in: query
+        name: lat
+        schema:
+          type: number
+      - in: query
+        name: limit
+        schema:
+          type: integer
+      - in: query
+        name: listing_type
+        schema:
+          type: string
+          enum:
+          - all
+          - car_sales
+          - guesthouse
+          - hotel
+          - property_rental
+      - in: query
+        name: lng
+        schema:
+          type: number
+      - in: query
+        name: q
+        schema:
+          type: string
+        required: true
+      tags:
+      - Listings
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SearchSuggestion'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/listing/seasonal-rates/:
     get:
       operationId: v1_listing_seasonal_rates_list
@@ -7370,6 +7684,193 @@ paths:
           description: ''
         '404':
           description: No response body
+  /api/v1/listing/within-bounds/:
+    get:
+      operationId: v1_listing_within_bounds_retrieve
+      summary: Find listings within viewport bounds
+      parameters:
+      - in: query
+        name: east
+        schema:
+          type: number
+        required: true
+      - in: query
+        name: listing_type
+        schema:
+          type: string
+          enum:
+          - all
+          - car_sales
+          - guesthouse
+          - hotel
+          - property_rental
+      - in: query
+        name: north
+        schema:
+          type: number
+        required: true
+      - in: query
+        name: page
+        schema:
+          type: integer
+      - in: query
+        name: south
+        schema:
+          type: number
+        required: true
+      - in: query
+        name: west
+        schema:
+          type: number
+        required: true
+      tags:
+      - Listings
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WithinBoundsListingsResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/maps/autocomplete/:
+    get:
+      operationId: v1_maps_autocomplete_list
+      summary: Address autocomplete
+      parameters:
+      - in: query
+        name: input
+        schema:
+          type: string
+          minLength: 1
+        required: true
+      - in: query
+        name: session_token
+        schema:
+          type: string
+          minLength: 1
+        required: true
+      tags:
+      - Maps
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AutocompleteResult'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/maps/place-detail/:
+    post:
+      operationId: v1_maps_place_detail_create
+      summary: Resolve Google place detail
+      tags:
+      - Maps
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MapPlaceDetailRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/MapPlaceDetailRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/MapPlaceDetailRequestRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlaceDetail'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/maps/reverse-geocode/:
+    get:
+      operationId: v1_maps_reverse_geocode_retrieve
+      summary: Reverse geocode coordinates
+      parameters:
+      - in: query
+        name: lat
+        schema:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+        required: true
+      - in: query
+        name: lng
+        schema:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+        required: true
+      tags:
+      - Maps
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReverseGeocode'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '401':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/notifications/:
     get:
       operationId: v1_notifications_list
@@ -9070,6 +9571,26 @@ components:
           maxLength: 100
       required:
       - name
+    AutocompleteResult:
+      type: object
+      properties:
+        place_id:
+          type: string
+          readOnly: true
+        description:
+          type: string
+          readOnly: true
+        main_text:
+          type: string
+          readOnly: true
+        secondary_text:
+          type: string
+          readOnly: true
+      required:
+      - description
+      - main_text
+      - place_id
+      - secondary_text
     AvailabilityCheckRequest:
       type: object
       properties:
@@ -10050,6 +10571,12 @@ components:
           type: string
           description: Owner-defined instructions or compliance notes that renters
             must review before booking.
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
       required:
       - brand
       - condition
@@ -10078,6 +10605,24 @@ components:
           items:
             $ref: '#/components/schemas/ListingImage'
           readOnly: true
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        formatted_address:
+          type: string
+          nullable: true
+          maxLength: 500
+        place_id:
+          type: string
+          nullable: true
+          maxLength: 300
         base_price:
           type: string
           format: decimal
@@ -10785,6 +11330,12 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
       required:
       - brand
       - condition
@@ -10815,6 +11366,26 @@ components:
           items:
             $ref: '#/components/schemas/ListingImage'
           readOnly: true
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+        formatted_address:
+          type: string
+          readOnly: true
+          nullable: true
+        place_id:
+          type: string
+          readOnly: true
+          nullable: true
         base_price:
           type: string
           format: decimal
@@ -10928,14 +11499,18 @@ components:
       - created_at
       - currency
       - description
+      - formatted_address
       - fuel_type
       - id
       - images
       - individual_owner
       - is_active
       - is_verified
+      - latitude
+      - longitude
       - mileage
       - model
+      - place_id
       - reveal_fee
       - reveal_state
       - seats
@@ -11326,6 +11901,59 @@ components:
       required:
       - email
       - password
+    DiscoveryListing:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        listing_type:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+          default: ''
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        formatted_address:
+          type: string
+          nullable: true
+        place_id:
+          type: string
+          nullable: true
+        price_preview:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        currency:
+          type: string
+          default: ETB
+        thumbnail_url:
+          type: string
+          nullable: true
+        rating:
+          type: number
+          format: double
+          nullable: true
+        is_verified:
+          type: boolean
+          default: false
+      required:
+      - id
+      - latitude
+      - listing_type
+      - longitude
+      - title
     DisputeActionRequest:
       type: object
       properties:
@@ -11800,6 +12428,12 @@ components:
           items:
             type: string
             format: uuid
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
         number_of_guests:
           type: integer
           maximum: 2147483647
@@ -11832,6 +12466,24 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ListingImage'
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        formatted_address:
+          type: string
+          nullable: true
+          maxLength: 500
+        place_id:
+          type: string
+          nullable: true
+          maxLength: 300
         title:
           type: string
           description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
@@ -12033,6 +12685,33 @@ components:
       required:
       - content_type
       - object_id
+    FeedListingsResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+        total_pages:
+          type: integer
+        current_page:
+          type: integer
+        page_size:
+          type: integer
+        next:
+          type: string
+          nullable: true
+        previous:
+          type: string
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProximityListing'
+      required:
+      - count
+      - current_page
+      - page_size
+      - results
+      - total_pages
     FrontDeskAvailabilityDay:
       type: object
       properties:
@@ -12557,6 +13236,12 @@ components:
         logo:
           type: string
           format: binary
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
       required:
       - address
       - amenities
@@ -12580,6 +13265,24 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ListingImage'
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        formatted_address:
+          type: string
+          nullable: true
+          maxLength: 500
+        place_id:
+          type: string
+          nullable: true
+          maxLength: 300
         amenities:
           type: array
           items:
@@ -12757,6 +13460,12 @@ components:
           items:
             type: string
             format: uuid
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
         number_of_guests:
           type: integer
           maximum: 2147483647
@@ -12792,6 +13501,24 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ListingImage'
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        formatted_address:
+          type: string
+          nullable: true
+          maxLength: 500
+        place_id:
+          type: string
+          nullable: true
+          maxLength: 300
         base_price:
           type: string
           format: decimal
@@ -12996,6 +13723,12 @@ components:
           items:
             type: string
             format: binary
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
       required:
       - address
       - facilities
@@ -13208,6 +13941,110 @@ components:
       - price_per_unit
       - source
       - units
+    ListingSearchResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+        total_pages:
+          type: integer
+        current_page:
+          type: integer
+        page_size:
+          type: integer
+        next:
+          type: string
+          nullable: true
+        previous:
+          type: string
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListingSearchResult'
+        search_center:
+          $ref: '#/components/schemas/ListingSearchResponseCenter'
+        applied_radius_km:
+          type: number
+          format: double
+      required:
+      - count
+      - current_page
+      - page_size
+      - results
+      - search_center
+      - total_pages
+    ListingSearchResponseCenter:
+      type: object
+      properties:
+        lat:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+        lng:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+      required:
+      - lat
+      - lng
+    ListingSearchResult:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        listing_type:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+          default: ''
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        formatted_address:
+          type: string
+          nullable: true
+        place_id:
+          type: string
+          nullable: true
+        price_preview:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        currency:
+          type: string
+          default: ETB
+        thumbnail_url:
+          type: string
+          nullable: true
+        rating:
+          type: number
+          format: double
+          nullable: true
+        is_verified:
+          type: boolean
+          default: false
+        distance_km:
+          type: number
+          format: double
+          nullable: true
+      required:
+      - id
+      - latitude
+      - listing_type
+      - longitude
+      - title
     ListingTypeEnum:
       enum:
       - sale
@@ -13216,6 +14053,98 @@ components:
       description: |-
         * `sale` - For Sale
         * `rent` - For Rent
+    MapAddressComponents:
+      type: object
+      properties:
+        city:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+        postcode:
+          type: string
+          nullable: true
+        region:
+          type: string
+          nullable: true
+    MapPin:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        listing_type:
+          type: string
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        title:
+          type: string
+        price_preview:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        thumbnail_url:
+          type: string
+          nullable: true
+        rating:
+          type: number
+          format: double
+          nullable: true
+      required:
+      - id
+      - latitude
+      - listing_type
+      - longitude
+      - title
+    MapPlaceDetailRequestRequest:
+      type: object
+      properties:
+        place_id:
+          type: string
+          minLength: 1
+        session_token:
+          type: string
+          minLength: 1
+      required:
+      - place_id
+      - session_token
+    NearbyListingsResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+        total_pages:
+          type: integer
+        current_page:
+          type: integer
+        page_size:
+          type: integer
+        next:
+          type: string
+          nullable: true
+        previous:
+          type: string
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProximityListing'
+      required:
+      - count
+      - current_page
+      - page_size
+      - results
+      - total_pages
     Notification:
       type: object
       properties:
@@ -15056,6 +15985,12 @@ components:
           type: string
           description: Owner-defined instructions or compliance notes that renters
             must review before booking.
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
     PatchedCarRentalRequest:
       type: object
       properties:
@@ -15225,6 +16160,12 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
     PatchedCompanyProfileRequest:
       type: object
       properties:
@@ -15316,6 +16257,12 @@ components:
           items:
             type: string
             format: uuid
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
         number_of_guests:
           type: integer
           maximum: 2147483647
@@ -15479,6 +16426,12 @@ components:
         logo:
           type: string
           format: binary
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
     PatchedGuestHouseRoomRequest:
       type: object
       properties:
@@ -15517,6 +16470,12 @@ components:
           items:
             type: string
             format: uuid
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
         number_of_guests:
           type: integer
           maximum: 2147483647
@@ -15578,6 +16537,12 @@ components:
           items:
             type: string
             format: binary
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
     PatchedIndividualOwnerProfileRequest:
       type: object
       properties:
@@ -15738,6 +16703,12 @@ components:
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
         is_furnished:
           type: boolean
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
     PatchedRoleRequest:
       type: object
       properties:
@@ -15792,6 +16763,12 @@ components:
           items:
             type: string
             format: uuid
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
         number_of_guests:
           type: integer
           maximum: 2147483647
@@ -16127,6 +17104,35 @@ components:
         * `paid` - Paid (Split Success)
         * `failed` - Failed (Split Error)
         * `na` - Not Applicable
+    PlaceDetail:
+      type: object
+      properties:
+        lat:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+        lng:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+        formatted_address:
+          type: string
+          readOnly: true
+        place_id:
+          type: string
+          readOnly: true
+        components:
+          allOf:
+          - $ref: '#/components/schemas/MapAddressComponents'
+          readOnly: true
+      required:
+      - components
+      - formatted_address
+      - lat
+      - lng
+      - place_id
     PriceBreakdownItem:
       type: object
       properties:
@@ -16533,6 +17539,12 @@ components:
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
         is_furnished:
           type: boolean
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
       required:
       - address
       - bathrooms
@@ -16559,6 +17571,24 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ListingImage'
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        formatted_address:
+          type: string
+          nullable: true
+          maxLength: 500
+        place_id:
+          type: string
+          nullable: true
+          maxLength: 300
         base_price:
           type: string
           format: decimal
@@ -16642,6 +17672,24 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ListingImageRequest'
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        formatted_address:
+          type: string
+          nullable: true
+          maxLength: 500
+        place_id:
+          type: string
+          nullable: true
+          maxLength: 300
         base_price:
           type: string
           format: decimal
@@ -17039,6 +18087,12 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
       required:
       - address
       - property_type
@@ -17065,6 +18119,26 @@ components:
           items:
             $ref: '#/components/schemas/ListingImage'
           readOnly: true
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+        formatted_address:
+          type: string
+          readOnly: true
+          nullable: true
+        place_id:
+          type: string
+          readOnly: true
+          nullable: true
         base_price:
           type: string
           format: decimal
@@ -17171,6 +18245,7 @@ components:
       - created_at
       - currency
       - description
+      - formatted_address
       - id
       - images
       - individual_owner
@@ -17178,6 +18253,9 @@ components:
       - is_furnished
       - is_verified
       - land_size_square_meters
+      - latitude
+      - longitude
+      - place_id
       - property_type
       - reveal_fee
       - reveal_state
@@ -17231,6 +18309,63 @@ components:
       - status
       - tx_ref
       - unlocked_at
+    ProximityListing:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        listing_type:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+          default: ''
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        formatted_address:
+          type: string
+          nullable: true
+        place_id:
+          type: string
+          nullable: true
+        price_preview:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        currency:
+          type: string
+          default: ETB
+        thumbnail_url:
+          type: string
+          nullable: true
+        rating:
+          type: number
+          format: double
+          nullable: true
+        is_verified:
+          type: boolean
+          default: false
+        distance_km:
+          type: number
+          format: double
+      required:
+      - distance_km
+      - id
+      - latitude
+      - listing_type
+      - longitude
+      - title
     PublicPlacement:
       type: object
       properties:
@@ -17331,6 +18466,19 @@ components:
       required:
       - amount
       - date
+    ReverseGeocode:
+      type: object
+      properties:
+        formatted_address:
+          type: string
+          readOnly: true
+        components:
+          allOf:
+          - $ref: '#/components/schemas/MapAddressComponents'
+          readOnly: true
+      required:
+      - components
+      - formatted_address
     Role:
       type: object
       properties:
@@ -17486,6 +18634,12 @@ components:
           items:
             type: string
             format: uuid
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
         number_of_guests:
           type: integer
           maximum: 2147483647
@@ -17534,6 +18688,24 @@ components:
         description:
           type: string
           description: Detailed description of the listing.
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        formatted_address:
+          type: string
+          nullable: true
+          maxLength: 500
+        place_id:
+          type: string
+          nullable: true
+          maxLength: 300
         base_price:
           type: string
           format: decimal
@@ -17744,6 +18916,51 @@ components:
       - id
       - number_of_guests
       - room_size_sqm
+      - title
+    SearchSuggestion:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        listing_type:
+          type: string
+        title:
+          type: string
+        formatted_address:
+          type: string
+          nullable: true
+        thumbnail_url:
+          type: string
+          nullable: true
+        rating:
+          type: number
+          format: double
+          nullable: true
+        price_preview:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        distance_km:
+          type: number
+          format: double
+          nullable: true
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+      required:
+      - id
+      - latitude
+      - listing_type
+      - longitude
       - title
     Season:
       type: object
@@ -18395,6 +19612,47 @@ components:
           maxLength: 20
       required:
       - email
+    UserLocation:
+      type: object
+      properties:
+        lat:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+        lng:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+        location_updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        location_permission_granted:
+          type: boolean
+          readOnly: true
+      required:
+      - lat
+      - lng
+      - location_permission_granted
+      - location_updated_at
+    UserLocationRequest:
+      type: object
+      properties:
+        lat:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+        lng:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+        permission_granted:
+          type: boolean
+          writeOnly: true
+      required:
+      - lat
+      - lng
+      - permission_granted
     UserRequest:
       type: object
       properties:
@@ -18456,6 +19714,24 @@ components:
           type: string
           format: date-time
           nullable: true
+        last_known_lat:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+          title: Last Known Latitude
+        last_known_lng:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+          title: Last Known Longitude
+        location_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        location_permission_granted:
+          type: boolean
         is_active:
           type: boolean
           title: Active
@@ -18498,6 +19774,24 @@ components:
           type: string
           format: date-time
           nullable: true
+        last_known_lat:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+          title: Last Known Latitude
+        last_known_lng:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          nullable: true
+          title: Last Known Longitude
+        location_updated_at:
+          type: string
+          format: date-time
+          nullable: true
+        location_permission_granted:
+          type: boolean
         is_active:
           type: boolean
           title: Active
@@ -18554,6 +19848,33 @@ components:
       required:
       - token
       - uid
+    WithinBoundsListingsResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+        total_pages:
+          type: integer
+        current_page:
+          type: integer
+        page_size:
+          type: integer
+        next:
+          type: string
+          nullable: true
+        previous:
+          type: string
+          nullable: true
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/DiscoveryListing'
+      required:
+      - count
+      - current_page
+      - page_size
+      - results
+      - total_pages
     WorkspaceInfo:
       type: object
       properties:

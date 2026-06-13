@@ -1,11 +1,14 @@
 
 from django.utils.dateparse import parse_date
 from django.conf import settings
+from django.core.cache import cache
 from django.db.models import Q, Count, Avg, Sum
 from django.utils import timezone
 from datetime import date
 from datetime import datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
+import hashlib
+import uuid
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework import status,filters
@@ -68,6 +71,7 @@ from apps.listing.models import (
 )
 from apps.account.models import(CompanyProfile,IndividualOwnerProfile,HotelProfile)
 from apps.listing.serializers import (
+    DISCOVERY_LISTING_TYPE_CHOICES,
     AmenityResponseSSerializer,
     BookingPreviewSerializer,
     BookingSerializer,BookingResponseSerializer,
@@ -115,6 +119,11 @@ from apps.listing.serializers import (
     GuestBookingOtpRequestSerializer,
     VerifyActionSerializer,
     SeasonSerializer, SeasonalRateSerializer,
+    DiscoveryListingSerializer,
+    ListingSearchResultSerializer,
+    ProximityListingSerializer,
+    MapPinSerializer,
+    SearchSuggestionSerializer,
 )
 from apps.listing.services import (
     StayAvailabilityService, BookingService, CarAvailabilityService, 
@@ -126,10 +135,554 @@ from apps.listing.services import (
 from apps.payment.services import ContactRevealPaymentService
 from apps.listing.exceptions import BookingConflict
 from rest_framework.exceptions import PermissionDenied
+from services.maps import build_map_pin, calculate_distance_km, find_listings_near, get_bounding_box
 
 NO_REFUND_POLICY_CODE = "no_refunds"
 NO_REFUND_POLICY_MESSAGE = "No refunds are available for any service payment on the platform."
 BOOKING_CANCEL_NOTE = "Cancelling a booking does not create a refund for any completed service payment."
+
+DISCOVERY_FILTER_CHOICES = [("all", "All"), *DISCOVERY_LISTING_TYPE_CHOICES]
+DISCOVERY_LISTING_TYPE_MAP = {
+    "hotel": HotelProfile,
+    "guesthouse": GuestHouseProfile,
+    "property_rental": PropertyListing,
+    "car_sales": CarSaleListing,
+}
+DISCOVERY_CACHE_TTL = getattr(settings, "PROXIMITY_CACHE_TTL", 300)
+MAP_PINS_CACHE_TTL = getattr(settings, "MAP_PINS_CACHE_TTL", 180)
+
+
+class NearbyListingsQuerySerializer(serializers.Serializer):
+    lat = serializers.DecimalField(max_digits=9, decimal_places=6)
+    lng = serializers.DecimalField(max_digits=9, decimal_places=6)
+    radius_km = serializers.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        required=False,
+        default=Decimal(str(getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10))),
+        min_value=Decimal("0"),
+    )
+    listing_type = serializers.CharField(required=False, default="all")
+    page = serializers.IntegerField(required=False, min_value=1)
+
+    def validate_listing_type(self, value):
+        allowed = {choice for choice, _ in DISCOVERY_FILTER_CHOICES}
+        if value not in allowed:
+            raise serializers.ValidationError("Invalid listing_type.")
+        return value
+
+    def validate(self, attrs):
+        radius_km = Decimal(str(attrs.get("radius_km", getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10))))
+        max_radius = Decimal(str(getattr(settings, "MAX_PROXIMITY_RADIUS_KM", 100)))
+        if radius_km > max_radius:
+            raise serializers.ValidationError({"radius_km": f"radius_km cannot exceed {max_radius}."})
+        return attrs
+
+
+class BoundsListingsQuerySerializer(serializers.Serializer):
+    north = serializers.DecimalField(max_digits=9, decimal_places=6)
+    south = serializers.DecimalField(max_digits=9, decimal_places=6)
+    east = serializers.DecimalField(max_digits=9, decimal_places=6)
+    west = serializers.DecimalField(max_digits=9, decimal_places=6)
+    listing_type = serializers.CharField(required=False, default="all")
+    page = serializers.IntegerField(required=False, min_value=1)
+
+    def validate_listing_type(self, value):
+        allowed = {choice for choice, _ in DISCOVERY_FILTER_CHOICES}
+        if value not in allowed:
+            raise serializers.ValidationError("Invalid listing_type.")
+        return value
+
+
+class MapPinsQuerySerializer(serializers.Serializer):
+    lat = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
+    lng = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
+    radius_km = serializers.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        required=False,
+        default=Decimal(str(getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10))),
+        min_value=Decimal("0"),
+    )
+    north = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
+    south = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
+    east = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
+    west = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
+    listing_type = serializers.CharField(required=False, default="all")
+
+    def validate(self, attrs):
+        has_lat_lng = attrs.get("lat") is not None and attrs.get("lng") is not None
+        has_bounds = all(attrs.get(key) is not None for key in ("north", "south", "east", "west"))
+        if not has_lat_lng and not has_bounds:
+            raise serializers.ValidationError(
+                "Provide either lat and lng with radius_km or north, south, east, and west."
+            )
+        allowed = {choice for choice, _ in DISCOVERY_FILTER_CHOICES}
+        listing_type = attrs.get("listing_type", "all")
+        if listing_type not in allowed:
+            raise serializers.ValidationError({"listing_type": "Invalid listing_type."})
+        return attrs
+
+
+class FeedListingsQuerySerializer(serializers.Serializer):
+    listing_type = serializers.CharField(required=False, default="all")
+    page = serializers.IntegerField(required=False, min_value=1)
+
+    def validate_listing_type(self, value):
+        allowed = {choice for choice, _ in DISCOVERY_FILTER_CHOICES}
+        if value not in allowed:
+            raise serializers.ValidationError("Invalid listing_type.")
+        return value
+
+
+class ListingSearchQuerySerializer(serializers.Serializer):
+    q = serializers.CharField(required=False, allow_blank=True, default="")
+    lat = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
+    lng = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
+    radius_km = serializers.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        required=False,
+        default=Decimal(str(getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10))),
+        min_value=Decimal("0"),
+    )
+    sort_by = serializers.ChoiceField(
+        choices=["distance", "price", "rating", "newest", "relevance"],
+        required=False,
+    )
+    listing_type = serializers.CharField(required=False, default="all")
+    page = serializers.IntegerField(required=False, min_value=1)
+
+    def validate_listing_type(self, value):
+        allowed = {choice for choice, _ in DISCOVERY_FILTER_CHOICES}
+        if value not in allowed:
+            raise serializers.ValidationError("Invalid listing_type.")
+        return value
+
+    def validate(self, attrs):
+        has_lat = attrs.get("lat") is not None
+        has_lng = attrs.get("lng") is not None
+        if has_lat != has_lng:
+            raise serializers.ValidationError({"detail": "Both lat and lng are required together."})
+
+        radius_km = Decimal(str(attrs.get("radius_km", getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10))))
+        max_radius = Decimal(str(getattr(settings, "MAX_PROXIMITY_RADIUS_KM", 100)))
+        if radius_km > max_radius:
+            raise serializers.ValidationError({"radius_km": f"radius_km cannot exceed {max_radius}."})
+        return attrs
+
+
+class SearchSuggestionsQuerySerializer(serializers.Serializer):
+    q = serializers.CharField(required=True, min_length=2)
+    lat = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
+    lng = serializers.DecimalField(max_digits=9, decimal_places=6, required=False)
+    limit = serializers.IntegerField(required=False, min_value=1, max_value=10, default=5)
+    listing_type = serializers.CharField(required=False, default="all")
+
+    def validate_listing_type(self, value):
+        allowed = {choice for choice, _ in DISCOVERY_FILTER_CHOICES}
+        if value not in allowed:
+            raise serializers.ValidationError("Invalid listing_type.")
+        return value
+
+    def validate(self, attrs):
+        has_lat = attrs.get("lat") is not None
+        has_lng = attrs.get("lng") is not None
+        if has_lat != has_lng:
+            raise serializers.ValidationError({"detail": "Both lat and lng are required together."})
+        return attrs
+
+
+def _rounded_cache_value(value) -> str:
+    return f"{Decimal(str(value)).quantize(Decimal('0.001'), rounding=ROUND_HALF_UP):.3f}"
+
+
+def _discovery_querysets(listing_type: str):
+    source_map = {
+        "hotel": HotelProfile.objects.filter(is_active=True, latitude__isnull=False, longitude__isnull=False).select_related("company", "address").prefetch_related("images", "room_listings"),
+        "guesthouse": GuestHouseProfile.objects.filter(is_active=True, latitude__isnull=False, longitude__isnull=False).select_related("company", "address").prefetch_related(
+            "images",
+            "rooms",
+            "facility",
+            "amenities",
+        ),
+        "property_rental": PropertyListing.objects.filter(is_active=True, latitude__isnull=False, longitude__isnull=False).select_related("company", "individual_owner", "address").prefetch_related("images"),
+        "car_sales": CarSaleListing.objects.filter(is_active=True, latitude__isnull=False, longitude__isnull=False).select_related("company", "individual_owner").prefetch_related("images"),
+    }
+    if listing_type == "all":
+        return list(source_map.items())
+    return [(listing_type, source_map[listing_type])]
+
+
+def _search_querysets(listing_type: str):
+    source_map = {
+        "hotel": HotelProfile.objects.filter(is_active=True).select_related("company", "address").prefetch_related("images", "room_listings"),
+        "guesthouse": GuestHouseProfile.objects.filter(is_active=True).select_related("company", "address").prefetch_related(
+            "images",
+            "rooms",
+            "facility",
+            "amenities",
+        ),
+        "property_rental": PropertyListing.objects.filter(is_active=True).select_related("company", "individual_owner", "address").prefetch_related("images"),
+        "car_sales": CarSaleListing.objects.filter(is_active=True).select_related("company", "individual_owner").prefetch_related("images"),
+    }
+    if listing_type == "all":
+        return list(source_map.items())
+    return [(listing_type, source_map[listing_type])]
+
+
+def _listing_title(listing, listing_type: str) -> str:
+    if listing_type == "hotel":
+        return getattr(listing, "name", "") or getattr(listing, "title", "")
+    if listing_type == "car_sales":
+        return getattr(listing, "title", "") or f"{getattr(listing, 'brand', '')} {getattr(listing, 'model', '')}".strip()
+    return getattr(listing, "title", "") or getattr(listing, "name", "")
+
+
+def _listing_thumbnail_url(listing) -> str | None:
+    images = getattr(listing, "images", None)
+    if images is not None:
+        try:
+            image = images.filter(is_primary=True).first() or images.first()
+            if image and getattr(image, "image", None):
+                return image.image.url
+        except Exception:
+            pass
+
+    logo = getattr(listing, "logo", None)
+    if logo:
+        try:
+            return logo.url
+        except Exception:
+            return None
+    return None
+
+
+def _listing_rating(listing, listing_type: str):
+    if listing_type == "hotel":
+        return getattr(listing, "stars", None)
+    if listing_type == "guesthouse":
+        return getattr(listing, "rating", None)
+    return None
+
+
+def _listing_price_preview(listing, listing_type: str):
+    base_price = getattr(listing, "base_price", None)
+    if base_price is not None:
+        return Decimal(str(base_price))
+
+    related_name = None
+    if listing_type == "hotel":
+        related_name = "room_listings"
+    elif listing_type == "guesthouse":
+        related_name = "rooms"
+
+    if related_name:
+        related_manager = getattr(listing, related_name, None)
+        if related_manager is not None:
+            try:
+                prices = [
+                    Decimal(str(item.base_price))
+                    for item in related_manager.all()
+                    if getattr(item, "base_price", None) is not None
+                ]
+                if prices:
+                    return min(prices)
+            except Exception:
+                return None
+    return None
+
+
+def _normalize_discovery_listing(listing, listing_type: str, *, distance_km=None) -> dict:
+    payload = {
+        "id": listing.id,
+        "listing_type": listing_type,
+        "title": _listing_title(listing, listing_type),
+        "description": getattr(listing, "description", "") or "",
+        "latitude": getattr(listing, "latitude", None),
+        "longitude": getattr(listing, "longitude", None),
+        "formatted_address": getattr(listing, "formatted_address", None),
+        "place_id": getattr(listing, "place_id", None),
+        "price_preview": _listing_price_preview(listing, listing_type),
+        "currency": getattr(listing, "currency", "ETB") or "ETB",
+        "thumbnail_url": _listing_thumbnail_url(listing),
+        "rating": _listing_rating(listing, listing_type),
+        "is_verified": getattr(listing, "is_verified", False),
+        "_created_at": getattr(listing, "created_at", timezone.now()),
+    }
+    if distance_km is not None:
+        payload["distance_km"] = float(distance_km)
+    return payload
+
+
+def _search_text_fields(listing, listing_type: str, payload: dict) -> list[str]:
+    address = getattr(listing, "address", None)
+    values = [
+        payload.get("title") or "",
+        payload.get("description") or "",
+        payload.get("formatted_address") or "",
+        getattr(listing, "name", "") or "",
+    ]
+
+    if listing_type == "hotel":
+        values.append(getattr(getattr(listing, "company", None), "name", "") or "")
+    if listing_type == "car_sales":
+        values.append(getattr(listing, "brand", "") or "")
+        values.append(getattr(listing, "model", "") or "")
+
+    if address is not None:
+        values.extend(
+            [
+                getattr(address, "city", "") or "",
+                getattr(address, "sub_city", "") or "",
+                getattr(address, "street_line1", "") or "",
+                getattr(address, "state", "") or "",
+            ]
+        )
+    return values
+
+
+def _relevance_score(query: str, values: list[str]) -> int:
+    normalized_query = (query or "").strip().lower()
+    if not normalized_query:
+        return 0
+
+    score = 0
+    for raw_value in values:
+        value = (raw_value or "").strip().lower()
+        if not value:
+            continue
+        if value == normalized_query:
+            score += 120
+        elif value.startswith(normalized_query):
+            score += 80
+        elif normalized_query in value:
+            score += 40
+    return score
+
+
+def _distance_sort_value(item: dict) -> float:
+    distance = item.get("distance_km")
+    return float(distance) if distance is not None else float("inf")
+
+
+def _price_sort_value(item: dict) -> Decimal:
+    price = item.get("price_preview")
+    if price is None:
+        return Decimal("Infinity")
+    return Decimal(str(price))
+
+
+def _rating_sort_value(item: dict) -> float:
+    rating = item.get("rating")
+    return float(rating) if rating is not None else -1.0
+
+
+def _apply_search_sort(listings: list[dict], sort_by: str, *, has_location: bool) -> list[dict]:
+    if sort_by == "price":
+        return sorted(listings, key=_price_sort_value)
+    if sort_by == "rating":
+        return sorted(listings, key=lambda item: (_rating_sort_value(item), item.get("_relevance_score", 0)), reverse=True)
+    if sort_by == "newest":
+        return sorted(listings, key=lambda item: item.get("_created_at", timezone.now()), reverse=True)
+    if sort_by == "relevance":
+        return sorted(
+            listings,
+            key=lambda item: (item.get("_relevance_score", 0), item.get("_created_at", timezone.now())),
+            reverse=True,
+        )
+
+    if has_location:
+        return sorted(
+            listings,
+            key=lambda item: (_distance_sort_value(item), -item.get("_relevance_score", 0), item.get("_created_at", timezone.now())),
+        )
+    return sorted(
+        listings,
+        key=lambda item: (item.get("_relevance_score", 0), item.get("_created_at", timezone.now())),
+        reverse=True,
+    )
+
+
+def _filter_search_payload(listing_type: str, query: str) -> list[dict]:
+    normalized_query = (query or "").strip()
+    listings = []
+
+    for current_type, queryset in _search_querysets(listing_type):
+        for listing in queryset:
+            payload = _normalize_discovery_listing(listing, current_type, distance_km=None)
+            values = _search_text_fields(listing, current_type, payload)
+            payload["_relevance_score"] = _relevance_score(normalized_query, values)
+            if normalized_query and payload["_relevance_score"] <= 0:
+                continue
+            listings.append(payload)
+    return listings
+
+
+def _apply_radius_to_payload(listings: list[dict], lat: Decimal, lng: Decimal, radius_km: Decimal) -> list[dict]:
+    bounds = get_bounding_box(float(lat), float(lng), float(radius_km))
+    filtered = []
+
+    for item in listings:
+        item_lat = item.get("latitude")
+        item_lng = item.get("longitude")
+        if item_lat is None or item_lng is None:
+            continue
+        if not (
+            bounds["lat_min"] <= float(item_lat) <= bounds["lat_max"]
+            and bounds["lng_min"] <= float(item_lng) <= bounds["lng_max"]
+        ):
+            continue
+
+        distance_km = calculate_distance_km(float(lat), float(lng), float(item_lat), float(item_lng))
+        if distance_km <= float(radius_km):
+            next_item = dict(item)
+            next_item["distance_km"] = distance_km
+            filtered.append(next_item)
+
+    return filtered
+
+
+def _search_response_schema(name: str):
+    return inline_serializer(
+        name=name,
+        fields={
+            "count": serializers.IntegerField(),
+            "total_pages": serializers.IntegerField(),
+            "current_page": serializers.IntegerField(),
+            "page_size": serializers.IntegerField(),
+            "next": serializers.CharField(allow_null=True, required=False),
+            "previous": serializers.CharField(allow_null=True, required=False),
+            "results": ListingSearchResultSerializer(many=True),
+            "search_center": inline_serializer(
+                name=f"{name}Center",
+                fields={
+                    "lat": serializers.DecimalField(max_digits=9, decimal_places=6),
+                    "lng": serializers.DecimalField(max_digits=9, decimal_places=6),
+                },
+            ),
+            "applied_radius_km": serializers.FloatField(required=False),
+        },
+    )
+
+
+def _attach_search_context(response: Response, *, lat=None, lng=None, radius_km=None) -> Response:
+    if lat is not None and lng is not None:
+        response.data["search_center"] = {"lat": lat, "lng": lng}
+        response.data["applied_radius_km"] = float(radius_km)
+    return response
+
+
+def _cache_key_for_map_pins(query_params) -> str:
+    normalized_items = sorted((key, str(value)) for key, value in query_params.items())
+    key_payload = "&".join(f"{key}={value}" for key, value in normalized_items)
+    return f"listing:pins:{hashlib.sha256(key_payload.encode('utf-8')).hexdigest()}"
+
+
+def _build_discovery_payload(listing_type: str, *, lat=None, lng=None, radius_km=None, bounds=None, mode="standard"):
+    listings = []
+    for current_type, queryset in _discovery_querysets(listing_type):
+        if mode == "nearby":
+            near_items = find_listings_near(float(lat), float(lng), float(radius_km), queryset)
+            if not near_items:
+                continue
+            ids = [uuid.UUID(item["id"]) for item in near_items]
+            object_map = queryset.in_bulk(ids)
+            for item in near_items:
+                obj = object_map.get(uuid.UUID(item["id"]))
+                if obj is None:
+                    continue
+                listings.append(
+                    _normalize_discovery_listing(
+                        obj,
+                        current_type,
+                        distance_km=item["distance_km"],
+                    )
+                )
+            continue
+
+        filtered_queryset = queryset
+        if bounds is not None:
+            filtered_queryset = filtered_queryset.filter(
+                latitude__gte=bounds["south"],
+                latitude__lte=bounds["north"],
+                longitude__gte=bounds["west"],
+                longitude__lte=bounds["east"],
+            )
+        else:
+            filtered_queryset = filtered_queryset.filter(latitude__isnull=False, longitude__isnull=False)
+
+        for listing in filtered_queryset:
+            listings.append(_normalize_discovery_listing(listing, current_type))
+
+    return listings
+
+
+def _paginate_discovery_listings(request, listings, serializer_class):
+    paginator = StandardResultsSetPagination()
+    page = paginator.paginate_queryset(listings, request)
+    serializer = serializer_class(page, many=True, context={"request": request})
+    return paginator.get_paginated_response(serializer.data)
+
+
+def _top_pin_candidates(listings):
+    return listings[:200]
+
+
+def _build_feed_response(request, listing_type: str, page=None):
+    user = request.user
+    has_location = (
+        user
+        and user.is_authenticated
+        and getattr(user, "location_permission_granted", False)
+        and getattr(user, "last_known_lat", None) is not None
+        and getattr(user, "last_known_lng", None) is not None
+    )
+
+    if has_location:
+        cache_key = _normalized_discovery_cache_key(
+            "listing:feed:proximity",
+            {
+                "user_id": user.id,
+                "lat": _rounded_cache_value(user.last_known_lat),
+                "lng": _rounded_cache_value(user.last_known_lng),
+                "radius_km": Decimal(str(getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10))),
+                "listing_type": listing_type,
+                "page": page or request.query_params.get("page", 1),
+            },
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        listings = _build_discovery_payload(
+            listing_type,
+            lat=user.last_known_lat,
+            lng=user.last_known_lng,
+            radius_km=Decimal(str(getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10))),
+            mode="nearby",
+        )
+        listings.sort(key=lambda item: item["distance_km"])
+        response = _paginate_discovery_listings(request, listings, ProximityListingSerializer)
+        cache.set(cache_key, response.data, DISCOVERY_CACHE_TTL)
+        return response
+
+    cache_key = _normalized_discovery_cache_key(
+        "listing:feed:standard",
+        {
+            "listing_type": listing_type,
+            "page": page or request.query_params.get("page", 1),
+        },
+    )
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return Response(cached)
+
+    listings = _build_discovery_payload(listing_type, mode="standard")
+    listings.sort(key=lambda item: item["_created_at"], reverse=True)
+    response = _paginate_discovery_listings(request, listings, DiscoveryListingSerializer)
+    cache.set(cache_key, response.data, MAP_PINS_CACHE_TTL)
+    return response
 
 
 def _with_booking_no_refund_policy(payload, *, cancellation_effect="booking_cancelled"):
@@ -3818,6 +4371,350 @@ class InventoryGridView(APIView):
             return Response(grid_data)
         except Exception as e:
             return Response({"error": str(e)}, status=400)
+
+
+def _paginated_discovery_response_schema(name: str, result_serializer):
+    return inline_serializer(
+        name=name,
+        fields={
+            "count": serializers.IntegerField(),
+            "total_pages": serializers.IntegerField(),
+            "current_page": serializers.IntegerField(),
+            "page_size": serializers.IntegerField(),
+            "next": serializers.CharField(allow_null=True, required=False),
+            "previous": serializers.CharField(allow_null=True, required=False),
+            "results": result_serializer(many=True),
+        },
+    )
+
+
+def _normalized_discovery_cache_key(prefix: str, payload: dict) -> str:
+    normalized = []
+    for key in sorted(payload.keys()):
+        value = payload[key]
+        if isinstance(value, Decimal):
+            value = f"{value}"
+        normalized.append(f"{key}:{value}")
+    digest = hashlib.sha256("|".join(normalized).encode("utf-8")).hexdigest()
+    return f"{prefix}:{digest}"
+
+
+class NearbyListingsView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    @extend_schema(
+        tags=["Listings"],
+        summary="Find listings nearby",
+        parameters=[
+            OpenApiParameter("lat", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("lng", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("radius_km", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["hotel", "guesthouse", "property_rental", "car_sales", "all"]),
+            OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
+        ],
+        responses={200: _paginated_discovery_response_schema("NearbyListingsResponse", ProximityListingSerializer), 400: OpenApiTypes.OBJECT},
+    )
+    def get(self, request):
+        query_serializer = NearbyListingsQuerySerializer(data=request.query_params)
+        query_serializer.is_valid(raise_exception=True)
+        params = query_serializer.validated_data
+
+        cache_key = _normalized_discovery_cache_key(
+            "listing:nearby",
+            {
+                "lat": _rounded_cache_value(params["lat"]),
+                "lng": _rounded_cache_value(params["lng"]),
+                "radius_km": params.get("radius_km", Decimal(str(getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10)))),
+                "listing_type": params.get("listing_type", "all"),
+                "page": params.get("page") or request.query_params.get("page", 1),
+            },
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        listings = _build_discovery_payload(
+            params.get("listing_type", "all"),
+            lat=params["lat"],
+            lng=params["lng"],
+            radius_km=params.get("radius_km", Decimal(str(getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10)))),
+            mode="nearby",
+        )
+        listings.sort(key=lambda item: item["distance_km"])
+        response = _paginate_discovery_listings(request, listings, ProximityListingSerializer)
+        cache.set(cache_key, response.data, DISCOVERY_CACHE_TTL)
+        return response
+
+
+class WithinBoundsListingsView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    @extend_schema(
+        tags=["Listings"],
+        summary="Find listings within viewport bounds",
+        parameters=[
+            OpenApiParameter("north", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("south", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("east", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("west", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["hotel", "guesthouse", "property_rental", "car_sales", "all"]),
+            OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
+        ],
+        responses={200: _paginated_discovery_response_schema("WithinBoundsListingsResponse", DiscoveryListingSerializer), 400: OpenApiTypes.OBJECT},
+    )
+    def get(self, request):
+        query_serializer = BoundsListingsQuerySerializer(data=request.query_params)
+        query_serializer.is_valid(raise_exception=True)
+        params = query_serializer.validated_data
+        bounds = {
+            "north": params["north"],
+            "south": params["south"],
+            "east": params["east"],
+            "west": params["west"],
+        }
+
+        cache_key = _normalized_discovery_cache_key(
+            "listing:bounds",
+            {
+                "north": _rounded_cache_value(bounds["north"]),
+                "south": _rounded_cache_value(bounds["south"]),
+                "east": _rounded_cache_value(bounds["east"]),
+                "west": _rounded_cache_value(bounds["west"]),
+                "listing_type": params.get("listing_type", "all"),
+                "page": params.get("page") or request.query_params.get("page", 1),
+            },
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        listings = _build_discovery_payload(
+            params.get("listing_type", "all"),
+            bounds=bounds,
+            mode="standard",
+        )
+        listings.sort(key=lambda item: item["_created_at"], reverse=True)
+        response = _paginate_discovery_listings(request, listings, DiscoveryListingSerializer)
+        cache.set(cache_key, response.data, MAP_PINS_CACHE_TTL)
+        return response
+
+
+class MapPinsView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    @extend_schema(
+        tags=["Listings"],
+        summary="Get lightweight map pins",
+        parameters=[
+            OpenApiParameter("lat", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("lng", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("radius_km", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("north", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("south", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("east", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("west", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["hotel", "guesthouse", "property_rental", "car_sales", "all"]),
+        ],
+        responses={200: MapPinSerializer(many=True), 400: OpenApiTypes.OBJECT},
+    )
+    def get(self, request):
+        query_serializer = MapPinsQuerySerializer(data=request.query_params)
+        query_serializer.is_valid(raise_exception=True)
+        params = query_serializer.validated_data
+        has_lat_lng = params.get("lat") is not None and params.get("lng") is not None
+
+        cache_key = _normalized_discovery_cache_key(
+            "listing:pins",
+            {
+                "mode": "nearby" if has_lat_lng else "bounds",
+                "lat": _rounded_cache_value(params["lat"]) if has_lat_lng else "",
+                "lng": _rounded_cache_value(params["lng"]) if has_lat_lng else "",
+                "radius_km": params.get("radius_km", Decimal(str(getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10)))) if has_lat_lng else "",
+                "north": _rounded_cache_value(params["north"]) if not has_lat_lng else "",
+                "south": _rounded_cache_value(params["south"]) if not has_lat_lng else "",
+                "east": _rounded_cache_value(params["east"]) if not has_lat_lng else "",
+                "west": _rounded_cache_value(params["west"]) if not has_lat_lng else "",
+                "listing_type": params.get("listing_type", "all"),
+            },
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        if has_lat_lng:
+            listings = _build_discovery_payload(
+                params.get("listing_type", "all"),
+                lat=params["lat"],
+                lng=params["lng"],
+                radius_km=params.get("radius_km", Decimal(str(getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10)))),
+                mode="nearby",
+            )
+            listings.sort(key=lambda item: item["distance_km"])
+        else:
+            bounds = {
+                "north": params["north"],
+                "south": params["south"],
+                "east": params["east"],
+                "west": params["west"],
+            }
+            listings = _build_discovery_payload(
+                params.get("listing_type", "all"),
+                bounds=bounds,
+                mode="standard",
+            )
+            listings.sort(key=lambda item: item["_created_at"], reverse=True)
+
+        pins = [
+            build_map_pin(listing, listing["listing_type"])
+            for listing in _top_pin_candidates(listings)
+        ]
+        response = Response(MapPinSerializer(pins, many=True, context={"request": request}).data)
+        cache.set(cache_key, response.data, MAP_PINS_CACHE_TTL)
+        return response
+
+
+class FeedListingsView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    @extend_schema(
+        tags=["Listings"],
+        summary="Get standard or proximity feed",
+        parameters=[
+            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["hotel", "guesthouse", "property_rental", "car_sales", "all"]),
+            OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
+        ],
+        responses={
+            200: _paginated_discovery_response_schema("FeedListingsResponse", ProximityListingSerializer),
+            400: OpenApiTypes.OBJECT,
+        },
+    )
+    def get(self, request):
+        query_serializer = FeedListingsQuerySerializer(data=request.query_params)
+        query_serializer.is_valid(raise_exception=True)
+        params = query_serializer.validated_data
+        return _build_feed_response(
+            request,
+            params.get("listing_type", "all"),
+            page=params.get("page"),
+        )
+
+
+class ListingSearchView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    @extend_schema(
+        tags=["Listings"],
+        summary="Search listings with optional radius context",
+        parameters=[
+            OpenApiParameter("q", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("lat", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("lng", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("radius_km", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("sort_by", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["distance", "price", "rating", "newest", "relevance"]),
+            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["hotel", "guesthouse", "property_rental", "car_sales", "all"]),
+            OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
+        ],
+        responses={200: _search_response_schema("ListingSearchResponse"), 400: OpenApiTypes.OBJECT},
+    )
+    def get(self, request):
+        query_serializer = ListingSearchQuerySerializer(data=request.query_params)
+        query_serializer.is_valid(raise_exception=True)
+        params = query_serializer.validated_data
+
+        query = (params.get("q") or "").strip()
+        lat = params.get("lat")
+        lng = params.get("lng")
+        radius_km = params.get("radius_km", Decimal(str(getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10))))
+        listing_type = params.get("listing_type", "all")
+        has_location = lat is not None and lng is not None
+
+        if not query and not has_location:
+            return _build_feed_response(request, listing_type, page=params.get("page"))
+
+        if query:
+            listings = _filter_search_payload(listing_type, query)
+        else:
+            listings = _build_discovery_payload(
+                listing_type,
+                lat=lat,
+                lng=lng,
+                radius_km=radius_km,
+                mode="nearby",
+            )
+
+        if has_location and query:
+            listings = _apply_radius_to_payload(listings, lat, lng, radius_km)
+
+        sort_by = params.get("sort_by") or ("distance" if has_location else "relevance")
+        listings = _apply_search_sort(listings, sort_by, has_location=has_location)
+        response = _paginate_discovery_listings(request, listings, ListingSearchResultSerializer)
+        return _attach_search_context(response, lat=lat, lng=lng, radius_km=radius_km) if has_location else response
+
+
+class ListingSearchSuggestionsView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = []
+
+    @extend_schema(
+        tags=["Listings"],
+        summary="Search suggestions for listing discovery",
+        parameters=[
+            OpenApiParameter("q", OpenApiTypes.STR, OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("lat", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("lng", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("limit", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
+            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["hotel", "guesthouse", "property_rental", "car_sales", "all"]),
+        ],
+        responses={200: SearchSuggestionSerializer(many=True), 400: OpenApiTypes.OBJECT},
+    )
+    def get(self, request):
+        query_serializer = SearchSuggestionsQuerySerializer(data=request.query_params)
+        query_serializer.is_valid(raise_exception=True)
+        params = query_serializer.validated_data
+
+        query = params["q"].strip()
+        lat = params.get("lat")
+        lng = params.get("lng")
+        limit = params.get("limit", 5)
+        listing_type = params.get("listing_type", "all")
+
+        cache_key = _normalized_discovery_cache_key(
+            "search:suggestions",
+            {
+                "q": query.lower(),
+                "lat": _rounded_cache_value(lat) if lat is not None else "",
+                "lng": _rounded_cache_value(lng) if lng is not None else "",
+                "limit": limit,
+                "listing_type": listing_type,
+            },
+        )
+        cached = cache.get(cache_key)
+        if cached is not None:
+            return Response(cached)
+
+        suggestions = _filter_search_payload(listing_type, query)
+        if lat is not None and lng is not None:
+            suggestions = _apply_radius_to_payload(
+                suggestions,
+                lat,
+                lng,
+                Decimal(str(getattr(settings, "DEFAULT_PROXIMITY_RADIUS_KM", 10))),
+            )
+
+        suggestions = _apply_search_sort(
+            suggestions,
+            "distance" if lat is not None and lng is not None else "relevance",
+            has_location=lat is not None and lng is not None,
+        )[:limit]
+
+        payload = SearchSuggestionSerializer(suggestions, many=True, context={"request": request}).data
+        cache.set(cache_key, payload, 60)
+        return Response(payload)
 
 
     

@@ -23,6 +23,7 @@ from apps.listing.models import (
     CarSaleListing,
     ContactRevealRequest,
     PropertyContactRevealRequest,
+    PropertyListing,
     PropertyRentalAvailability,
     PropertyRentalBooking,
     PropertySaleListing,
@@ -377,6 +378,10 @@ def test_flutter_contract_property_sales_connector(auth_client, user, company):
         "base_price",
         "currency",
         "address",
+        "latitude",
+        "longitude",
+        "formatted_address",
+        "place_id",
         "property_type",
         "bedrooms",
         "bathrooms",
@@ -416,6 +421,220 @@ def test_flutter_contract_property_sales_connector(auth_client, user, company):
     assert payload["reveal_request"]["id"] == str(reveal_request.id)
     for key in ["seller_contact_name", "seller_phone", "seller_email", "off_platform_notice"]:
         assert key in payload["contact"]
+
+
+def test_flutter_contract_listing_nearby(api_client, hotel):
+    hotel.latitude = Decimal("9.000000")
+    hotel.longitude = Decimal("38.000000")
+    hotel.formatted_address = "Nearby hotel address"
+    hotel.place_id = "nearby-hotel-place"
+    hotel.save(update_fields=["latitude", "longitude", "formatted_address", "place_id", "updated_at"])
+
+    response = api_client.get(
+        "/api/v1/listing/nearby/",
+        {"lat": "9.000000", "lng": "38.000000", "radius_km": "1", "listing_type": "hotel"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["results"]
+    item = data["results"][0]
+    for key in ["id", "listing_type", "title", "latitude", "longitude", "formatted_address", "price_preview", "currency", "distance_km"]:
+        assert key in item
+
+
+def test_flutter_contract_listing_map_pins(api_client, hotel):
+    hotel.latitude = Decimal("9.000000")
+    hotel.longitude = Decimal("38.000000")
+    hotel.formatted_address = "Map pin hotel address"
+    hotel.place_id = "map-pin-hotel-place"
+    hotel.save(update_fields=["latitude", "longitude", "formatted_address", "place_id", "updated_at"])
+
+    response = api_client.get(
+        "/api/v1/listing/map-pins/",
+        {"lat": "9.000000", "lng": "38.000000", "radius_km": "1", "listing_type": "hotel"},
+    )
+
+    assert response.status_code == 200
+    pins = response.json()
+    assert pins
+    pin = pins[0]
+    for key in ["id", "listing_type", "latitude", "longitude", "title", "price_preview", "thumbnail_url", "rating"]:
+        assert key in pin
+    assert "distance_km" not in pin
+    assert "formatted_address" not in pin
+
+
+def test_flutter_contract_listing_feed_proximity(auth_client, user, hotel):
+    hotel.latitude = Decimal("9.000000")
+    hotel.longitude = Decimal("38.000000")
+    hotel.formatted_address = "Feed hotel address"
+    hotel.place_id = "feed-hotel-place"
+    hotel.save(update_fields=["latitude", "longitude", "formatted_address", "place_id", "updated_at"])
+
+    user.location_permission_granted = True
+    user.last_known_lat = Decimal("9.000000")
+    user.last_known_lng = Decimal("38.000000")
+    user.save(update_fields=["location_permission_granted", "last_known_lat", "last_known_lng", "updated_at"])
+
+    response = auth_client.get("/api/v1/listing/feed/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["results"]
+    assert "distance_km" in data["results"][0]
+
+
+def test_flutter_contract_listing_search_with_map_context(api_client, property_listing):
+    property_listing.title = "Flutter Search Listing"
+    property_listing.latitude = Decimal("9.000000")
+    property_listing.longitude = Decimal("38.000000")
+    property_listing.formatted_address = "Search listing address"
+    property_listing.place_id = "flutter-search-place"
+    property_listing.save(update_fields=["title", "latitude", "longitude", "formatted_address", "place_id", "updated_at"])
+
+    response = api_client.get(
+        "/api/v1/listing/search/",
+        {
+            "q": "Flutter Search",
+            "lat": "9.000000",
+            "lng": "38.000000",
+            "radius_km": "2",
+            "listing_type": "property_rental",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["results"]
+    assert "search_center" in data
+    for key in ["id", "listing_type", "title", "latitude", "longitude", "formatted_address", "distance_km"]:
+        assert key in data["results"][0]
+
+
+def test_flutter_contract_listing_search_suggestions(api_client, property_listing):
+    property_listing.title = "Suggestion Listing"
+    property_listing.latitude = Decimal("9.000000")
+    property_listing.longitude = Decimal("38.000000")
+    property_listing.formatted_address = "Suggestion listing address"
+    property_listing.place_id = "flutter-suggestion-place"
+    property_listing.save(update_fields=["title", "latitude", "longitude", "formatted_address", "place_id", "updated_at"])
+
+    response = api_client.get(
+        "/api/v1/listing/search/suggestions/",
+        {"q": "Suggestion", "listing_type": "property_rental"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload
+    for key in ["id", "listing_type", "title", "formatted_address", "price_preview", "distance_km", "latitude", "longitude"]:
+        assert key in payload[0]
+
+
+def test_flutter_contract_maps_autocomplete(auth_client):
+    with patch(
+        "apps.listing.maps_views.autocomplete_address",
+        return_value=[
+            {
+                "place_id": "place-123",
+                "description": "Bole Road, Addis Ababa, Ethiopia",
+                "main_text": "Bole Road",
+                "secondary_text": "Addis Ababa, Ethiopia",
+            }
+        ],
+    ):
+        response = auth_client.get(
+            "/api/v1/maps/autocomplete/",
+            {"input": "Bole", "session_token": "session-123"},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload
+    for key in ["place_id", "description", "main_text", "secondary_text"]:
+        assert key in payload[0]
+
+
+def test_flutter_contract_maps_place_detail(auth_client):
+    with patch(
+        "apps.listing.maps_views.get_place_detail",
+        return_value={
+            "lat": Decimal("9.012345"),
+            "lng": Decimal("38.765432"),
+            "formatted_address": "Bole Road, Addis Ababa, Ethiopia",
+            "place_id": "place-123",
+            "components": {"city": "Addis Ababa", "country": "Ethiopia"},
+        },
+    ):
+        response = auth_client.post(
+            "/api/v1/maps/place-detail/",
+            {"place_id": "place-123", "session_token": "session-123"},
+            format="json",
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    for key in ["lat", "lng", "formatted_address", "place_id", "components"]:
+        assert key in payload
+
+
+def test_flutter_contract_property_listing_create_with_place_id(company_client, company):
+    with patch(
+        "apps.listing.serializers.get_place_detail",
+        return_value={
+            "lat": Decimal("9.012345"),
+            "lng": Decimal("38.765432"),
+            "formatted_address": "Bole Road, Addis Ababa, Ethiopia",
+            "place_id": "place-123",
+            "components": {"city": "Addis Ababa", "country": "Ethiopia"},
+        },
+    ):
+        response = company_client.post(
+            "/api/v1/listing/properties/",
+            {
+                "title": "Flutter Property",
+                "description": "Created from Flutter contract test",
+                "images": [],
+                "base_price": "3000.00",
+                "currency": "ETB",
+                "company": str(company.id),
+                "address": {
+                    "street_line1": "Bole Road",
+                    "country": "Ethiopia",
+                    "city": "Addis Ababa",
+                    "sub_city": "Bole",
+                    "state": "Addis Ababa",
+                    "postal_code": "1000",
+                },
+                "property_type": PropertyListing.PropertyTypeChoices.APARTMENT,
+                "bedrooms": 2,
+                "bathrooms": 1,
+                "square_meters": 80,
+                "is_furnished": True,
+                "place_id": "place-123",
+                "session_token": "session-123",
+            },
+            format="json",
+        )
+
+    assert response.status_code == 201
+    payload = response.json()
+    for key in ["id", "latitude", "longitude", "formatted_address", "place_id"]:
+        assert key in payload
+
+
+def test_flutter_contract_account_location(auth_client):
+    response = auth_client.post(
+        "/api/v1/account/location/",
+        {"lat": "9.012345", "lng": "38.765432", "permission_granted": True},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    for key in ["lat", "lng", "location_updated_at", "location_permission_granted"]:
+        assert key in payload
 
 
 def test_flutter_contract_property_rental_booking(auth_client, property_listing):

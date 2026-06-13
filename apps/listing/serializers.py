@@ -57,6 +57,7 @@ from apps.listing.services import PriceService
 from apps.core.utils import get_display_currency, convert_currency
 from decimal import Decimal
 from datetime import timedelta 
+from services.maps import GeocodingError, get_place_detail
 
 
 
@@ -117,6 +118,225 @@ class CurrencyConversionMixin(metaclass=serializers.SerializerMetaclass):
 
 class PriceQuoteMixin(metaclass=serializers.SerializerMetaclass):
     price_quote = serializers.SerializerMethodField(help_text="Complete pricing breakdown including platform fees. Populated only when check_in/check_out dates are provided.")
+
+    @extend_schema_field(inline_serializer(
+        name="ListingPriceQuote",
+        fields={
+            "breakdown": inline_serializer(
+                name="ListingPriceQuoteBreakdownItem",
+                fields={
+                    "date": serializers.DateField(),
+                    "price_per_unit": serializers.CharField(),
+                    "units": serializers.IntegerField(),
+                    "daily_total": serializers.CharField(),
+                    "source": serializers.CharField(),
+                    "is_discounted": serializers.BooleanField(),
+                },
+                many=True,
+            ),
+            "daily_breakdown": inline_serializer(
+                name="ListingPriceQuoteDailyBreakdownItem",
+                fields={
+                    "date": serializers.DateField(),
+                    "price_per_unit": serializers.CharField(),
+                    "units": serializers.IntegerField(),
+                    "daily_total": serializers.CharField(),
+                    "source": serializers.CharField(),
+                    "is_discounted": serializers.BooleanField(),
+                },
+                many=True,
+            ),
+            "items_subtotal": serializers.CharField(),
+            "subtotal": serializers.CharField(),
+            "base_total": serializers.CharField(),
+            "platform_fee": serializers.CharField(),
+            "platform_fee_percentage": serializers.CharField(),
+            "total": serializers.CharField(),
+            "currency": serializers.CharField(),
+            "has_discount": serializers.BooleanField(),
+            "min_price_per_unit": serializers.CharField(),
+            "min_nightly_price": serializers.CharField(),
+        },
+    ))
+    def get_price_quote(self, obj) -> dict | None:
+        request = self.context.get('request')
+        if not request:
+            return None
+        
+        check_in = request.query_params.get('check_in')
+        check_out = request.query_params.get('check_out')
+        units = request.query_params.get('units', '1')
+        
+        if not (check_in and check_out):
+            return None
+        
+        try:
+            check_in_date = parse_date(check_in)
+            check_out_date = parse_date(check_out)
+            units_int = int(units)
+        except (ValueError, TypeError):
+            return None
+        
+        if not check_in_date or not check_out_date or check_out_date <= check_in_date or units_int < 1:
+            return None
+        
+        display_currency = get_display_currency(request)
+        source_currency = getattr(obj, 'currency', 'ETB')
+        guest_phone = request.query_params.get("guest_phone")
+        user_phone = getattr(request.user, "phone", None) if getattr(request, "user", None) and request.user.is_authenticated else None
+        phone_identity = guest_phone or user_phone
+        
+        try:
+            if hasattr(PriceService, 'resolve_price_details_batch'):
+                price_details_list = PriceService.resolve_price_details_batch(
+                    obj, check_in_date, check_out_date
+                )
+            else:
+                price_details_list = []
+                date_cursor = check_in_date
+                while date_cursor < check_out_date:
+                    detail = PriceService.resolve_price_detail(obj, date_cursor)
+                    detail['date'] = date_cursor
+                    price_details_list.append(detail)
+                    date_cursor += timedelta(days=1)
+        except Exception:
+            return None
+        
+        breakdown = []
+        subtotal = Decimal('0.00')
+        
+        for detail in price_details_list:
+            price_in_source = Decimal(str(detail['price_per_unit']))
+            
+            if display_currency and display_currency != source_currency:
+                try:
+                    price_converted = convert_currency(
+                        price_in_source,
+                        source_currency,
+                        display_currency
+                    )
+                except Exception:
+                    price_converted = price_in_source
+                    display_currency = source_currency
+            else:
+                price_converted = price_in_source
+            
+            daily_total = price_converted * units_int
+            subtotal += daily_total
+            
+            breakdown.append({
+                'date': detail['date'].isoformat(),
+                'price_per_unit': str(price_converted.quantize(Decimal('0.01'))),
+                'units': units_int,
+                'daily_total': str(daily_total.quantize(Decimal('0.01'))),
+                'source': detail.get('source', 'base'),
+                'is_discounted': detail.get('is_discounted', False)
+            })
+        
+        from apps.listing.services import get_effective_platform_fee_rate
+        fee_rate = get_effective_platform_fee_rate(phone=phone_identity)
+        platform_fee = subtotal * fee_rate
+        total = subtotal + platform_fee
+        
+        has_discount = any(item['is_discounted'] for item in breakdown)
+        
+        min_nightly_price = Decimal('0.00')
+        if breakdown:
+            min_nightly_price = min(Decimal(item['price_per_unit']) for item in breakdown)
+
+        return {
+            'breakdown': breakdown,
+            'daily_breakdown': breakdown,
+            'items_subtotal': str(subtotal.quantize(Decimal('0.01'))),
+            'subtotal': str(subtotal.quantize(Decimal('0.01'))),
+            'base_total': str(subtotal.quantize(Decimal('0.01'))),
+            'platform_fee': str(platform_fee.quantize(Decimal('0.01'))),
+            'platform_fee_percentage': str(fee_rate * 100),
+            'total': str(total.quantize(Decimal('0.01'))),
+            'currency': display_currency or source_currency,
+            'has_discount': has_discount,
+            'min_price_per_unit': str(min_nightly_price.quantize(Decimal('0.01'))),
+            'min_nightly_price': str(min_nightly_price.quantize(Decimal('0.01'))),
+            'units_count': len(breakdown)
+        }
+
+
+class PlaceResolutionMixin(metaclass=serializers.SerializerMetaclass):
+    place_id = serializers.CharField(required=False, allow_blank=True, write_only=True)
+    session_token = serializers.CharField(required=False, allow_blank=True, write_only=True)
+
+    def _resolve_place_detail(self, data):
+        place_id = (data.get("place_id") or "").strip()
+        session_token = (data.get("session_token") or "").strip()
+
+        if not place_id:
+            return data
+
+        if not session_token:
+            raise serializers.ValidationError(
+                {"session_token": "This field is required when place_id is provided."}
+            )
+
+        try:
+            detail = get_place_detail(place_id, session_token)
+        except GeocodingError as exc:
+            raise serializers.ValidationError({"place_id": str(exc)}) from exc
+
+        data["latitude"] = detail.get("lat")
+        data["longitude"] = detail.get("lng")
+        data["formatted_address"] = detail.get("formatted_address")
+        data["place_id"] = detail.get("place_id") or place_id
+        data["address_components"] = detail.get("components") or {}
+        data["_skip_async_geocoding"] = True
+        return data
+
+    def _pop_session_token(self, validated_data):
+        validated_data.pop("session_token", None)
+
+    def _pop_skip_async_geocoding(self, validated_data) -> bool:
+        return bool(validated_data.pop("_skip_async_geocoding", False))
+
+
+class AutocompleteResultSerializer(serializers.Serializer):
+    place_id = serializers.CharField(read_only=True)
+    description = serializers.CharField(read_only=True)
+    main_text = serializers.CharField(read_only=True)
+    secondary_text = serializers.CharField(read_only=True)
+
+
+class MapAddressComponentsSerializer(serializers.Serializer):
+    city = serializers.CharField(allow_null=True, required=False)
+    country = serializers.CharField(allow_null=True, required=False)
+    postcode = serializers.CharField(allow_null=True, required=False)
+    region = serializers.CharField(allow_null=True, required=False)
+
+
+class PlaceDetailSerializer(serializers.Serializer):
+    lat = serializers.DecimalField(max_digits=9, decimal_places=6, read_only=True)
+    lng = serializers.DecimalField(max_digits=9, decimal_places=6, read_only=True)
+    formatted_address = serializers.CharField(read_only=True)
+    place_id = serializers.CharField(read_only=True)
+    components = MapAddressComponentsSerializer(read_only=True)
+
+
+class MapAutocompleteQuerySerializer(serializers.Serializer):
+    input = serializers.CharField()
+    session_token = serializers.CharField()
+
+
+class MapPlaceDetailRequestSerializer(serializers.Serializer):
+    place_id = serializers.CharField()
+    session_token = serializers.CharField()
+
+
+class ReverseGeocodeQuerySerializer(serializers.Serializer):
+    lat = serializers.DecimalField(max_digits=9, decimal_places=6)
+    lng = serializers.DecimalField(max_digits=9, decimal_places=6)
+
+
+class ReverseGeocodeSerializer(serializers.Serializer):
+    formatted_address = serializers.CharField(read_only=True)
+    components = MapAddressComponentsSerializer(read_only=True)
 
     @extend_schema_field(inline_serializer(
         name="ListingPriceQuote",
@@ -391,6 +611,10 @@ class RoomListingResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin, se
             "images",
             "title",
             "description",
+            "latitude",
+            "longitude",
+            "formatted_address",
+            "place_id",
             "base_price",
             "currency",
             "booking_forward_window_days",
@@ -431,7 +655,7 @@ class RoomAddressField(FlexibleAddressField):
     pass
 
 
-class RoomListingSerializer(serializers.ModelSerializer):
+class RoomListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     address = RoomAddressField(required=False)
     images = serializers.ListField(child=serializers.ImageField())
     amenities = StringArrayField(
@@ -453,6 +677,8 @@ class RoomListingSerializer(serializers.ModelSerializer):
             "booking_forward_window_days",
             "address",
             "amenities",
+            "place_id",
+            "session_token",
             "number_of_guests",
             "total_units",
             "bed_type",
@@ -496,12 +722,17 @@ class RoomListingSerializer(serializers.ModelSerializer):
         except HotelProfile.DoesNotExist:
             raise serializers.ValidationError(f"Hotel with id {value} does not exist.")
 
+    def validate(self, data):
+        return self._resolve_place_detail(data)
+
     @transaction.atomic()
     def create(self, validated_data):
+        self._pop_session_token(validated_data)
         return ListingService.create_room_listing(validated_data)
 
     @transaction.atomic()
     def update(self, instance, validated_data):
+        self._pop_session_token(validated_data)
         kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
         if kept_image_ids is None and "kept_image_ids" in self.initial_data:
              kept_image_ids = self.initial_data["kept_image_ids"]
@@ -525,6 +756,10 @@ class GuestHouseRoomResponseSerializer(CurrencyConversionMixin, PriceQuoteMixin,
             "id",
             "title",
             "images",
+            "latitude",
+            "longitude",
+            "formatted_address",
+            "place_id",
             "base_price",
             "currency",
             "booking_forward_window_days",
@@ -565,6 +800,10 @@ class GuestHouseProfileResponseSerializer(serializers.ModelSerializer):
             "title",
             "description",
             "images",
+            "latitude",
+            "longitude",
+            "formatted_address",
+            "place_id",
             "amenities",
             "address",
             "rating",
@@ -605,7 +844,7 @@ class GuestHouseProfileResponseSerializer(serializers.ModelSerializer):
             return []
 
 
-class GuestHouseRoomSerializer(serializers.ModelSerializer):
+class GuestHouseRoomSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     images = serializers.ListField(child=serializers.ImageField(), required=False)
     amenities = StringArrayField(
         child=serializers.PrimaryKeyRelatedField(
@@ -626,6 +865,8 @@ class GuestHouseRoomSerializer(serializers.ModelSerializer):
             "currency",
             "booking_forward_window_days",
             "amenities",
+            "place_id",
+            "session_token",
             "number_of_guests",
             "total_units",
             "bed_type",
@@ -645,8 +886,13 @@ class GuestHouseRoomSerializer(serializers.ModelSerializer):
              raise serializers.ValidationError(f"Guest House with id {value} does not exist.")
         return value
 
+    def validate(self, data):
+        return self._resolve_place_detail(data)
+
     @transaction.atomic
     def create(self, validated_data):
+         self._pop_session_token(validated_data)
+         self._pop_skip_async_geocoding(validated_data)
          images = validated_data.pop("images", [])
          amenities = validated_data.pop("amenities", [])
          validated_data.setdefault("is_active", False)
@@ -666,6 +912,8 @@ class GuestHouseRoomSerializer(serializers.ModelSerializer):
 
     @transaction.atomic()
     def update(self, instance, validated_data):
+        self._pop_session_token(validated_data)
+        self._pop_skip_async_geocoding(validated_data)
         kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
         if kept_image_ids is None and "kept_image_ids" in self.initial_data:
             kept_image_ids = self.initial_data["kept_image_ids"]
@@ -682,7 +930,7 @@ class GuestHouseAmenitiesField(JsonSerializerField):
     pass
 
 
-class GuestHouseProfileSerializer(serializers.ModelSerializer):
+class GuestHouseProfileSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     address = FlexibleAddressField()
     images = serializers.ListField(child=serializers.ImageField())
     amenities = GuestHouseAmenitiesField()
@@ -709,6 +957,8 @@ class GuestHouseProfileSerializer(serializers.ModelSerializer):
             "website",
             "license",
             "logo",
+            "place_id",
+            "session_token",
         ]
 
     def validate_address(self, attr):
@@ -745,12 +995,13 @@ class GuestHouseProfileSerializer(serializers.ModelSerializer):
                 if indiv_obj != individual_owner:
                     raise serializers.ValidationError({"individual_owner": "You do not have permission to manage this profile."})
         
-        return data
+        return self._resolve_place_detail(data)
 
 
 
     @transaction.atomic
     def create(self, validated_data):
+        self._pop_session_token(validated_data)
         user = self.context['request'].user
         company = getattr(user, 'company', None) or getattr(user, 'profile', None)
         individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
@@ -771,6 +1022,7 @@ class GuestHouseProfileSerializer(serializers.ModelSerializer):
 
     @transaction.atomic()
     def update(self, instance, validated_data):
+        self._pop_session_token(validated_data)
         kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
         if kept_image_ids is None and "kept_image_ids" in self.initial_data:
              kept_image_ids = self.initial_data["kept_image_ids"]
@@ -1149,6 +1401,10 @@ class CarListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, ser
             "title",
             "description",
             "images",
+            "latitude",
+            "longitude",
+            "formatted_address",
+            "place_id",
             "base_price",
             "booking_forward_window_days",
             "is_active",
@@ -1236,6 +1492,10 @@ class CarSaleListingResponseSerializer(CurrencyConversionMixin, serializers.Mode
             "title",
             "description",
             "images",
+            "latitude",
+            "longitude",
+            "formatted_address",
+            "place_id",
             "base_price",
             "currency",
             "brand",
@@ -1295,7 +1555,7 @@ class CarSaleListingResponseSerializer(CurrencyConversionMixin, serializers.Mode
         }
 
 
-class CarSaleListingSerializer(serializers.ModelSerializer):
+class CarSaleListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     images = serializers.ListField(
         child=serializers.ImageField(),
         write_only=True,
@@ -1326,6 +1586,8 @@ class CarSaleListingSerializer(serializers.ModelSerializer):
             "seller_phone",
             "seller_email",
             "reveal_fee",
+            "place_id",
+            "session_token",
         ]
 
     def validate_currency(self, value):
@@ -1366,15 +1628,32 @@ class CarSaleListingSerializer(serializers.ModelSerializer):
         if reveal_fee <= 0:
             raise serializers.ValidationError({"reveal_fee": "Reveal fee must be greater than 0."})
 
-        return data
+        return self._resolve_place_detail(data)
 
     @transaction.atomic
     def create(self, validated_data):
+        self._pop_session_token(validated_data)
         images = validated_data.pop("images", [])
+        self._pop_skip_async_geocoding(validated_data)
         validated_data.setdefault("is_active", False)
         instance = CarSaleListing.objects.create(**validated_data)
         if images:
             ImageCreationService.create_images(instance, images)
+        return instance
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        self._pop_session_token(validated_data)
+        self._pop_skip_async_geocoding(validated_data)
+        images = validated_data.pop("images", [])
+        kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
+        if kept_image_ids is None and "kept_image_ids" in self.initial_data:
+            kept_image_ids = self.initial_data["kept_image_ids"]
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        ListingService._update_images(instance, images, kept_image_ids)
         return instance
 
     def to_representation(self, instance):
@@ -1427,6 +1706,10 @@ class PropertySaleListingResponseSerializer(CurrencyConversionMixin, serializers
             "title",
             "description",
             "images",
+            "latitude",
+            "longitude",
+            "formatted_address",
+            "place_id",
             "base_price",
             "currency",
             "company",
@@ -1484,7 +1767,7 @@ class PropertySaleListingResponseSerializer(CurrencyConversionMixin, serializers
         }
 
 
-class PropertySaleListingSerializer(serializers.ModelSerializer):
+class PropertySaleListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     address = FlexibleAddressField()
     images = serializers.ListField(
         child=serializers.ImageField(),
@@ -1514,6 +1797,8 @@ class PropertySaleListingSerializer(serializers.ModelSerializer):
             "seller_phone",
             "seller_email",
             "reveal_fee",
+            "place_id",
+            "session_token",
         ]
         extra_kwargs = {
             "company": {"required": False, "allow_null": True},
@@ -1564,12 +1849,14 @@ class PropertySaleListingSerializer(serializers.ModelSerializer):
         if reveal_fee <= 0:
             raise serializers.ValidationError({"reveal_fee": "Reveal fee must be greater than 0."})
 
-        return data
+        return self._resolve_place_detail(data)
 
     @transaction.atomic
     def create(self, validated_data):
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address")
+        self._pop_session_token(validated_data)
+        skip_async_geocoding = self._pop_skip_async_geocoding(validated_data)
         request = self.context.get("request")
         request_user = getattr(request, "user", None)
 
@@ -1589,6 +1876,28 @@ class PropertySaleListingSerializer(serializers.ModelSerializer):
         instance = PropertySaleListing.objects.create(**validated_data)
         if images:
             ImageCreationService.create_images(instance, images)
+        ListingService.schedule_geocoding(instance, should_dispatch=not skip_async_geocoding)
+        return instance
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        self._pop_session_token(validated_data)
+        skip_async_geocoding = self._pop_skip_async_geocoding(validated_data)
+        images = validated_data.pop("images", [])
+        address_data = validated_data.pop("address", None)
+        kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
+        if kept_image_ids is None and "kept_image_ids" in self.initial_data:
+            kept_image_ids = self.initial_data["kept_image_ids"]
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if address_data:
+            ListingService._update_address(instance, address_data)
+            ListingService.schedule_geocoding(instance, should_dispatch=not skip_async_geocoding)
+
+        ListingService._update_images(instance, images, kept_image_ids)
         return instance
 
     def to_representation(self, instance):
@@ -1600,7 +1909,7 @@ class EventSpaceAmenitiesField(JsonSerializerField):
     """Schema-only override for event space amenity ID lists."""
     pass
 
-class CarListingSerializer(serializers.ModelSerializer):
+class CarListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     images = serializers.ListField(
         child=serializers.ImageField(),
         write_only=True,
@@ -1633,6 +1942,8 @@ class CarListingSerializer(serializers.ModelSerializer):
             "requires_code_3",
             "requires_business_license",
             "pre_rental_requirements",
+            "place_id",
+            "session_token",
         ]
 
     def validate_currency(self, value):
@@ -1709,11 +2020,13 @@ class CarListingSerializer(serializers.ModelSerializer):
             if company_obj.status != CompanyProfile.StatusChoice.APPROVED:
                 raise serializers.ValidationError({"company": "Company profile is not approved."})
         
-        return data
+        return self._resolve_place_detail(data)
 
     @transaction.atomic
     def create(self, validated_data):
+        self._pop_session_token(validated_data)
         images = validated_data.pop("images", [])
+        self._pop_skip_async_geocoding(validated_data)
         validated_data.setdefault("is_active", False)
         
         car_listing_instance = CarListing.objects.create(**validated_data)
@@ -1725,6 +2038,21 @@ class CarListingSerializer(serializers.ModelSerializer):
         CarAvailabilityService.create_availability(car_listing_instance)
         
         return car_listing_instance
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        self._pop_session_token(validated_data)
+        self._pop_skip_async_geocoding(validated_data)
+        images = validated_data.pop("images", [])
+        kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
+        if kept_image_ids is None and "kept_image_ids" in self.initial_data:
+            kept_image_ids = self.initial_data["kept_image_ids"]
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        ListingService._update_images(instance, images, kept_image_ids)
+        return instance
 
     def to_representation(self, instance):
         return CarListingResponseSerializer(instance, context=self.context).data
@@ -2144,6 +2472,10 @@ class PropertyListingResponseSerializer(CurrencyConversionMixin, serializers.Mod
             "title",
             "description",
             "images",
+            "latitude",
+            "longitude",
+            "formatted_address",
+            "place_id",
             "base_price",
             "currency",
             "booking_forward_window_days",
@@ -2167,7 +2499,7 @@ class PropertyAddressField(FlexibleAddressField):
     pass
 
 
-class PropertyListingSerializer(serializers.ModelSerializer):
+class PropertyListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     address = PropertyAddressField()
     images = serializers.ListField(child=serializers.ImageField())
 
@@ -2187,6 +2519,8 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             "bathrooms",
             "square_meters",
             "is_furnished",
+            "place_id",
+            "session_token",
         ]
 
     def validate_currency(self, value):
@@ -2219,9 +2553,10 @@ class PropertyListingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"owner": "An owner is required."}
             )
-        return data
+        return self._resolve_place_detail(data)
 
     def create(self, validated_data):
+        self._pop_session_token(validated_data)
         request = self.context.get("request")
         request_user = getattr(request, "user", None)
         request_company = getattr(request_user, "company", None) or getattr(request_user, "profile", None)
@@ -2240,6 +2575,7 @@ class PropertyListingSerializer(serializers.ModelSerializer):
 
     @transaction.atomic()
     def update(self, instance, validated_data):
+        self._pop_session_token(validated_data)
         kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
         if kept_image_ids is None and "kept_image_ids" in self.initial_data:
              kept_image_ids = self.initial_data["kept_image_ids"]
@@ -2867,6 +3203,74 @@ class SearchResultSerializer(CurrencyConversionMixin, serializers.Serializer):
         # obj is usually a dict here from StaySearchView
         hid = obj.get("hotel_id") if isinstance(obj, dict) else getattr(obj, "id", None)
         return str(hid) in fav_ids
+
+
+DISCOVERY_LISTING_TYPE_CHOICES = (
+    ("hotel", "Hotel"),
+    ("guesthouse", "Guest House"),
+    ("property_rental", "Property Rental"),
+    ("car_sales", "Car Sales"),
+)
+
+
+class DiscoveryListingSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    listing_type = serializers.CharField()
+    title = serializers.CharField()
+    description = serializers.CharField(allow_blank=True, required=False, default="")
+    latitude = serializers.DecimalField(max_digits=9, decimal_places=6, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=9, decimal_places=6, allow_null=True)
+    formatted_address = serializers.CharField(allow_null=True, allow_blank=True, required=False, default=None)
+    place_id = serializers.CharField(allow_null=True, allow_blank=True, required=False, default=None)
+    price_preview = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        allow_null=True,
+        required=False,
+    )
+    currency = serializers.CharField(required=False, default="ETB")
+    thumbnail_url = serializers.CharField(allow_null=True, allow_blank=True, required=False, default=None)
+    rating = serializers.FloatField(allow_null=True, required=False, default=None)
+    is_verified = serializers.BooleanField(required=False, default=False)
+
+
+class ProximityListingSerializer(DiscoveryListingSerializer):
+    distance_km = serializers.FloatField()
+
+
+class ListingSearchResultSerializer(DiscoveryListingSerializer):
+    distance_km = serializers.FloatField(allow_null=True, required=False, default=None)
+
+
+class SearchSuggestionSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    listing_type = serializers.CharField()
+    title = serializers.CharField()
+    formatted_address = serializers.CharField(allow_null=True, allow_blank=True, required=False, default=None)
+    thumbnail_url = serializers.CharField(allow_null=True, allow_blank=True, required=False, default=None)
+    rating = serializers.FloatField(allow_null=True, required=False, default=None)
+    price_preview = serializers.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        allow_null=True,
+        required=False,
+    )
+    distance_km = serializers.FloatField(allow_null=True, required=False, default=None)
+    latitude = serializers.DecimalField(max_digits=9, decimal_places=6, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=9, decimal_places=6, allow_null=True)
+
+
+class MapPinSerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    listing_type = serializers.CharField()
+    latitude = serializers.DecimalField(max_digits=9, decimal_places=6, allow_null=True)
+    longitude = serializers.DecimalField(max_digits=9, decimal_places=6, allow_null=True)
+    title = serializers.CharField()
+    price_preview = serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True, required=False)
+    thumbnail_url = serializers.CharField(allow_null=True, allow_blank=True, required=False, default=None)
+    rating = serializers.FloatField(allow_null=True, required=False, default=None)
+
+
 class StayAvailabilityUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = StayAvailability
@@ -2886,6 +3290,10 @@ class EventSpaceListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMix
         fields = [
             "id",
             "images",
+            "latitude",
+            "longitude",
+            "formatted_address",
+            "place_id",
             "title",
             "description",
             "number_of_guests",
@@ -2904,7 +3312,7 @@ class EventSpaceListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMix
             "verified_by",
             "verification_note",
         ]
-class EventSpaceListingSerializer(serializers.ModelSerializer):
+class EventSpaceListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     """Serializer used for POST/PUT operations, relying on the service layer."""
     
     address = FlexibleAddressField(required=False)
@@ -2925,6 +3333,8 @@ class EventSpaceListingSerializer(serializers.ModelSerializer):
             "booking_forward_window_days",
             "address",
             "amenities",
+            "place_id",
+            "session_token",
             "number_of_guests",
             "total_units",
             "space_type",
@@ -2950,6 +3360,9 @@ class EventSpaceListingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Currency must be a 3-letter ISO code.")
         return value
 
+    def validate(self, data):
+        return self._resolve_place_detail(data)
+
     # The Address validation is handled by the nested AddressSerializer
     # if you use the standard nested serializer structure (as shown above).
     # If using JsonSerializerField for Address, you must re-implement the validate_address:
@@ -2964,11 +3377,13 @@ class EventSpaceListingSerializer(serializers.ModelSerializer):
         Delegates the complex creation process (including availability) 
         to the service layer.
         """
+        self._pop_session_token(validated_data)
         validated_data.setdefault("is_active", False)
         return ListingService.create_event_space_listing(validated_data)
 
     @transaction.atomic()
     def update(self, instance, validated_data):
+        self._pop_session_token(validated_data)
         kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
         if kept_image_ids is None and "kept_image_ids" in self.initial_data:
              kept_image_ids = self.initial_data["kept_image_ids"]

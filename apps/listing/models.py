@@ -8,8 +8,7 @@ from django.contrib.contenttypes.fields import GenericRelation
 from django.utils.translation import gettext_lazy as _
 from django.core.exceptions import ValidationError
 
-from apps.core.models import AbstractBaseModel, Address
-from apps.core.models import AbstractBaseModel, Address,Facility
+from apps.core.models import AbstractBaseModel, Address, Facility, GeoLocatedModel
 from apps.account.models import (
     CompanyProfile,
     HotelProfile,
@@ -40,7 +39,7 @@ def validate_days_of_week(value):
             raise ValidationError("each entry in days_of_week must be between 0 and 6 (Mon=0..Sun=6)")
 
 
-class BaseListing(AbstractBaseModel):
+class BaseListing(GeoLocatedModel):
     # images = models.ManyToManyField(ListingImage)
 
     images = GenericRelation(ListingImage, related_query_name="listings")

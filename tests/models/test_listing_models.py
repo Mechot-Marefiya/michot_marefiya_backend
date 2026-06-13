@@ -11,11 +11,13 @@ from django.core.exceptions import ValidationError
 from django.contrib.contenttypes.models import ContentType
 
 from apps.account.models import HotelProfile
+from apps.account.serializers import HotelProfileResponseSerializer
 from apps.listing.models import (
     AddonOffering,
     Booking,
     BookingItem,
     CarListing,
+    CarSaleListing,
     CarRental,
     CarRentalItem,
     EventSpaceListing,
@@ -25,8 +27,20 @@ from apps.listing.models import (
     GuestHouseProfile,
     GuestHouseRoom,
     RoomListing,
+    PropertyListing,
+    PropertySaleListing,
     SeasonalRate,
     TermsAndConditions,
+)
+from apps.listing.serializers import (
+    CarListingResponseSerializer,
+    CarSaleListingResponseSerializer,
+    EventSpaceListingResponseSerializer,
+    GuestHouseProfileResponseSerializer,
+    GuestHouseRoomResponseSerializer,
+    PropertyListingResponseSerializer,
+    PropertySaleListingResponseSerializer,
+    RoomListingResponseSerializer,
 )
 
 pytestmark = pytest.mark.django_db
@@ -186,3 +200,162 @@ def test_terms_and_conditions_save_deactivates_previous(hotel):
     second.refresh_from_db()
     assert first.is_active is False
     assert second.is_active is True
+
+
+def test_listing_models_include_nullable_coordinate_fields(
+    car_listing,
+    property_listing,
+    guest_house,
+    guest_house_room,
+    room,
+    event_space,
+    hotel,
+    company,
+    address,
+):
+    car_sale = CarSaleListing.objects.create(
+        company=company,
+        title="Sale Camry",
+        description="Sale listing",
+        base_price=Decimal("1200000.00"),
+        currency="ETB",
+        brand=CarListing.CarBrandChoices.TOYOTA,
+        model="Camry",
+        year=2020,
+        mileage=30000,
+        fuel_type=CarListing.FuelTypeChoices.PETROL,
+        transmission=CarListing.TransmissionChoices.AUTOMATIC,
+        condition=CarListing.ConditionChoices.USED,
+        car_class=CarListing.CarClassChoices.NORMAL,
+        seats=4,
+        seller_contact_name="Seller",
+        seller_phone="0911000001",
+        seller_email="seller@example.com",
+        reveal_fee=Decimal("100.00"),
+    )
+    property_sale = PropertySaleListing.objects.create(
+        company=company,
+        address=address,
+        title="Sale Villa",
+        description="Sale listing",
+        base_price=Decimal("3500000.00"),
+        currency="ETB",
+        property_type=PropertySaleListing.PropertyTypeChoices.VILLA,
+        bedrooms=4,
+        bathrooms=3,
+        square_meters=Decimal("180.00"),
+        land_size_square_meters=Decimal("240.00"),
+        is_furnished=True,
+        seller_contact_name="Seller",
+        seller_phone="0911000002",
+        seller_email="seller2@example.com",
+        reveal_fee=Decimal("150.00"),
+    )
+
+    instances = [
+        car_listing,
+        property_listing,
+        guest_house,
+        guest_house_room,
+        room,
+        event_space,
+        hotel,
+        car_sale,
+        property_sale,
+    ]
+
+    for instance in instances:
+        for field_name in ("latitude", "longitude", "formatted_address", "place_id", "address_components"):
+            field = instance._meta.get_field(field_name)
+            assert field.null is True
+            assert field.blank is True
+            assert getattr(instance, field_name) is None
+
+    for model in (PropertyListing, GuestHouseProfile, RoomListing, EventSpaceListing, HotelProfile, PropertySaleListing):
+        assert model._meta.get_field("address")
+
+
+@pytest.mark.parametrize(
+    ("serializer_class", "instance"),
+    [
+        (RoomListingResponseSerializer, "room"),
+        (GuestHouseRoomResponseSerializer, "guest_house_room"),
+        (GuestHouseProfileResponseSerializer, "guest_house"),
+        (CarListingResponseSerializer, "car_listing"),
+        (CarSaleListingResponseSerializer, "car_sale"),
+        (PropertyListingResponseSerializer, "property_listing"),
+        (PropertySaleListingResponseSerializer, "property_sale"),
+        (EventSpaceListingResponseSerializer, "event_space"),
+        (HotelProfileResponseSerializer, "hotel"),
+    ],
+)
+def test_listing_response_serializers_expose_coordinates(
+    serializer_class,
+    instance,
+    car_listing,
+    guest_house_room,
+    guest_house,
+    room,
+    event_space,
+    hotel,
+    property_listing,
+    company,
+    address,
+):
+    if instance == "car_sale":
+        instance = CarSaleListing.objects.create(
+            company=company,
+            title="Sale Camry",
+            description="Sale listing",
+            base_price=Decimal("1200000.00"),
+            currency="ETB",
+            brand=CarListing.CarBrandChoices.TOYOTA,
+            model="Camry",
+            year=2020,
+            mileage=30000,
+            fuel_type=CarListing.FuelTypeChoices.PETROL,
+            transmission=CarListing.TransmissionChoices.AUTOMATIC,
+            condition=CarListing.ConditionChoices.USED,
+            car_class=CarListing.CarClassChoices.NORMAL,
+            seats=4,
+            seller_contact_name="Seller",
+            seller_phone="0911000001",
+            seller_email="seller@example.com",
+            reveal_fee=Decimal("100.00"),
+        )
+    elif instance == "property_sale":
+        instance = PropertySaleListing.objects.create(
+            company=company,
+            address=address,
+            title="Sale Villa",
+            description="Sale listing",
+            base_price=Decimal("3500000.00"),
+            currency="ETB",
+            property_type=PropertySaleListing.PropertyTypeChoices.VILLA,
+            bedrooms=4,
+            bathrooms=3,
+            square_meters=Decimal("180.00"),
+            land_size_square_meters=Decimal("240.00"),
+            is_furnished=True,
+            seller_contact_name="Seller",
+            seller_phone="0911000002",
+            seller_email="seller2@example.com",
+            reveal_fee=Decimal("150.00"),
+        )
+    else:
+        instance = {
+            "room": room,
+            "guest_house_room": guest_house_room,
+            "guest_house": guest_house,
+            "car_listing": car_listing,
+            "property_listing": property_listing,
+            "event_space": event_space,
+            "hotel": hotel,
+        }[instance]
+
+    data = serializer_class(instance).data
+
+    assert data["latitude"] is None
+    assert data["longitude"] is None
+    assert data["formatted_address"] is None
+    assert data["place_id"] is None

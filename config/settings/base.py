@@ -45,6 +45,15 @@ OTP_TTL_SECONDS = OTP_EXPIRY_SECONDS
 OTP_MAX_ATTEMPTS = env("OTP_MAX_ATTEMPTS", default=5, cast=int)
 OTP_COOLDOWN_SECONDS = env("OTP_COOLDOWN_SECONDS", default=60, cast=int)
 OTP_REDIS_KEY_PREFIX = env("OTP_REDIS_KEY_PREFIX", default="otp")
+GOOGLE_MAPS_API_KEY = env("GOOGLE_MAPS_API_KEY", default="")
+GOOGLE_MAPS_GEOCODING_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+GOOGLE_MAPS_PLACES_AUTOCOMPLETE_URL = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
+GOOGLE_MAPS_PLACE_DETAIL_URL = "https://maps.googleapis.com/maps/api/place/details/json"
+DEFAULT_PROXIMITY_RADIUS_KM = env("DEFAULT_PROXIMITY_RADIUS_KM", default=10, cast=float)
+MAX_PROXIMITY_RADIUS_KM = env("MAX_PROXIMITY_RADIUS_KM", default=100, cast=float)
+GEOCODING_CACHE_TTL = env("GEOCODING_CACHE_TTL", default=86400, cast=int)
+PROXIMITY_CACHE_TTL = env("PROXIMITY_CACHE_TTL", default=300, cast=int)
+MAP_PINS_CACHE_TTL = env("MAP_PINS_CACHE_TTL", default=180, cast=int)
 
 
 # ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
@@ -130,6 +139,13 @@ TEMPLATES = [
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {"default": dj_database_url.parse(env("DATABASE_URL"))}
+
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": env("REDIS_URL", default="redis://redis:6379/1"),
+    }
+}
 
 
 # Password validation

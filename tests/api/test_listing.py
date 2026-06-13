@@ -278,6 +278,24 @@ def test_get_amenities_public_list_success(api_client):
     assert data["results"][0]["name"] == "WiFi"
 
 
+def test_room_listing_list_and_detail_expose_coordinates(api_client, room):
+    list_response = api_client.get("/api/v1/listing/rooms/")
+    assert list_response.status_code == 200
+    list_item = list_response.json()["results"][0]
+    assert list_item["formatted_address"] is None
+    assert list_item["latitude"] is None
+    assert list_item["longitude"] is None
+    assert list_item["place_id"] is None
+
+    detail_response = api_client.get(f"/api/v1/listing/rooms/{room.id}/")
+    assert detail_response.status_code == 200
+    detail = detail_response.json()
+    assert detail["latitude"] is None
+    assert detail["longitude"] is None
+    assert detail["formatted_address"] is None
+    assert detail["place_id"] is None
+
+
 def test_car_sales_happy_path_all_four_endpoints(api_client, auth_client, user, company, settings, monkeypatch):
     listing = _create_car_sale_listing(company)
 

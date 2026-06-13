@@ -63,6 +63,7 @@ from apps.account.serializers import (
     OtpRequestSerializer,
     OtpResponseSerializer,
     OtpVerifySerializer,
+    UserLocationSerializer,
     OwnerComplianceAgreementCreateSerializer,
     OwnerComplianceAgreementPatchSerializer,
     OwnerComplianceAgreementReadSerializer,
@@ -187,6 +188,24 @@ class OtpVerifyView(APIView):
             if result.user.role:
                 data["role"] = result.user.role.code
         return Response(data, status=status.HTTP_200_OK)
+
+
+@extend_schema(tags=["Account"])
+class UserLocationView(APIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = UserLocationSerializer
+
+    @extend_schema(
+        summary="Store user location",
+        description="Persist the latest client-reported location for proximity-aware experiences.",
+        request=UserLocationSerializer,
+        responses={200: UserLocationSerializer, 400: OpenApiTypes.OBJECT, 401: OpenApiTypes.OBJECT},
+    )
+    def post(self, request):
+        serializer = UserLocationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save(user=request.user)
+        return Response(UserLocationSerializer(user).data, status=status.HTTP_200_OK)
 
 
 @extend_schema(tags=["Identity & Auth"])

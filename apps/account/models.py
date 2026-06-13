@@ -10,7 +10,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib.contenttypes.fields import GenericForeignKey, GenericRelation
 from apps.account.managers import CustomUserManager
-from apps.core.models import AbstractBaseModel, Address, Facility
+from apps.core.models import AbstractBaseModel, Address, Facility, GeoLocatedModel
 
 
 def normalize_phone_number(phone: str | None) -> str:
@@ -56,6 +56,29 @@ class User(AbstractUser, AbstractBaseModel):
         null=True,
         blank=True,
         verbose_name=_("Phone Last Changed At"),
+    )
+    last_known_lat = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        verbose_name=_("Last Known Latitude"),
+    )
+    last_known_lng = models.DecimalField(
+        max_digits=9,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        verbose_name=_("Last Known Longitude"),
+    )
+    location_updated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Location Updated At"),
+    )
+    location_permission_granted = models.BooleanField(
+        default=False,
+        verbose_name=_("Location Permission Granted"),
     )
 
     role = models.ForeignKey(
@@ -473,7 +496,7 @@ class OwnerComplianceAgreement(AbstractBaseModel):
         return f"{self.owner}::{self.status}::{self.agreement_version}"
 
 
-class HotelProfile(AbstractBaseModel):
+class HotelProfile(GeoLocatedModel):
     # class CategoryChoice(models.TextChoices):
     #     HOTEL = "hotel", _("Hotel")
     #     PENSION = "pension", _("Pension")
