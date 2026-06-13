@@ -31,6 +31,7 @@ class _MockResponse:
 
 
 def test_get_maps_autocomplete_returns_suggestions(auth_client, settings, monkeypatch):
+    settings.GEOAPIFY_API_KEY = "test-key"
     monkeypatch.setattr(
         "apps.listing.maps_views.autocomplete_address",
         lambda input_text, session_token: [
@@ -52,7 +53,7 @@ def test_get_maps_autocomplete_returns_suggestions(auth_client, settings, monkey
     payload = response.json()
     assert payload[0]["place_id"] == "place-123"
     assert "description" in payload[0]
-    assert settings.GOOGLE_MAPS_API_KEY not in response.content.decode()
+    assert settings.GEOAPIFY_API_KEY not in response.content.decode()
 
 
 def test_get_maps_autocomplete_requires_auth(api_client):
@@ -88,24 +89,26 @@ def test_get_maps_autocomplete_returns_empty_list_on_failure(auth_client, monkey
 
 def test_post_maps_place_detail_returns_payload_and_uses_cache(auth_client, settings, monkeypatch):
     cache.clear()
+    settings.GEOAPIFY_API_KEY = "test-key"
     calls = {"count": 0}
 
     def _fake_get(url, params=None, timeout=5):
         calls["count"] += 1
         return _MockResponse(
             {
-                "status": "OK",
-                "result": {
-                    "place_id": "place-123",
-                    "formatted_address": "Bole Road, Addis Ababa, Ethiopia",
-                    "geometry": {"location": {"lat": 9.012345, "lng": 38.765432}},
-                    "address_components": [
-                        {"long_name": "Addis Ababa", "types": ["locality"]},
-                        {"long_name": "Addis Ababa", "types": ["administrative_area_level_1"]},
-                        {"long_name": "Ethiopia", "types": ["country"]},
-                        {"long_name": "1000", "types": ["postal_code"]},
-                    ],
-                },
+                "features": [
+                    {
+                        "properties": {
+                            "place_id": "place-123",
+                            "formatted": "Bole Road, Addis Ababa, Ethiopia",
+                            "city": "Addis Ababa",
+                            "state": "Addis Ababa",
+                            "country": "Ethiopia",
+                            "postcode": "1000",
+                        },
+                        "geometry": {"type": "Point", "coordinates": [38.765432, 9.012345]},
+                    }
+                ],
             }
         )
 
@@ -123,7 +126,7 @@ def test_post_maps_place_detail_returns_payload_and_uses_cache(auth_client, sett
     assert data["formatted_address"] == "Bole Road, Addis Ababa, Ethiopia"
     assert Decimal(data["lat"]) == Decimal("9.012345")
     assert Decimal(data["lng"]) == Decimal("38.765432")
-    assert settings.GOOGLE_MAPS_API_KEY not in first.content.decode()
+    assert settings.GEOAPIFY_API_KEY not in first.content.decode()
 
 
 def test_post_maps_place_detail_requires_auth(api_client):
@@ -149,20 +152,18 @@ def test_post_maps_place_detail_missing_place_id_returns_400(auth_client):
 
 def test_get_maps_reverse_geocode_returns_payload(auth_client, settings, monkeypatch):
     cache.clear()
+    settings.GEOAPIFY_API_KEY = "test-key"
 
     def _fake_get(url, params=None, timeout=5):
         return _MockResponse(
             {
-                "status": "OK",
                 "results": [
                     {
-                        "formatted_address": "Bole Road, Addis Ababa, Ethiopia",
-                        "address_components": [
-                            {"long_name": "Addis Ababa", "types": ["locality"]},
-                            {"long_name": "Addis Ababa", "types": ["administrative_area_level_1"]},
-                            {"long_name": "Ethiopia", "types": ["country"]},
-                            {"long_name": "1000", "types": ["postal_code"]},
-                        ],
+                        "formatted": "Bole Road, Addis Ababa, Ethiopia",
+                        "city": "Addis Ababa",
+                        "state": "Addis Ababa",
+                        "country": "Ethiopia",
+                        "postcode": "1000",
                     }
                 ],
             }
@@ -179,7 +180,7 @@ def test_get_maps_reverse_geocode_returns_payload(auth_client, settings, monkeyp
     data = response.json()
     assert data["formatted_address"] == "Bole Road, Addis Ababa, Ethiopia"
     assert data["components"]["country"] == "Ethiopia"
-    assert settings.GOOGLE_MAPS_API_KEY not in response.content.decode()
+    assert settings.GEOAPIFY_API_KEY not in response.content.decode()
 
 
 def test_get_maps_reverse_geocode_requires_auth(api_client):

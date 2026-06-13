@@ -4940,10 +4940,13 @@ paths:
           type: string
           enum:
           - all
+          - car_rental
           - car_sales
+          - event_space
           - guesthouse
           - hotel
           - property_rental
+          - property_sales
       - in: query
         name: page
         schema:
@@ -6004,10 +6007,13 @@ paths:
           type: string
           enum:
           - all
+          - car_rental
           - car_sales
+          - event_space
           - guesthouse
           - hotel
           - property_rental
+          - property_sales
       - in: query
         name: lng
         schema:
@@ -6065,10 +6071,13 @@ paths:
           type: string
           enum:
           - all
+          - car_rental
           - car_sales
+          - event_space
           - guesthouse
           - hotel
           - property_rental
+          - property_sales
       - in: query
         name: lng
         schema:
@@ -7007,10 +7016,13 @@ paths:
           type: string
           enum:
           - all
+          - car_rental
           - car_sales
+          - event_space
           - guesthouse
           - hotel
           - property_rental
+          - property_sales
       - in: query
         name: lng
         schema:
@@ -7075,10 +7087,13 @@ paths:
           type: string
           enum:
           - all
+          - car_rental
           - car_sales
+          - event_space
           - guesthouse
           - hotel
           - property_rental
+          - property_sales
       - in: query
         name: lng
         schema:
@@ -7700,10 +7715,13 @@ paths:
           type: string
           enum:
           - all
+          - car_rental
           - car_sales
+          - event_space
           - guesthouse
           - hotel
           - property_rental
+          - property_sales
       - in: query
         name: north
         schema:
@@ -7789,7 +7807,7 @@ paths:
   /api/v1/maps/place-detail/:
     post:
       operationId: v1_maps_place_detail_create
-      summary: Resolve Google place detail
+      summary: Resolve place detail
       tags:
       - Maps
       requestBody:

@@ -2,7 +2,7 @@ import pytest
 from decimal import Decimal
 from unittest.mock import patch
 
-from apps.listing.models import CarListing, CarSaleListing
+from apps.listing.models import CarListing, CarSaleListing, PropertySaleListing
 
 pytestmark = pytest.mark.django_db
 
@@ -42,10 +42,54 @@ def _create_car_sale(company, *, title, lat, lng, suffix):
     )
 
 
-def test_nearby_returns_listings_with_distance_and_filtering(api_client, hotel, guest_house, property_listing, company):
+def _create_property_sale(company, *, title, lat, lng, suffix):
+    from apps.core.models import Address
+
+    return PropertySaleListing.objects.create(
+        company=company,
+        address=Address.objects.create(
+            street_line1=f"{title} Street",
+            city="Addis Ababa",
+            state="Addis Ababa",
+            country="Ethiopia",
+        ),
+        property_type=PropertySaleListing.PropertyTypeChoices.HOUSE,
+        bedrooms=3,
+        bathrooms=2,
+        square_meters=Decimal("180.00"),
+        land_size_square_meters=Decimal("240.00"),
+        is_furnished=True,
+        title=title,
+        description=f"{title} description",
+        base_price=Decimal("4500000.00") + Decimal(str(suffix)),
+        currency="ETB",
+        seller_contact_name="Seller",
+        seller_phone="0911000000",
+        seller_email="seller@example.com",
+        reveal_fee=Decimal("150.00"),
+        is_active=True,
+        latitude=Decimal(str(lat)),
+        longitude=Decimal(str(lng)),
+        formatted_address=f"{title} address",
+        place_id=f"{title.lower().replace(' ', '-')}-place",
+    )
+
+
+def test_nearby_returns_listings_with_distance_and_filtering(
+    api_client,
+    hotel,
+    guest_house,
+    property_listing,
+    event_space,
+    car_listing,
+    company,
+):
     _set_geo(hotel, 9.0000, 38.0000, "Hotel address", "hotel-place")
     _set_geo(guest_house, 9.0010, 38.0010, "Guesthouse address", "guesthouse-place")
     _set_geo(property_listing, 9.0020, 38.0020, "Property address", "property-place")
+    _set_geo(event_space, 9.0030, 38.0030, "Event space address", "event-space-place")
+    _set_geo(car_listing, 9.0040, 38.0040, "Car rental address", "car-rental-place")
+    _create_property_sale(company, title="Sale House", lat=9.0050, lng=38.0050, suffix=12)
     far_sale = _create_car_sale(company, title="Far Sale", lat=9.0500, lng=38.0500, suffix=99)
 
     response = api_client.get(
@@ -59,11 +103,57 @@ def test_nearby_returns_listings_with_distance_and_filtering(api_client, hotel, 
     assert data["results"]
     ids = {item["id"] for item in data["results"]}
     assert str(far_sale.id) not in ids
+    listing_types = {item["listing_type"] for item in data["results"]}
+    assert {
+        "hotel",
+        "guesthouse",
+        "event_space",
+        "property_rental",
+        "property_sales",
+        "car_rental",
+    } <= listing_types
     for item in data["results"]:
         assert "distance_km" in item
         assert "formatted_address" in item
         assert "latitude" in item
         assert "longitude" in item
+
+
+@pytest.mark.parametrize(
+    ("listing_type", "fixture_name"),
+    [
+        ("event_space", "event_space"),
+        ("property_rental", "property_listing"),
+        ("car_rental", "car_listing"),
+    ],
+)
+def test_nearby_supports_rental_listing_type_filters(api_client, request, listing_type, fixture_name):
+    listing = request.getfixturevalue(fixture_name)
+    _set_geo(listing, 9.0000, 38.0000, f"{listing_type} address", f"{listing_type}-place")
+
+    response = api_client.get(
+        "/api/v1/listing/nearby/",
+        {"lat": "9.0000", "lng": "38.0000", "radius_km": "2", "listing_type": listing_type},
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert results
+    assert all(item["listing_type"] == listing_type for item in results)
+
+
+def test_nearby_supports_property_sales_filter(api_client, company):
+    listing = _create_property_sale(company, title="Nearby Sale House", lat=9.0000, lng=38.0000, suffix=33)
+
+    response = api_client.get(
+        "/api/v1/listing/nearby/",
+        {"lat": "9.0000", "lng": "38.0000", "radius_km": "2", "listing_type": "property_sales"},
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert [item["id"] for item in results] == [str(listing.id)]
+    assert all(item["listing_type"] == "property_sales" for item in results)
 
 
 def test_nearby_excludes_listings_beyond_radius(api_client, hotel, company):

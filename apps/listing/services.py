@@ -449,16 +449,36 @@ class ListingService:
         return ListingService.get_or_create_address(address_data)
 
     @staticmethod
-    def _update_address(instance, address_data):
+    def _clear_geocoding_fields(instance):
+        update_fields = []
+        for field_name in ("latitude", "longitude", "formatted_address", "place_id", "address_components"):
+            if hasattr(instance, field_name):
+                setattr(instance, field_name, None)
+                update_fields.append(field_name)
+
+        if update_fields:
+            if hasattr(instance, "updated_at"):
+                update_fields.append("updated_at")
+            instance.save(update_fields=update_fields)
+
+    @staticmethod
+    def _update_address(instance, address_data, *, reset_geocoding: bool = True):
         if not address_data:
-            return
+            return False
 
         address = instance.address
         
         new_address = ListingService.get_or_create_address(address_data)
         if instance.address != new_address:
             instance.address = new_address
-            instance.save(update_fields=['address'])
+            update_fields = ["address"]
+            if hasattr(instance, "updated_at"):
+                update_fields.append("updated_at")
+            instance.save(update_fields=update_fields)
+            if reset_geocoding:
+                ListingService._clear_geocoding_fields(instance)
+            return True
+        return False
 
     @staticmethod
     def _update_images(instance, new_images, kept_image_ids):
@@ -491,7 +511,7 @@ class ListingService:
         instance.save()
         
         if address_data:
-            ListingService._update_address(instance, address_data)
+            ListingService._update_address(instance, address_data, reset_geocoding=not skip_async_geocoding)
             ListingGeocodingService.schedule(instance, should_dispatch=not skip_async_geocoding)
               
         if amenity_ids is not None:
@@ -515,7 +535,7 @@ class ListingService:
         instance.save()
         
         if address_data:
-            ListingService._update_address(instance, address_data)
+            ListingService._update_address(instance, address_data, reset_geocoding=not skip_async_geocoding)
             ListingGeocodingService.schedule(instance, should_dispatch=not skip_async_geocoding)
         
         if amenity_ids is not None:
@@ -540,7 +560,7 @@ class ListingService:
         instance.save()
         
         if address_data:
-            ListingService._update_address(instance, address_data)
+            ListingService._update_address(instance, address_data, reset_geocoding=not skip_async_geocoding)
             ListingGeocodingService.schedule(instance, should_dispatch=not skip_async_geocoding)
               
         if amenity_ids is not None:
@@ -561,7 +581,7 @@ class ListingService:
         instance.save()
         
         if address_data:
-            ListingService._update_address(instance, address_data)
+            ListingService._update_address(instance, address_data, reset_geocoding=not skip_async_geocoding)
             ListingGeocodingService.schedule(instance, should_dispatch=not skip_async_geocoding)
               
         ListingService._update_images(instance, images, kept_image_ids)
@@ -592,7 +612,7 @@ class ListingService:
                  ListingService._update_address(company, company_address_data)
 
         if address_data:
-            ListingService._update_address(instance, address_data)
+            ListingService._update_address(instance, address_data, reset_geocoding=not skip_async_geocoding)
             ListingGeocodingService.schedule(instance, should_dispatch=not skip_async_geocoding)
 
         if facility_ids is not None:

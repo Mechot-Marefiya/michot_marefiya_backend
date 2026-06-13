@@ -38,6 +38,13 @@ def _build_address_text(address) -> str:
     return ", ".join(str(part).strip() for part in parts if part and str(part).strip())
 
 
+def _build_listing_address_text(listing) -> str:
+    address_text = _build_address_text(getattr(listing, "address", None))
+    if address_text:
+        return address_text
+    return (getattr(listing, "formatted_address", None) or "").strip()
+
+
 def _resolve_model(model_label: str):
     if not model_label or "." not in model_label:
         return None
@@ -257,7 +264,7 @@ def geocode_listing_async(self, listing_id, model_label):
         logger.debug("Skipping geocoding for %s because coordinates already exist.", listing_id)
         return False
 
-    address_text = _build_address_text(getattr(listing, "address", None))
+    address_text = _build_listing_address_text(listing)
     if not address_text:
         logger.warning(
             "Geocoding skipped for %s because no address text could be built.",

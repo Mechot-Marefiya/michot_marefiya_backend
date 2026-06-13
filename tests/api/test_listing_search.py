@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from apps.listing.models import CarListing, CarSaleListing
+from apps.listing.models import CarListing, CarSaleListing, PropertySaleListing
 from tests.conftest import HotelProfileFactory, PropertyListingFactory
 
 
@@ -32,6 +32,39 @@ def _create_car_sale(company, *, title, lat=None, lng=None, suffix=1):
         title=title,
         description=f"{title} description",
         base_price=Decimal("25000.00") + Decimal(str(suffix)),
+        currency="ETB",
+        seller_contact_name="Seller",
+        seller_phone="0911000000",
+        seller_email="seller@example.com",
+        reveal_fee=Decimal("150.00"),
+        is_active=True,
+        latitude=Decimal(str(lat)) if lat is not None else None,
+        longitude=Decimal(str(lng)) if lng is not None else None,
+        formatted_address=f"{title} address" if lat is not None and lng is not None else None,
+        place_id=f"{title.lower().replace(' ', '-')}-place" if lat is not None and lng is not None else None,
+    )
+
+
+def _create_property_sale(company, *, title, lat=None, lng=None, suffix=1):
+    from apps.core.models import Address
+
+    return PropertySaleListing.objects.create(
+        company=company,
+        address=Address.objects.create(
+            street_line1=f"{title} Street",
+            city="Addis Ababa",
+            state="Addis Ababa",
+            country="Ethiopia",
+        ),
+        property_type=PropertySaleListing.PropertyTypeChoices.HOUSE,
+        bedrooms=3,
+        bathrooms=2,
+        square_meters=Decimal("180.00"),
+        land_size_square_meters=Decimal("240.00"),
+        is_furnished=True,
+        title=title,
+        description=f"{title} description",
+        base_price=Decimal("4500000.00") + Decimal(str(suffix)),
         currency="ETB",
         seller_contact_name="Seller",
         seller_phone="0911000000",
@@ -101,6 +134,24 @@ def test_listing_search_location_only_orders_by_distance(api_client, company):
     assert data["results"][0]["distance_km"] <= data["results"][1]["distance_km"]
     assert data["search_center"] == {"lat": 9.0, "lng": 38.0}
     assert data["applied_radius_km"] == 5.0
+
+
+def test_listing_search_all_includes_event_car_and_property_sale_categories(
+    api_client,
+    company,
+    event_space,
+    car_listing,
+):
+    _set_geo(event_space, 9.0000, 38.0000, "Atlas Event address", "atlas-event-place")
+    _set_geo(car_listing, 9.0010, 38.0010, "Atlas Car address", "atlas-car-place")
+    _create_car_sale(company, title="Atlas Sale Car", lat=9.0020, lng=38.0020, suffix=7)
+    _create_property_sale(company, title="Atlas Sale House", lat=9.0030, lng=38.0030, suffix=8)
+
+    response = api_client.get("/api/v1/listing/search/", {"q": "Atlas", "listing_type": "all"})
+
+    assert response.status_code == 200
+    listing_types = {item["listing_type"] for item in response.json()["results"]}
+    assert {"event_space", "car_rental", "car_sales", "property_sales"} <= listing_types
 
 
 def test_listing_search_keyword_plus_location_filters_and_excludes_missing_coordinates(api_client, company):

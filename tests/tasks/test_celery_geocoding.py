@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from apps.account.models import HotelProfile
 from apps.account.serializers import HotelProfileSerializer
-from apps.listing.models import PropertyListing, PropertySaleListing
+from apps.listing.models import CarListing, PropertyListing, PropertySaleListing
 from apps.listing.serializers import PropertySaleListingSerializer
 from apps.listing.services import ListingService
 from apps.listing.tasks import GEOCODING_RETRY_DELAYS, geocode_listing_async
@@ -139,6 +139,108 @@ def test_property_listing_update_with_address_change_queues_geocoding(
     assert calls == [(property_listing.id, f"{property_listing._meta.app_label}.{property_listing._meta.model_name}")]
 
 
+def test_property_listing_update_with_address_change_clears_stale_coordinates(
+    property_listing,
+    django_capture_on_commit_callbacks,
+    monkeypatch,
+):
+    property_listing.latitude = Decimal("9.111111")
+    property_listing.longitude = Decimal("38.111111")
+    property_listing.formatted_address = "Old Address"
+    property_listing.place_id = "old-place"
+    property_listing.address_components = {"city": "Old City"}
+    property_listing.save(
+        update_fields=[
+            "latitude",
+            "longitude",
+            "formatted_address",
+            "place_id",
+            "address_components",
+        ]
+    )
+
+    calls = []
+    monkeypatch.setattr(
+        "apps.listing.tasks.geocode_listing_async.delay",
+        lambda listing_id, model_label: calls.append((listing_id, model_label)),
+    )
+
+    with django_capture_on_commit_callbacks(execute=True):
+        ListingService.update_property_listing(
+            property_listing,
+            {"address": _address_payload(street="Kazanchis Avenue")},
+        )
+
+    property_listing.refresh_from_db()
+    assert property_listing.address.street_line1 == "Kazanchis Avenue"
+    assert property_listing.latitude is None
+    assert property_listing.longitude is None
+    assert property_listing.formatted_address is None
+    assert property_listing.place_id is None
+    assert property_listing.address_components is None
+    assert calls == [(property_listing.id, f"{property_listing._meta.app_label}.{property_listing._meta.model_name}")]
+
+
+def test_geocode_listing_async_updates_after_address_change_cleared_coordinates(
+    property_listing,
+    monkeypatch,
+):
+    property_listing.latitude = None
+    property_listing.longitude = None
+    property_listing.save(update_fields=["latitude", "longitude"])
+    monkeypatch.setattr(
+        "apps.listing.tasks.geocode_address",
+        lambda address: {
+            "lat": Decimal("8.998877"),
+            "lng": Decimal("38.554433"),
+            "formatted_address": "Kazanchis, Addis Ababa, Ethiopia",
+            "place_id": "geoapify-place-999",
+            "components": {"city": "Addis Ababa", "country": "Ethiopia"},
+        },
+    )
+
+    assert geocode_listing_async(
+        property_listing.id,
+        f"{property_listing._meta.app_label}.{property_listing._meta.model_name}",
+    ) is True
+
+    property_listing.refresh_from_db()
+    assert property_listing.latitude == Decimal("8.998877")
+    assert property_listing.longitude == Decimal("38.554433")
+    assert property_listing.formatted_address == "Kazanchis, Addis Ababa, Ethiopia"
+    assert property_listing.place_id == "geoapify-place-999"
+
+
+def test_geocode_listing_async_uses_formatted_address_for_addressless_car_listing(
+    car_listing,
+    monkeypatch,
+):
+    car_listing.latitude = None
+    car_listing.longitude = None
+    car_listing.formatted_address = "Bole, Addis Ababa, Ethiopia"
+    car_listing.save(update_fields=["latitude", "longitude", "formatted_address"])
+    monkeypatch.setattr(
+        "apps.listing.tasks.geocode_address",
+        lambda address: {
+            "lat": Decimal("9.010000"),
+            "lng": Decimal("38.760000"),
+            "formatted_address": address,
+            "place_id": "geoapify-car-place",
+            "components": {"city": "Addis Ababa"},
+        },
+    )
+
+    assert geocode_listing_async(
+        car_listing.id,
+        f"{car_listing._meta.app_label}.{car_listing._meta.model_name}",
+    ) is True
+
+    car_listing.refresh_from_db()
+    assert car_listing.latitude == Decimal("9.010000")
+    assert car_listing.longitude == Decimal("38.760000")
+    assert car_listing.place_id == "geoapify-car-place"
+
+
 def test_property_sale_listing_serializer_create_queues_geocoding(
     company_user,
     company,
@@ -266,3 +368,41 @@ def test_geocode_existing_listings_command_dry_run(monkeypatch, property_listing
     out = capsys.readouterr().out
     assert "Would queue geocoding" in out
     assert called["value"] is False
+
+
+def test_geocode_existing_listings_command_overwrite_includes_geocoded(
+    monkeypatch,
+    property_listing,
+):
+    property_listing.latitude = Decimal("9.900000")
+    property_listing.longitude = Decimal("38.900000")
+    property_listing.save(update_fields=["latitude", "longitude"])
+    calls = []
+    monkeypatch.setattr(
+        "apps.listing.tasks.geocode_listing_async.delay",
+        lambda listing_id, model_label: calls.append((listing_id, model_label)),
+    )
+
+    call_command("geocode_existing_listings", model="property", batch_size=1, overwrite=True)
+
+    assert (property_listing.id, f"{property_listing._meta.app_label}.{property_listing._meta.model_name}") in calls
+
+
+def test_geocode_existing_listings_command_dispatches_car_rental_with_formatted_address(
+    monkeypatch,
+    car_listing,
+):
+    car_listing.latitude = None
+    car_listing.longitude = None
+    car_listing.formatted_address = "Bole, Addis Ababa, Ethiopia"
+    car_listing.listing_type = CarListing.ListingTypeChoices.RENT
+    car_listing.save(update_fields=["latitude", "longitude", "formatted_address", "listing_type"])
+    calls = []
+    monkeypatch.setattr(
+        "apps.listing.tasks.geocode_listing_async.delay",
+        lambda listing_id, model_label: calls.append((listing_id, model_label)),
+    )
+
+    call_command("geocode_existing_listings", model="car_rental", batch_size=1)
+
+    assert (car_listing.id, f"{car_listing._meta.app_label}.{car_listing._meta.model_name}") in calls

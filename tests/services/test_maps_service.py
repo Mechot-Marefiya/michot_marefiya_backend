@@ -71,28 +71,34 @@ def test_hash_address_normalizes_input():
     assert _hash_address("  Addis Ababa") == _hash_address("addis ababa  ")
 
 
-@override_settings(GOOGLE_MAPS_API_KEY="test-key", GEOCODING_CACHE_TTL=3600)
+@override_settings(GEOAPIFY_API_KEY="test-key", GEOCODING_CACHE_TTL=3600)
 def test_geocode_address_returns_correct_structure(monkeypatch):
     payload = {
-        "status": "OK",
         "results": [
             {
-                "formatted_address": "Bole, Addis Ababa, Ethiopia",
+                "formatted": "Bole, Addis Ababa, Ethiopia",
                 "place_id": "place-123",
-                "geometry": {"location": {"lat": 9.03, "lng": 38.75}},
-                "address_components": [
-                    {"long_name": "Addis Ababa", "types": ["locality"]},
-                    {"long_name": "Addis Ababa", "types": ["administrative_area_level_1"]},
-                    {"long_name": "Ethiopia", "types": ["country"]},
-                    {"long_name": "1000", "types": ["postal_code"]},
-                ],
+                "lat": 9.03,
+                "lon": 38.75,
+                "city": "Addis Ababa",
+                "state": "Addis Ababa",
+                "country": "Ethiopia",
+                "postcode": "1000",
             }
         ],
     }
-    monkeypatch.setattr("services.maps.requests.get", lambda *a, **k: DummyResponse(payload))
+    calls = []
+
+    def fake_get(url, params=None, timeout=5):
+        calls.append((url, params))
+        return DummyResponse(payload)
+
+    monkeypatch.setattr("services.maps.requests.get", fake_get)
 
     result = geocode_address("Bole, Addis Ababa")
 
+    assert calls[0][1]["text"] == "Bole, Addis Ababa"
+    assert calls[0][1]["apiKey"] == "test-key"
     assert result["lat"] == Decimal("9.03")
     assert result["lng"] == Decimal("38.75")
     assert result["formatted_address"] == "Bole, Addis Ababa, Ethiopia"
@@ -105,18 +111,18 @@ def test_geocode_address_returns_correct_structure(monkeypatch):
     }
 
 
-@override_settings(GOOGLE_MAPS_API_KEY="test-key")
+@override_settings(GEOAPIFY_API_KEY="test-key")
 def test_geocode_address_raises_on_empty_results(monkeypatch):
     monkeypatch.setattr(
         "services.maps.requests.get",
-        lambda *a, **k: DummyResponse({"status": "ZERO_RESULTS", "results": []}),
+        lambda *a, **k: DummyResponse({"results": []}),
     )
 
     with pytest.raises(GeocodingError):
         geocode_address("Unknown place")
 
 
-@override_settings(GOOGLE_MAPS_API_KEY="test-key")
+@override_settings(GEOAPIFY_API_KEY="test-key")
 def test_geocode_address_raises_on_network_failure(monkeypatch):
     def boom(*args, **kwargs):
         raise requests.RequestException("network down")
@@ -127,16 +133,15 @@ def test_geocode_address_raises_on_network_failure(monkeypatch):
         geocode_address("Bole, Addis Ababa")
 
 
-@override_settings(GOOGLE_MAPS_API_KEY="test-key", GEOCODING_CACHE_TTL=3600)
+@override_settings(GEOAPIFY_API_KEY="test-key", GEOCODING_CACHE_TTL=3600)
 def test_geocode_address_returns_cached_value_on_second_call(monkeypatch):
     payload = {
-        "status": "OK",
         "results": [
             {
-                "formatted_address": "Bole, Addis Ababa, Ethiopia",
+                "formatted": "Bole, Addis Ababa, Ethiopia",
                 "place_id": "place-123",
-                "geometry": {"location": {"lat": 9.03, "lng": 38.75}},
-                "address_components": [],
+                "lat": 9.03,
+                "lon": 38.75,
             }
         ],
     }
@@ -155,17 +160,14 @@ def test_geocode_address_returns_cached_value_on_second_call(monkeypatch):
     assert calls["count"] == 1
 
 
-@override_settings(GOOGLE_MAPS_API_KEY="test-key", GEOCODING_CACHE_TTL=3600)
+@override_settings(GEOAPIFY_API_KEY="test-key", GEOCODING_CACHE_TTL=3600)
 def test_reverse_geocode_returns_formatted_address(monkeypatch):
     payload = {
-        "status": "OK",
         "results": [
             {
-                "formatted_address": "Bole, Addis Ababa, Ethiopia",
-                "address_components": [
-                    {"long_name": "Bole", "types": ["locality"]},
-                    {"long_name": "Addis Ababa", "types": ["administrative_area_level_1"]},
-                ],
+                "formatted": "Bole, Addis Ababa, Ethiopia",
+                "city": "Bole",
+                "state": "Addis Ababa",
             }
         ],
     }
@@ -177,17 +179,15 @@ def test_reverse_geocode_returns_formatted_address(monkeypatch):
     assert result["components"]["city"] == "Bole"
 
 
-@override_settings(GOOGLE_MAPS_API_KEY="test-key")
+@override_settings(GEOAPIFY_API_KEY="test-key")
 def test_autocomplete_address_returns_suggestions_list(monkeypatch):
     payload = {
-        "predictions": [
+        "results": [
             {
                 "place_id": "place-1",
-                "description": "Bole, Addis Ababa, Ethiopia",
-                "structured_formatting": {
-                    "main_text": "Bole",
-                    "secondary_text": "Addis Ababa, Ethiopia",
-                },
+                "formatted": "Bole, Addis Ababa, Ethiopia",
+                "address_line1": "Bole",
+                "address_line2": "Addis Ababa, Ethiopia",
             }
         ]
     }
@@ -205,7 +205,7 @@ def test_autocomplete_address_returns_suggestions_list(monkeypatch):
     ]
 
 
-@override_settings(GOOGLE_MAPS_API_KEY="test-key")
+@override_settings(GEOAPIFY_API_KEY="test-key")
 def test_autocomplete_address_returns_empty_list_on_failure(monkeypatch):
     def boom(*args, **kwargs):
         raise requests.RequestException("network down")
@@ -215,35 +215,44 @@ def test_autocomplete_address_returns_empty_list_on_failure(monkeypatch):
     assert autocomplete_address("Bol", "session-1") == []
 
 
-@override_settings(GOOGLE_MAPS_API_KEY="test-key", GEOCODING_CACHE_TTL=3600)
+@override_settings(GEOAPIFY_API_KEY="test-key", GEOCODING_CACHE_TTL=3600)
 def test_get_place_detail_returns_lat_lng_address(monkeypatch):
     payload = {
-        "status": "OK",
-        "result": {
-            "place_id": "place-555",
-            "formatted_address": "Bole, Addis Ababa, Ethiopia",
-            "geometry": {"location": {"lat": 9.03, "lng": 38.75}},
-            "address_components": [
-                {"long_name": "Bole", "types": ["locality"]},
-                {"long_name": "Ethiopia", "types": ["country"]},
-            ],
-        },
+        "features": [
+            {
+                "properties": {
+                    "place_id": "place-555",
+                    "formatted": "Bole, Addis Ababa, Ethiopia",
+                    "city": "Bole",
+                    "country": "Ethiopia",
+                },
+                "geometry": {"type": "Point", "coordinates": [38.75, 9.03]},
+            }
+        ],
     }
-    monkeypatch.setattr("services.maps.requests.get", lambda *a, **k: DummyResponse(payload))
+    calls = []
+
+    def fake_get(url, params=None, timeout=5):
+        calls.append((url, params))
+        return DummyResponse(payload)
+
+    monkeypatch.setattr("services.maps.requests.get", fake_get)
 
     result = get_place_detail("place-555", "session-1")
 
+    assert calls[0][1]["id"] == "place-555"
+    assert calls[0][1]["features"] == "details"
     assert result["lat"] == Decimal("9.03")
     assert result["lng"] == Decimal("38.75")
     assert result["formatted_address"] == "Bole, Addis Ababa, Ethiopia"
     assert result["place_id"] == "place-555"
 
 
-@override_settings(GOOGLE_MAPS_API_KEY="test-key")
+@override_settings(GEOAPIFY_API_KEY="test-key")
 def test_get_place_detail_raises_on_failure(monkeypatch):
     monkeypatch.setattr(
         "services.maps.requests.get",
-        lambda *a, **k: DummyResponse({"status": "ZERO_RESULTS", "result": None}),
+        lambda *a, **k: DummyResponse({"features": []}),
     )
 
     with pytest.raises(GeocodingError):

@@ -44,7 +44,7 @@ class MapsPlaceDetailView(APIView):
     permission_classes = [IsAuthenticated]
 
     @extend_schema(
-        summary="Resolve Google place detail",
+        summary="Resolve place detail",
         request=MapPlaceDetailRequestSerializer,
         responses={200: PlaceDetailSerializer, 400: OpenApiTypes.OBJECT, 401: OpenApiTypes.OBJECT},
     )

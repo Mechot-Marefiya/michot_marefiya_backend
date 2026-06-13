@@ -1,11 +1,11 @@
-"""Shared Google Maps helpers used across listing discovery flows."""
+"""Shared Geoapify helpers used across listing discovery flows."""
 
 from __future__ import annotations
 
 import hashlib
 import logging
 import math
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 import requests
 from django.conf import settings
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class GeocodingError(Exception):
-    """Raised when a Google Maps lookup cannot be completed."""
+    """Raised when a map provider lookup cannot be completed."""
 
 
 def _hash_address(address: str) -> str:
@@ -28,7 +28,7 @@ def _to_decimal(value) -> Decimal:
 
 
 def _api_key() -> str:
-    return getattr(settings, "GOOGLE_MAPS_API_KEY", "").strip()
+    return getattr(settings, "GEOAPIFY_API_KEY", "").strip()
 
 
 def _cache_get(key: str):
@@ -39,29 +39,90 @@ def _cache_set(key: str, value, ttl: int) -> None:
     cache.set(key, value, timeout=ttl)
 
 
-def _safe_components(address_components) -> dict:
-    lookup = {}
-    for component in address_components or []:
-        types = component.get("types", [])
-        for type_name in types:
-            lookup.setdefault(type_name, component)
-
-    city_component = (
-        lookup.get("locality")
-        or lookup.get("postal_town")
-        or lookup.get("administrative_area_level_2")
-        or lookup.get("sublocality")
-    )
-    region_component = lookup.get("administrative_area_level_1")
-    country_component = lookup.get("country")
-    postcode_component = lookup.get("postal_code")
-
+def _safe_components(properties: dict | None) -> dict:
+    properties = properties or {}
     return {
-        "city": city_component.get("long_name") if city_component else None,
-        "region": region_component.get("long_name") if region_component else None,
-        "country": country_component.get("long_name") if country_component else None,
-        "postcode": postcode_component.get("long_name") if postcode_component else None,
+        "city": (
+            properties.get("city")
+            or properties.get("town")
+            or properties.get("village")
+            or properties.get("municipality")
+            or properties.get("suburb")
+            or properties.get("county")
+        ),
+        "region": properties.get("state") or properties.get("region"),
+        "country": properties.get("country"),
+        "postcode": properties.get("postcode"),
     }
+
+
+def _provider_params(extra: dict) -> dict:
+    api_key = _api_key()
+    if not api_key:
+        raise GeocodingError("Geoapify API key is not configured.")
+    return {**extra, "apiKey": api_key}
+
+
+def _request_json(url: str, params: dict) -> dict:
+    response = requests.get(url, params=_provider_params(params), timeout=5)
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("INVALID_RESPONSE")
+    return payload
+
+
+def _feature_to_result(feature: dict) -> dict:
+    properties = dict(feature.get("properties") or {})
+    geometry = feature.get("geometry") or {}
+    coordinates = geometry.get("coordinates") or []
+    if len(coordinates) >= 2:
+        properties.setdefault("lon", coordinates[0])
+        properties.setdefault("lat", coordinates[1])
+    return properties
+
+
+def _results_from_payload(payload: dict) -> list[dict]:
+    if payload.get("results"):
+        return list(payload["results"])
+    if payload.get("features"):
+        return [_feature_to_result(feature) for feature in payload["features"]]
+    return []
+
+
+def _format_address(result: dict) -> str:
+    return (
+        result.get("formatted")
+        or result.get("formatted_address")
+        or ", ".join(
+            part
+            for part in [result.get("address_line1"), result.get("address_line2")]
+            if part
+        )
+    )
+
+
+def _normalize_place(result: dict, fallback_place_id: str = "") -> dict:
+    lat = result.get("lat")
+    lng = result.get("lon", result.get("lng"))
+    if lat is None or lng is None:
+        raise ValueError("MISSING_COORDINATES")
+
+    place_id = result.get("place_id") or result.get("id") or fallback_place_id
+    return {
+        "lat": _to_decimal(lat),
+        "lng": _to_decimal(lng),
+        "formatted_address": _format_address(result),
+        "place_id": place_id,
+        "components": _safe_components(result),
+    }
+
+
+def _first_result(payload: dict) -> dict:
+    results = _results_from_payload(payload)
+    if not results:
+        raise ValueError("NO_RESULTS")
+    return results[0]
 
 
 def _raise_geocoding_error(message: str, exc: Exception | None = None) -> None:
@@ -82,25 +143,11 @@ def geocode_address(address: str) -> dict:
         return cached
 
     try:
-        response = requests.get(
-            settings.GOOGLE_MAPS_GEOCODING_URL,
-            params={"address": address, "key": _api_key()},
-            timeout=5,
+        payload = _request_json(
+            settings.GEOAPIFY_GEOCODING_URL,
+            {"text": address, "format": "json", "limit": 1},
         )
-        response.raise_for_status()
-        payload = response.json()
-        if payload.get("status") != "OK" or not payload.get("results"):
-            raise ValueError(payload.get("status", "NO_RESULTS"))
-
-        result = payload["results"][0]
-        location = result["geometry"]["location"]
-        parsed = {
-            "lat": _to_decimal(location["lat"]),
-            "lng": _to_decimal(location["lng"]),
-            "formatted_address": result.get("formatted_address", ""),
-            "place_id": result.get("place_id", ""),
-            "components": _safe_components(result.get("address_components")),
-        }
+        parsed = _normalize_place(_first_result(payload))
         _cache_set(cache_key, parsed, getattr(settings, "GEOCODING_CACHE_TTL", 86400))
         return parsed
     except Exception as exc:  # pragma: no cover - exercised through tests
@@ -114,20 +161,14 @@ def reverse_geocode(lat: Decimal, lng: Decimal) -> dict:
         return cached
 
     try:
-        response = requests.get(
-            settings.GOOGLE_MAPS_GEOCODING_URL,
-            params={"latlng": f"{lat},{lng}", "key": _api_key()},
-            timeout=5,
+        payload = _request_json(
+            settings.GEOAPIFY_REVERSE_GEOCODING_URL,
+            {"lat": lat, "lon": lng, "format": "json", "limit": 1},
         )
-        response.raise_for_status()
-        payload = response.json()
-        if payload.get("status") != "OK" or not payload.get("results"):
-            raise ValueError(payload.get("status", "NO_RESULTS"))
-
-        result = payload["results"][0]
+        result = _first_result(payload)
         parsed = {
-            "formatted_address": result.get("formatted_address", ""),
-            "components": _safe_components(result.get("address_components")),
+            "formatted_address": _format_address(result),
+            "components": _safe_components(result),
         }
         _cache_set(cache_key, parsed, getattr(settings, "GEOCODING_CACHE_TTL", 86400))
         return parsed
@@ -140,27 +181,23 @@ def autocomplete_address(input_text: str, session_token: str) -> list:
         return []
 
     try:
-        response = requests.get(
-            settings.GOOGLE_MAPS_PLACES_AUTOCOMPLETE_URL,
-            params={
-                "input": input_text,
-                "sessiontoken": session_token,
-                "key": _api_key(),
-            },
-            timeout=5,
+        payload = _request_json(
+            settings.GEOAPIFY_AUTOCOMPLETE_URL,
+            {"text": input_text, "format": "json", "limit": 5},
         )
-        response.raise_for_status()
-        payload = response.json()
-        predictions = payload.get("predictions") or []
         suggestions = []
-        for item in predictions:
-            structured = item.get("structured_formatting") or {}
+        for item in _results_from_payload(payload):
+            formatted = _format_address(item)
+            main_text = item.get("address_line1") or item.get("name") or formatted.split(",", 1)[0]
+            secondary_text = item.get("address_line2") or (
+                formatted.split(",", 1)[1].strip() if "," in formatted else ""
+            )
             suggestions.append(
                 {
                     "place_id": item.get("place_id", ""),
-                    "description": item.get("description", ""),
-                    "main_text": structured.get("main_text", ""),
-                    "secondary_text": structured.get("secondary_text", ""),
+                    "description": formatted,
+                    "main_text": main_text,
+                    "secondary_text": secondary_text,
                 }
             )
         return suggestions
@@ -179,34 +216,15 @@ def get_place_detail(place_id: str, session_token: str) -> dict:
         return cached
 
     try:
-        response = requests.get(
-            settings.GOOGLE_MAPS_PLACE_DETAIL_URL,
-            params={
-                "place_id": place_id,
-                "fields": "geometry,formatted_address,address_components,place_id",
-                "sessiontoken": session_token,
-                "key": _api_key(),
-            },
-            timeout=5,
+        payload = _request_json(
+            settings.GEOAPIFY_PLACE_DETAIL_URL,
+            {"id": place_id, "features": "details"},
         )
-        response.raise_for_status()
-        payload = response.json()
-        if payload.get("status") != "OK" or not payload.get("result"):
-            raise ValueError(payload.get("status", "NO_RESULTS"))
-
-        result = payload["result"]
-        location = result["geometry"]["location"]
-        parsed = {
-            "lat": _to_decimal(location["lat"]),
-            "lng": _to_decimal(location["lng"]),
-            "formatted_address": result.get("formatted_address", ""),
-            "place_id": result.get("place_id", place_id),
-            "components": _safe_components(result.get("address_components")),
-        }
+        parsed = _normalize_place(_first_result(payload), fallback_place_id=place_id)
         _cache_set(cache_key, parsed, getattr(settings, "GEOCODING_CACHE_TTL", 86400))
         return parsed
     except Exception as exc:  # pragma: no cover - exercised through tests
-        _raise_geocoding_error("Unable to fetch Google place details.", exc)
+        _raise_geocoding_error("Unable to fetch place details.", exc)
 
 
 def calculate_distance_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:

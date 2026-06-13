@@ -1894,7 +1894,11 @@ class PropertySaleListingSerializer(PlaceResolutionMixin, serializers.ModelSeria
         instance.save()
 
         if address_data:
-            ListingService._update_address(instance, address_data)
+            ListingService._update_address(
+                instance,
+                address_data,
+                reset_geocoding=not skip_async_geocoding,
+            )
             ListingService.schedule_geocoding(instance, should_dispatch=not skip_async_geocoding)
 
         ListingService._update_images(instance, images, kept_image_ids)
@@ -3208,7 +3212,10 @@ class SearchResultSerializer(CurrencyConversionMixin, serializers.Serializer):
 DISCOVERY_LISTING_TYPE_CHOICES = (
     ("hotel", "Hotel"),
     ("guesthouse", "Guest House"),
+    ("event_space", "Event Space"),
     ("property_rental", "Property Rental"),
+    ("property_sales", "Property Sales"),
+    ("car_rental", "Car Rental"),
     ("car_sales", "Car Sales"),
 )
 

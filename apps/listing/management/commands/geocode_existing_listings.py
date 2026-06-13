@@ -3,16 +3,26 @@ import time
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.account.models import HotelProfile
-from apps.listing.models import EventSpaceListing, GuestHouseProfile, PropertyListing, PropertySaleListing, RoomListing
+from apps.listing.models import (
+    CarListing,
+    CarSaleListing,
+    EventSpaceListing,
+    GuestHouseProfile,
+    PropertyListing,
+    PropertySaleListing,
+    RoomListing,
+)
 from apps.listing.tasks import geocode_listing_async
 
 
 MODEL_MAP = {
+    "car_rental": CarListing,
+    "car_sales": CarSaleListing,
+    "event_space": EventSpaceListing,
     "hotel": HotelProfile,
     "room": RoomListing,
     "guesthouse": GuestHouseProfile,
     "property": PropertyListing,
-    "event_space": EventSpaceListing,
     "property_sale": PropertySaleListing,
 }
 
@@ -59,6 +69,12 @@ class Command(BaseCommand):
             queryset = queryset.select_related("address")
         return queryset
 
+    def _has_geocodable_text(self, listing):
+        address = getattr(listing, "address", None)
+        if address:
+            return True
+        return bool((getattr(listing, "formatted_address", None) or "").strip())
+
     def handle(self, *args, **options):
         batch_size = max(1, options["batch_size"])
         dry_run = options["dry_run"]
@@ -82,11 +98,10 @@ class Command(BaseCommand):
                     break
 
                 for listing in batch:
-                    address = getattr(listing, "address", None)
-                    if not address:
+                    if not self._has_geocodable_text(listing):
                         total_skipped += 1
                         self.stdout.write(
-                            f"Skipping {model.__name__} {listing.id}: no address relation."
+                            f"Skipping {model.__name__} {listing.id}: no address text."
                         )
                         continue
 

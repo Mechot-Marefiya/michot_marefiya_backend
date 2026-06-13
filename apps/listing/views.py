@@ -142,10 +142,14 @@ NO_REFUND_POLICY_MESSAGE = "No refunds are available for any service payment on 
 BOOKING_CANCEL_NOTE = "Cancelling a booking does not create a refund for any completed service payment."
 
 DISCOVERY_FILTER_CHOICES = [("all", "All"), *DISCOVERY_LISTING_TYPE_CHOICES]
+DISCOVERY_LISTING_TYPE_ENUM = [choice for choice, _label in DISCOVERY_FILTER_CHOICES]
 DISCOVERY_LISTING_TYPE_MAP = {
     "hotel": HotelProfile,
     "guesthouse": GuestHouseProfile,
+    "event_space": EventSpaceListing,
     "property_rental": PropertyListing,
+    "property_sales": PropertySaleListing,
+    "car_rental": CarListing,
     "car_sales": CarSaleListing,
 }
 DISCOVERY_CACHE_TTL = getattr(settings, "PROXIMITY_CACHE_TTL", 300)
@@ -306,7 +310,10 @@ def _discovery_querysets(listing_type: str):
             "facility",
             "amenities",
         ),
+        "event_space": EventSpaceListing.objects.filter(is_active=True, latitude__isnull=False, longitude__isnull=False).select_related("hotel", "address").prefetch_related("images", "amenities"),
         "property_rental": PropertyListing.objects.filter(is_active=True, latitude__isnull=False, longitude__isnull=False).select_related("company", "individual_owner", "address").prefetch_related("images"),
+        "property_sales": PropertySaleListing.objects.filter(is_active=True, latitude__isnull=False, longitude__isnull=False).select_related("company", "individual_owner", "address").prefetch_related("images"),
+        "car_rental": CarListing.objects.filter(is_active=True, listing_type=CarListing.ListingTypeChoices.RENT, latitude__isnull=False, longitude__isnull=False).select_related("company", "individual_owner").prefetch_related("images"),
         "car_sales": CarSaleListing.objects.filter(is_active=True, latitude__isnull=False, longitude__isnull=False).select_related("company", "individual_owner").prefetch_related("images"),
     }
     if listing_type == "all":
@@ -323,7 +330,10 @@ def _search_querysets(listing_type: str):
             "facility",
             "amenities",
         ),
+        "event_space": EventSpaceListing.objects.filter(is_active=True).select_related("hotel", "address").prefetch_related("images", "amenities"),
         "property_rental": PropertyListing.objects.filter(is_active=True).select_related("company", "individual_owner", "address").prefetch_related("images"),
+        "property_sales": PropertySaleListing.objects.filter(is_active=True).select_related("company", "individual_owner", "address").prefetch_related("images"),
+        "car_rental": CarListing.objects.filter(is_active=True, listing_type=CarListing.ListingTypeChoices.RENT).select_related("company", "individual_owner").prefetch_related("images"),
         "car_sales": CarSaleListing.objects.filter(is_active=True).select_related("company", "individual_owner").prefetch_related("images"),
     }
     if listing_type == "all":
@@ -334,7 +344,7 @@ def _search_querysets(listing_type: str):
 def _listing_title(listing, listing_type: str) -> str:
     if listing_type == "hotel":
         return getattr(listing, "name", "") or getattr(listing, "title", "")
-    if listing_type == "car_sales":
+    if listing_type in {"car_rental", "car_sales"}:
         return getattr(listing, "title", "") or f"{getattr(listing, 'brand', '')} {getattr(listing, 'model', '')}".strip()
     return getattr(listing, "title", "") or getattr(listing, "name", "")
 
@@ -426,7 +436,7 @@ def _search_text_fields(listing, listing_type: str, payload: dict) -> list[str]:
 
     if listing_type == "hotel":
         values.append(getattr(getattr(listing, "company", None), "name", "") or "")
-    if listing_type == "car_sales":
+    if listing_type in {"car_rental", "car_sales"}:
         values.append(getattr(listing, "brand", "") or "")
         values.append(getattr(listing, "model", "") or "")
 
@@ -4410,7 +4420,7 @@ class NearbyListingsView(APIView):
             OpenApiParameter("lat", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=True),
             OpenApiParameter("lng", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=True),
             OpenApiParameter("radius_km", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
-            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["hotel", "guesthouse", "property_rental", "car_sales", "all"]),
+            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=DISCOVERY_LISTING_TYPE_ENUM),
             OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
         ],
         responses={200: _paginated_discovery_response_schema("NearbyListingsResponse", ProximityListingSerializer), 400: OpenApiTypes.OBJECT},
@@ -4459,7 +4469,7 @@ class WithinBoundsListingsView(APIView):
             OpenApiParameter("south", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=True),
             OpenApiParameter("east", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=True),
             OpenApiParameter("west", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=True),
-            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["hotel", "guesthouse", "property_rental", "car_sales", "all"]),
+            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=DISCOVERY_LISTING_TYPE_ENUM),
             OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
         ],
         responses={200: _paginated_discovery_response_schema("WithinBoundsListingsResponse", DiscoveryListingSerializer), 400: OpenApiTypes.OBJECT},
@@ -4516,7 +4526,7 @@ class MapPinsView(APIView):
             OpenApiParameter("south", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
             OpenApiParameter("east", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
             OpenApiParameter("west", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
-            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["hotel", "guesthouse", "property_rental", "car_sales", "all"]),
+            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=DISCOVERY_LISTING_TYPE_ENUM),
         ],
         responses={200: MapPinSerializer(many=True), 400: OpenApiTypes.OBJECT},
     )
@@ -4584,7 +4594,7 @@ class FeedListingsView(APIView):
         tags=["Listings"],
         summary="Get standard or proximity feed",
         parameters=[
-            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["hotel", "guesthouse", "property_rental", "car_sales", "all"]),
+            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=DISCOVERY_LISTING_TYPE_ENUM),
             OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
         ],
         responses={
@@ -4616,7 +4626,7 @@ class ListingSearchView(APIView):
             OpenApiParameter("lng", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
             OpenApiParameter("radius_km", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
             OpenApiParameter("sort_by", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["distance", "price", "rating", "newest", "relevance"]),
-            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["hotel", "guesthouse", "property_rental", "car_sales", "all"]),
+            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=DISCOVERY_LISTING_TYPE_ENUM),
             OpenApiParameter("page", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
         ],
         responses={200: _search_response_schema("ListingSearchResponse"), 400: OpenApiTypes.OBJECT},
@@ -4668,7 +4678,7 @@ class ListingSearchSuggestionsView(APIView):
             OpenApiParameter("lat", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
             OpenApiParameter("lng", OpenApiTypes.NUMBER, OpenApiParameter.QUERY, required=False),
             OpenApiParameter("limit", OpenApiTypes.INT, OpenApiParameter.QUERY, required=False),
-            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=["hotel", "guesthouse", "property_rental", "car_sales", "all"]),
+            OpenApiParameter("listing_type", OpenApiTypes.STR, OpenApiParameter.QUERY, required=False, enum=DISCOVERY_LISTING_TYPE_ENUM),
         ],
         responses={200: SearchSuggestionSerializer(many=True), 400: OpenApiTypes.OBJECT},
     )

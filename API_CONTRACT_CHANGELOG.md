@@ -1,5 +1,38 @@
 # API Contract Changelog
 
+[2026-06-13] TASK-607 - All Listing Family Map Coverage
+Modified: existing listing discovery, map pin, feed, search, and search suggestion endpoints
+Change type: NON-BREAKING additive listing_type filters
+New listing_type filters: event_space, car_rental, property_sales
+Existing listing_type filters unchanged: hotel, guesthouse, property_rental, car_sales, all
+Flutter action required: yes - expose filters for event spaces, car rentals, and property sales
+React action required: yes - expose filters for event spaces, car rentals, and property sales
+
+[2026-06-13] TASK-606 - Google Maps To Geoapify Migration
+Modified: backend map provider implementation only
+Change type: NON-BREAKING provider migration
+Provider: Geoapify is now the only active backend maps provider
+Deprecated: Google Maps backend settings and active service logic
+Endpoint contract: unchanged
+Existing endpoints preserved:
+GET /api/v1/maps/autocomplete/
+POST /api/v1/maps/place-detail/
+GET /api/v1/maps/reverse-geocode/
+GET /api/v1/listing/nearby/
+GET /api/v1/listing/within-bounds/
+GET /api/v1/listing/map-pins/
+GET /api/v1/listing/feed/
+GET /api/v1/listing/search/
+GET /api/v1/listing/search/suggestions/
+POST /api/v1/account/location/
+Stable fields preserved: latitude, longitude, formatted_address,
+                         place_id, address_components, distance_km,
+                         search_center, applied_radius_km
+Flutter action required: no - continue using backend REST endpoints
+React action required: no - continue using backend REST endpoints
+Operational note: provide GEOAPIFY_API_KEY in backend environment;
+                  never expose it to clients
+
 [2026-06-12] TASK-402 - Add Coordinates To All Listing Models
 Modified models: apps.core.GeoLocatedModel, apps.listing.BaseListing subclasses,
                  apps.account.HotelProfile, apps.account.User

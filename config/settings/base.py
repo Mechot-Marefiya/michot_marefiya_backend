@@ -45,10 +45,24 @@ OTP_TTL_SECONDS = OTP_EXPIRY_SECONDS
 OTP_MAX_ATTEMPTS = env("OTP_MAX_ATTEMPTS", default=5, cast=int)
 OTP_COOLDOWN_SECONDS = env("OTP_COOLDOWN_SECONDS", default=60, cast=int)
 OTP_REDIS_KEY_PREFIX = env("OTP_REDIS_KEY_PREFIX", default="otp")
-GOOGLE_MAPS_API_KEY = env("GOOGLE_MAPS_API_KEY", default="")
-GOOGLE_MAPS_GEOCODING_URL = "https://maps.googleapis.com/maps/api/geocode/json"
-GOOGLE_MAPS_PLACES_AUTOCOMPLETE_URL = "https://maps.googleapis.com/maps/api/place/autocomplete/json"
-GOOGLE_MAPS_PLACE_DETAIL_URL = "https://maps.googleapis.com/maps/api/place/details/json"
+MAP_PROVIDER = env("MAP_PROVIDER", default="geoapify").strip().lower()
+GEOAPIFY_API_KEY = env("GEOAPIFY_API_KEY", default="")
+GEOAPIFY_GEOCODING_URL = env(
+    "GEOAPIFY_GEOCODING_URL",
+    default="https://api.geoapify.com/v1/geocode/search",
+)
+GEOAPIFY_REVERSE_GEOCODING_URL = env(
+    "GEOAPIFY_REVERSE_GEOCODING_URL",
+    default="https://api.geoapify.com/v1/geocode/reverse",
+)
+GEOAPIFY_AUTOCOMPLETE_URL = env(
+    "GEOAPIFY_AUTOCOMPLETE_URL",
+    default="https://api.geoapify.com/v1/geocode/autocomplete",
+)
+GEOAPIFY_PLACE_DETAIL_URL = env(
+    "GEOAPIFY_PLACE_DETAIL_URL",
+    default="https://api.geoapify.com/v2/place-details",
+)
 DEFAULT_PROXIMITY_RADIUS_KM = env("DEFAULT_PROXIMITY_RADIUS_KM", default=10, cast=float)
 MAX_PROXIMITY_RADIUS_KM = env("MAX_PROXIMITY_RADIUS_KM", default=100, cast=float)
 GEOCODING_CACHE_TTL = env("GEOCODING_CACHE_TTL", default=86400, cast=int)
