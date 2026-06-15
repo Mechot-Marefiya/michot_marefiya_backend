@@ -185,3 +185,17 @@ New endpoints: GET /api/v1/listing/nearby/
                GET /api/v1/listing/feed/
 Flutter action required: yes — render proximity, viewport, map pin, and feed discovery states
 React action required: yes — render proximity, viewport, map pin, and feed discovery states
+
+[2026-06-14] TASK-805 - Chapa Subaccount Registration API
+New endpoints: POST /api/v1/payment/subaccounts/
+               GET /api/v1/payment/subaccounts/me/
+Change type: NON-BREAKING additive endpoints
+Flutter action required: yes - vendor subaccount setup screen
+React action required: yes - admin/vendor subaccount setup screen
+
+[2026-06-14] TASK-808 - Chapa Receipt Access
+Modified: existing payment transaction responses
+Change type: NON-BREAKING additive field
+New field: receipt_url
+Flutter action required: yes - display Chapa receipt link after successful payment
+React action required: yes - display Chapa receipt link after successful payment

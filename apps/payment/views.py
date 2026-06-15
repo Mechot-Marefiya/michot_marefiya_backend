@@ -24,6 +24,8 @@ from .serializers import (
     PaymentInitializeResponseSerializer,
     ChapaCallbackSerializer,
     ChapaWebhookSerializer,
+    ChapaSubaccountCreateSerializer,
+    ChapaSubaccountResponseSerializer,
     OwnerPaymentTransactionSerializer,
     TransactionMonitorListSerializer,
     TransactionMonitorDetailSerializer,
@@ -39,6 +41,7 @@ from .services import (
     open_dispute,
     update_dispute,
     resolve_dispute,
+    register_chapa_subaccount,
 )
 
 
@@ -59,7 +62,18 @@ def _is_payment_owner_or_admin(user, payment_tx):
     if not booking:
         return False
 
-    return getattr(booking, 'user', None) == user or getattr(booking, 'renter', None) == user
+    rental = getattr(booking, "rental", None)
+    if rental is not None:
+        return (
+            getattr(booking, "requested_by", None) == user
+            or getattr(rental, "renter", None) == user
+        )
+
+    return (
+        getattr(booking, 'user', None) == user
+        or getattr(booking, 'renter', None) == user
+        or getattr(booking, 'buyer', None) == user
+    )
 
 
 def _with_no_refund_policy(payload, *, cancellation_effect):
@@ -73,6 +87,159 @@ def _with_no_refund_policy(payload, *, cancellation_effect):
         }
     )
     return response
+
+
+def _is_admin_request_user(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (
+            user.is_superuser
+            or (
+                hasattr(user, "role")
+                and user.role
+                and user.role.code == RoleCode.ADMIN.value
+            )
+        )
+    )
+
+
+def _owner_type_for_profile(owner):
+    from apps.account.models import CompanyProfile, IndividualOwnerProfile
+
+    if isinstance(owner, CompanyProfile):
+        return "company"
+    if isinstance(owner, IndividualOwnerProfile):
+        return "individual_owner"
+    return None
+
+
+def _current_user_payment_owner(user):
+    if not user or not user.is_authenticated:
+        return None
+
+    try:
+        company_profile = getattr(user, "profile", None)
+    except Exception:
+        company_profile = None
+
+    company_profile = company_profile or getattr(user, "company", None)
+    if company_profile:
+        return company_profile
+
+    return getattr(user, "individual_owner", None)
+
+
+def _get_payment_owner(owner_type, owner_id):
+    from apps.account.models import CompanyProfile, IndividualOwnerProfile
+
+    model_map = {
+        "company": CompanyProfile,
+        "individual_owner": IndividualOwnerProfile,
+    }
+    model = model_map.get(owner_type)
+    if model is None:
+        return None
+    try:
+        return model.objects.get(id=owner_id)
+    except model.DoesNotExist:
+        return None
+
+
+def _serialize_subaccount_owner(owner):
+    return {
+        "owner_type": _owner_type_for_profile(owner),
+        "owner_id": getattr(owner, "id", None),
+        "chapa_subaccount_id": getattr(owner, "chapa_subaccount_id", None),
+        "split_type": getattr(owner, "split_type", None),
+        "split_value": getattr(owner, "split_value", None),
+        "split_config_active": getattr(owner, "split_config_active", False),
+    }
+
+
+@extend_schema(tags=["Payments"])
+class ChapaSubaccountView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Register Chapa subaccount",
+        description="Register or update the authenticated owner's Chapa subaccount. Admins may target any supported owner.",
+        request=ChapaSubaccountCreateSerializer,
+        responses={
+            201: ChapaSubaccountResponseSerializer,
+            400: OpenApiTypes.OBJECT,
+            403: OpenApiTypes.OBJECT,
+            404: OpenApiTypes.OBJECT,
+        },
+    )
+    def post(self, request):
+        serializer = ChapaSubaccountCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        requested_owner_type = data.get("owner_type")
+        requested_owner_id = data.get("owner_id")
+        is_admin = _is_admin_request_user(request.user)
+
+        if requested_owner_type and requested_owner_id:
+            owner = _get_payment_owner(requested_owner_type, requested_owner_id)
+            if owner is None:
+                return Response({"detail": "Owner not found."}, status=status.HTTP_404_NOT_FOUND)
+            current_owner = _current_user_payment_owner(request.user)
+            if not is_admin and owner != current_owner:
+                return Response(
+                    {"detail": "You can only register your own Chapa subaccount."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        else:
+            owner = _current_user_payment_owner(request.user)
+
+        if owner is None or _owner_type_for_profile(owner) is None:
+            return Response(
+                {"detail": "Unsupported owner target."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            result = register_chapa_subaccount(
+                owner=owner,
+                bank_code=data["bank_code"],
+                account_number=data["account_number"],
+                business_name=data["business_name"],
+                account_name=data["account_name"],
+                split_type=data.get("split_type"),
+                split_value=data.get("split_value"),
+                allow_overwrite=data.get("allow_overwrite", False),
+            )
+        except serializers.ValidationError as exc:
+            return Response({"detail": exc.detail}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not result["success"]:
+            return Response({"detail": result["error"]}, status=result.get("status_code", 400))
+
+        return Response(_serialize_subaccount_owner(owner), status=status.HTTP_201_CREATED)
+
+
+@extend_schema(tags=["Payments"])
+class ChapaSubaccountMeView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="Current owner Chapa subaccount",
+        description="Return the authenticated owner's Chapa subaccount and split configuration.",
+        responses={
+            200: ChapaSubaccountResponseSerializer,
+            400: OpenApiTypes.OBJECT,
+        },
+    )
+    def get(self, request):
+        owner = _current_user_payment_owner(request.user)
+        if owner is None or _owner_type_for_profile(owner) is None:
+            return Response(
+                {"detail": "Unsupported owner target."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(_serialize_subaccount_owner(owner), status=status.HTTP_200_OK)
 
 
 @extend_schema(tags=["Payments"])
@@ -315,9 +482,9 @@ class InitiatePaymentView(APIView):
             payer_first_name = request.user.first_name
             payer_last_name = request.user.last_name
         else:
-            payer_email = getattr(booking, 'guest_email', 'guest@michotmarefia.com')
-            payer_first_name = getattr(booking, 'guest_first_name', 'Guest')
-            payer_last_name = getattr(booking, 'guest_last_name', 'User')
+            payer_email = getattr(booking, 'guest_email', None) or 'guest@michotmarefia.com'
+            payer_first_name = getattr(booking, 'guest_first_name', None) or 'Guest'
+            payer_last_name = getattr(booking, 'guest_last_name', None) or 'User'
 
         result = ChapaPaymentService.initialize_payment(
             booking=booking,
@@ -436,6 +603,7 @@ def verify_payment(request, tx_ref):
                 )
 
             result = ChapaPaymentService.handle_callback({"tx_ref": tx_ref})
+            payment_tx.refresh_from_db()
             serializer = PaymentTransactionSerializer(payment_tx)
             response_data = serializer.data
             response_data["chapa_verification"] = result
@@ -468,6 +636,7 @@ def verify_payment_public(request, tx_ref):
 
         try:
             payment_tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
+            payment_tx.refresh_from_db()
             serializer = PaymentTransactionSerializer(payment_tx)
             response_data = serializer.data
             response_data["chapa_verification"] = result

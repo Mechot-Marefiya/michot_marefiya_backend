@@ -7,6 +7,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import check_password, make_password
 from django.core.cache import cache
+from django.core import signing
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
@@ -87,6 +88,9 @@ class OtpService:
         OtpChallenge.Purpose.GUEST_GUESTHOUSE_BOOKING,
         OtpChallenge.Purpose.GUEST_EVENTSPACE_BOOKING,
         OtpChallenge.Purpose.GUEST_CAR_RENTAL_BOOKING,
+        OtpChallenge.Purpose.GUEST_PROPERTY_RENTAL_BOOKING,
+        OtpChallenge.Purpose.GUEST_CAR_SALE_REVEAL,
+        OtpChallenge.Purpose.GUEST_PROPERTY_SALE_REVEAL,
     }
 
     @staticmethod
@@ -244,12 +248,47 @@ class OtpService:
         return OtpVerificationResult(challenge=challenge, user=challenge.user, tokens=tokens)
 
 
+class GuestPhoneVerificationService:
+    SALT = "guest-phone-verification"
+    TOKEN_ERROR = "Guest phone verification is invalid or expired."
+
+    @classmethod
+    def create_token(cls, phone: str) -> str:
+        normalized_phone = OtpService.normalize_phone(phone)
+        if not normalized_phone:
+            raise OtpError("Phone number is required.")
+        return signing.dumps(
+            {
+                "phone": normalized_phone,
+                "verified_at": timezone.now().isoformat(),
+            },
+            salt=cls.SALT,
+        )
+
+    @classmethod
+    def verify_token(cls, *, token: str, phone: str) -> str:
+        normalized_phone = OtpService.normalize_phone(phone)
+        if not token or not normalized_phone:
+            raise OtpError(cls.TOKEN_ERROR)
+
+        max_age = getattr(settings, "GUEST_PHONE_VERIFICATION_MAX_AGE_SECONDS", None)
+        try:
+            payload = signing.loads(token, salt=cls.SALT, max_age=max_age)
+        except signing.BadSignature as exc:
+            raise OtpError(cls.TOKEN_ERROR) from exc
+
+        if payload.get("phone") != normalized_phone:
+            raise OtpError(cls.TOKEN_ERROR)
+        return normalized_phone
+
+
 class GuestBookingConversionService:
     MODEL_MAPPINGS = (
         ("hotel_bookings", "user", "Booking"),
         ("guesthouse_bookings", "renter", "GuestHouseBooking"),
         ("car_rentals", "renter", "CarRental"),
         ("eventspace_bookings", "user", "EventSpaceBooking"),
+        ("property_rental_bookings", "renter", "PropertyRentalBooking"),
     )
 
     @staticmethod
@@ -299,13 +338,14 @@ class GuestBookingConversionService:
                 "Phone verification is required before converting guest bookings."
             )
 
-        from apps.listing.models import Booking, CarRental, EventSpaceBooking, GuestHouseBooking
+        from apps.listing.models import Booking, CarRental, EventSpaceBooking, GuestHouseBooking, PropertyRentalBooking
 
         model_map = {
             "Booking": Booking,
             "GuestHouseBooking": GuestHouseBooking,
             "CarRental": CarRental,
             "EventSpaceBooking": EventSpaceBooking,
+            "PropertyRentalBooking": PropertyRentalBooking,
         }
         phone_candidates = cls.phone_variants(user.phone)
         linked_counts: dict[str, int] = {}

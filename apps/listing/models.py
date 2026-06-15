@@ -390,6 +390,8 @@ class ContactRevealRequest(AbstractBaseModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="contact_reveal_requests",
+        null=True,
+        blank=True,
     )
     status = models.CharField(
         max_length=32,
@@ -584,7 +586,7 @@ class CarRental(AbstractBaseModel):
                 name="car_rental_valid_dates",
             ),
             models.CheckConstraint(
-                condition=Q(renter__isnull=False) | Q(guest_email__isnull=False),
+                condition=Q(renter__isnull=False) | ~Q(guest_phone=""),
                 name="car_rental_must_have_renter_or_guest"
             ),
         ]
@@ -630,6 +632,77 @@ class CarRentalItem(AbstractBaseModel):
 
     def __str__(self) -> str:
         return f"Car {self.car_listing} rent for {self.car_rental.start_date}"
+
+
+class CarRentalExtensionRequest(AbstractBaseModel):
+    class ExtensionStatus(models.TextChoices):
+        REQUESTED = "requested", _("Requested")
+        PAYMENT_INITIATED = "payment_initiated", _("Payment Initiated")
+        PAID_APPLIED = "paid_applied", _("Paid & Applied")
+        FAILED = "failed", _("Failed")
+        CANCELLED = "cancelled", _("Cancelled")
+        EXPIRED = "expired", _("Expired")
+
+    rental = models.ForeignKey(
+        CarRental,
+        on_delete=models.CASCADE,
+        related_name="extension_requests",
+        verbose_name=_("Car Rental"),
+    )
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="car_rental_extension_requests",
+        verbose_name=_("Requested By"),
+    )
+    original_end_date = models.DateField(verbose_name=_("Original End Date"))
+    requested_end_date = models.DateField(verbose_name=_("Requested End Date"))
+    extra_days = models.PositiveIntegerField(verbose_name=_("Extra Days"))
+    amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name=_("Extension Amount"))
+    currency = models.CharField(max_length=3, default="ETB", verbose_name=_("Currency"))
+    status = models.CharField(
+        max_length=30,
+        choices=ExtensionStatus.choices,
+        default=ExtensionStatus.REQUESTED,
+        verbose_name=_("Status"),
+    )
+    tx_ref = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    availability_held = models.BooleanField(default=False)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    applied_at = models.DateTimeField(null=True, blank=True)
+    snapshot = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        verbose_name = _("Car Rental Extension Request")
+        verbose_name_plural = _("Car Rental Extension Requests")
+        db_table = "car_rental_extension_requests"
+        ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(requested_end_date__gt=F("original_end_date")),
+                name="car_rental_extension_requested_end_after_original_end",
+            ),
+            models.CheckConstraint(
+                condition=Q(extra_days__gt=0),
+                name="car_rental_extension_extra_days_positive",
+            ),
+        ]
+
+    @property
+    def is_expired(self):
+        return bool(
+            self.expires_at
+            and self.status in {
+                self.ExtensionStatus.REQUESTED,
+                self.ExtensionStatus.PAYMENT_INITIATED,
+            }
+            and self.expires_at <= now()
+        )
+
+    def __str__(self):
+        return f"Extension {self.rental.booking_reference} -> {self.requested_end_date}"
 # class CarSale(AbstractBaseModel):
 #     class SaleStatus(models.TextChoices):
 #         PENDING = "pending", _("Pending")
@@ -908,7 +981,7 @@ class PropertyRentalBooking(AbstractBaseModel):
                 name="property_rental_booking_valid_dates",
             ),
             models.CheckConstraint(
-                condition=Q(renter__isnull=False) | Q(guest_email__isnull=False),
+                condition=Q(renter__isnull=False) | ~Q(guest_phone=""),
                 name="property_rental_booking_must_have_renter_or_guest",
             ),
         ]
@@ -1003,6 +1076,8 @@ class PropertyContactRevealRequest(AbstractBaseModel):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="property_contact_reveal_requests",
+        null=True,
+        blank=True,
     )
     status = models.CharField(
         max_length=32,
@@ -1346,7 +1421,7 @@ class GuestHouseBooking(AbstractBaseModel):
             # Either renter OR guest_email must exist (for guest checkout)
             # Either renter OR guest_email must exist (for guest checkout)
             models.CheckConstraint(
-                condition=Q(renter__isnull=False) | Q(guest_email__isnull=False),
+                condition=Q(renter__isnull=False) | ~Q(guest_phone=""),
                 name="guesthouse_booking_must_have_renter_or_guest"
             ),
         ]
@@ -1627,9 +1702,9 @@ class Booking(AbstractBaseModel):
                 condition=Q(check_in_date__lt=F("check_out_date")),
                 name="booking_valid_dates",
             ),
-            # Either user OR guest_email must exist (for guest checkout)
+            # Either user OR a guest phone must exist (for lightweight guest checkout)
             models.CheckConstraint(
-                condition=Q(user__isnull=False) | Q(guest_email__isnull=False),
+                condition=Q(user__isnull=False) | ~Q(guest_phone=""),
                 name="booking_must_have_user_or_guest"
             ),
         ]

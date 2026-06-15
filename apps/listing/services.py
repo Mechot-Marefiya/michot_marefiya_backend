@@ -16,7 +16,12 @@ from typing import Dict, Optional, Tuple,Any,List
 from rest_framework.exceptions import ValidationError
 from decimal import Decimal
 from apps.account.models import CompanyProfile, HotelProfile, OtpChallenge
-from apps.account.services import ImageCreationService, OtpService
+from apps.account.services import (
+    GuestPhoneVerificationService,
+    ImageCreationService,
+    OtpError,
+    OtpService,
+)
 from apps.core.models import Address,Facility
 from apps.listing.exceptions import BookingConflict
 from apps.listing.models import (
@@ -36,6 +41,7 @@ from apps.listing.models import (
     EventSpaceBooking,
     EventSpaceBookingItem,
     CarRental,
+    CarRentalExtensionRequest,
     CarRentalItem,
     GuestHouseRoom, GuestHouseInventory, GuestHouseProfile
 )
@@ -45,15 +51,47 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from apps.listing.models import TermsAndConditions
 from apps.listing.models import RoomListing, RoomInventory
 from apps.core.utils import convert_currency
-from apps.core.services.email_service import BookingEmailService
+from apps.core.services.email_service import BookingEmailService, has_deliverable_email
 from apps.notifications.services import NotificationService
 from apps.notifications.models import Notification
-from services.sms import normalize_phone_number
+from services.sms import normalize_phone_number, send_sms
 
 
 
 logger = logging.getLogger(__name__)
 _VERIFICATION_NOTE_UNSET = object()
+
+
+def _booking_confirmation_phone(booking):
+    return (
+        getattr(booking, "guest_phone", None)
+        or getattr(getattr(booking, "user", None), "phone", None)
+        or getattr(getattr(booking, "renter", None), "phone", None)
+    )
+
+
+def _send_booking_confirmation_sms_first(booking, *, label="booking"):
+    phone = _booking_confirmation_phone(booking)
+    if phone:
+        check_in = getattr(booking, "check_in_date", getattr(booking, "start_date", None))
+        check_out = getattr(booking, "check_out_date", getattr(booking, "end_date", None))
+        message = (
+            f"Your Mechot Marefiya {label} {booking.booking_reference} is confirmed"
+            f"{f' for {check_in} to {check_out}' if check_in and check_out else ''}. "
+            f"Total: {booking.total_price} {booking.currency}."
+        )
+        try:
+            send_sms(phone, message)
+        except Exception as exc:
+            logger.warning(
+                "Could not send %s confirmation SMS for %s: %s",
+                label,
+                getattr(booking, "id", None),
+                exc,
+            )
+
+    if has_deliverable_email(getattr(booking, "guest_email", "")):
+        BookingEmailService.send_booking_confirmation(booking)
 
 
 class ListingGeocodingService:
@@ -128,6 +166,7 @@ class GuestBookingOtpService:
         "guesthouse": OtpChallenge.Purpose.GUEST_GUESTHOUSE_BOOKING,
         "eventspace": OtpChallenge.Purpose.GUEST_EVENTSPACE_BOOKING,
         "car_rental": OtpChallenge.Purpose.GUEST_CAR_RENTAL_BOOKING,
+        "property_rental": OtpChallenge.Purpose.GUEST_PROPERTY_RENTAL_BOOKING,
     }
 
     @classmethod
@@ -167,10 +206,74 @@ class GuestBookingOtpService:
                 purpose=cls._purpose_for_booking_type(booking_type),
                 issue_tokens=False,
             )
-            return True
+            return GuestPhoneVerificationService.create_token(normalized_phone)
         except Exception as exc:
             if isinstance(exc, GuestBookingOtpError):
                 raise
+            raise GuestBookingOtpError(str(exc)) from exc
+
+    @staticmethod
+    def verify_guest_token(*, token: str, phone: str):
+        try:
+            return GuestPhoneVerificationService.verify_token(token=token, phone=phone)
+        except OtpError as exc:
+            raise GuestBookingOtpError(str(exc)) from exc
+
+
+class GuestContactRevealOtpService:
+    PURPOSE_MAP = {
+        "car_sale_reveal": OtpChallenge.Purpose.GUEST_CAR_SALE_REVEAL,
+        "property_sale_reveal": OtpChallenge.Purpose.GUEST_PROPERTY_SALE_REVEAL,
+    }
+
+    @classmethod
+    def _purpose_for_reveal_type(cls, reveal_type: str) -> str:
+        purpose = cls.PURPOSE_MAP.get(reveal_type)
+        if not purpose:
+            raise GuestBookingOtpError("Invalid reveal type.")
+        return purpose
+
+    @classmethod
+    def create_challenge(cls, *, phone: str, reveal_type: str) -> GuestBookingOtpChallenge:
+        try:
+            challenge = OtpService.create_challenge(
+                phone=phone,
+                purpose=cls._purpose_for_reveal_type(reveal_type),
+            )
+        except Exception as exc:
+            raise GuestBookingOtpError(str(exc)) from exc
+
+        return GuestBookingOtpChallenge(
+            challenge_id=str(challenge.id),
+            phone=challenge.phone,
+            booking_type=reveal_type,
+            expires_at=challenge.expires_at,
+        )
+
+    @classmethod
+    def verify_challenge(cls, *, challenge_id, code: str, phone: str, reveal_type: str):
+        try:
+            challenge = OtpChallenge.objects.filter(id=challenge_id).only("phone").first()
+            normalized_phone = OtpService.normalize_phone(phone)
+            if not challenge or challenge.phone != normalized_phone:
+                raise GuestBookingOtpError(OtpService.GENERIC_VERIFY_ERROR)
+            OtpService.verify_challenge(
+                challenge_id=challenge_id,
+                code=code,
+                purpose=cls._purpose_for_reveal_type(reveal_type),
+                issue_tokens=False,
+            )
+            return GuestPhoneVerificationService.create_token(normalized_phone)
+        except Exception as exc:
+            if isinstance(exc, GuestBookingOtpError):
+                raise
+            raise GuestBookingOtpError(str(exc)) from exc
+
+    @staticmethod
+    def verify_guest_token(*, token: str, phone: str):
+        try:
+            return GuestPhoneVerificationService.verify_token(token=token, phone=phone)
+        except OtpError as exc:
             raise GuestBookingOtpError(str(exc)) from exc
 
 DEFAULT_PLATFORM_FEE_RATE = Decimal("0.05")
@@ -1391,8 +1494,9 @@ class BookingService:
 
     def create_booking(validated_data, user=None, is_walk_in=False):
         guest_email = validated_data.get("guest_email")
-        if not user and not guest_email and not validated_data.get("user"):
-            raise ValidationError("Either a user account or guest email is required to complete the booking.")
+        guest_phone = validated_data.get("guest_phone")
+        if not guest_phone or not str(guest_phone).strip():
+            raise ValidationError({"guest_phone": "Phone number is required for every booking."})
 
         items_data = validated_data.pop("items")
         
@@ -1769,20 +1873,21 @@ class BookingService:
         booking.save()
         logger.info(f"Booking {booking.id} status updated to CONFIRMED.")
         
-        BookingEmailService.send_booking_confirmation(booking)
+        _send_booking_confirmation_sms_first(booking, label="hotel booking")
         
-        NotificationService.create_notification(
-            user=booking.user,
-            notification_type=Notification.NotificationType.BOOKING_CONFIRMED,
-            title="Booking Confirmed",
-            message=f"Your booking {booking.booking_reference} at {booking.items.first().room.hotel.company.name} is confirmed.",
-            metadata={
-                'booking_reference': booking.booking_reference,
-                'booking_id': str(booking.id),
-                'hotel_name': booking.items.first().room.hotel.company.name
-            },
-            priority=Notification.Priority.HIGH
-        )
+        if booking.user_id:
+            NotificationService.create_notification(
+                user=booking.user,
+                notification_type=Notification.NotificationType.BOOKING_CONFIRMED,
+                title="Booking Confirmed",
+                message=f"Your booking {booking.booking_reference} at {booking.items.first().room.hotel.company.name} is confirmed.",
+                metadata={
+                    'booking_reference': booking.booking_reference,
+                    'booking_id': str(booking.id),
+                    'hotel_name': booking.items.first().room.hotel.company.name
+                },
+                priority=Notification.Priority.HIGH
+            )
 
         # Notify Vendor (Company Owner)
         try:
@@ -1840,9 +1945,9 @@ class EventSpaceBookingService:
         Creates a new Event Space Booking, validates availability, and decrements inventory, 
         using only the base price for calculation.
         """
-        guest_email = validated_data.get("guest_email")
-        if not user and not guest_email and not validated_data.get("user"):
-            raise ValidationError("Either a user account or guest email is required to complete the booking.")
+        guest_phone = validated_data.get("guest_phone")
+        if not guest_phone or not str(guest_phone).strip():
+            raise ValidationError({"guest_phone": "Phone number is required for every booking."})
 
         items_data = validated_data.pop("items")
         
@@ -2092,20 +2197,21 @@ class EventSpaceBookingService:
         booking.status = booking.BookingStatus.CONFIRMED
         booking.save()
 
-        BookingEmailService.send_booking_confirmation(booking)
+        _send_booking_confirmation_sms_first(booking, label="event space booking")
 
-        NotificationService.create_notification(
-            user=booking.user,
-            notification_type=Notification.NotificationType.BOOKING_CONFIRMED,
-            title="Event Space Booking Confirmed",
-            message=f"Your booking {booking.booking_reference} for {booking.items.first().event_space.title} is confirmed.",
-            metadata={
-                'booking_reference': booking.booking_reference,
-                'booking_id': str(booking.id),
-                'space_title': booking.items.first().event_space.title
-            },
-            priority=Notification.Priority.HIGH
-        )
+        if booking.user_id:
+            NotificationService.create_notification(
+                user=booking.user,
+                notification_type=Notification.NotificationType.BOOKING_CONFIRMED,
+                title="Event Space Booking Confirmed",
+                message=f"Your booking {booking.booking_reference} for {booking.items.first().event_space.title} is confirmed.",
+                metadata={
+                    'booking_reference': booking.booking_reference,
+                    'booking_id': str(booking.id),
+                    'space_title': booking.items.first().event_space.title
+                },
+                priority=Notification.Priority.HIGH
+            )
 
         # Notify Vendor
         try:
@@ -2849,9 +2955,9 @@ class GuestHouseBookingService:
         Creates a Guest House Booking, validates availability, 
         captures T&C snapshots, and updates inventory.
         """
-        guest_email = validated_data.get("guest_email")
-        if not user and not guest_email and not validated_data.get("renter"):
-             raise ValidationError("Either a user account or guest email is required to complete the booking.")
+        guest_phone = validated_data.get("guest_phone")
+        if not guest_phone or not str(guest_phone).strip():
+             raise ValidationError({"guest_phone": "Phone number is required for every booking."})
 
         items_data = validated_data.pop("items")
         terms_accepted = validated_data.pop("terms_accepted", False)
@@ -3015,9 +3121,32 @@ class GuestHouseBookingService:
                 rooms_info, booking.start_date, booking.end_date, increment=False
             )
 
-            BookingEmailService.send_booking_confirmation(booking)
-            
             return booking
+
+    @staticmethod
+    def _confirmation_phone(booking):
+        return booking.guest_phone or getattr(getattr(booking, "renter", None), "phone", "")
+
+    @staticmethod
+    def _send_confirmation_sms(booking):
+        phone = GuestHouseBookingService._confirmation_phone(booking)
+        if not phone:
+            return False
+
+        message = (
+            f"Your Mechot Marefiya guest house booking {booking.booking_reference} is confirmed "
+            f"for {booking.start_date} to {booking.end_date}. Total: {booking.total_price} {booking.currency}."
+        )
+        try:
+            send_sms(phone, message)
+            return True
+        except Exception as exc:
+            logger.warning(
+                "Could not send guesthouse booking confirmation SMS for %s: %s",
+                booking.id,
+                exc,
+            )
+            return False
 
     @staticmethod
     def confirm_booking(booking):
@@ -3035,7 +3164,7 @@ class GuestHouseBookingService:
         booking.status = booking.RentStatus.CONFIRMED
         booking.save()
         
-        BookingEmailService.send_booking_confirmation(booking)
+        GuestHouseBookingService._send_confirmation_sms(booking)
         
         try:
              renter = getattr(booking, 'renter', None) or getattr(booking, 'user', None)
@@ -3272,9 +3401,9 @@ class PropertyRentalBookingService:
     @transaction.atomic()
     @staticmethod
     def create_booking(validated_data, user=None):
-        guest_email = validated_data.get("guest_email")
-        if not user and not guest_email and not validated_data.get("renter"):
-            raise ValidationError("Either a user account or guest email is required to complete the booking.")
+        guest_phone = validated_data.get("guest_phone")
+        if not guest_phone or not str(guest_phone).strip():
+            raise ValidationError({"guest_phone": "Phone number is required for every booking."})
 
         property_listing = validated_data["property_listing"]
         if property_listing.individual_owner_id:
@@ -3287,6 +3416,9 @@ class PropertyRentalBookingService:
         terms_accepted = validated_data.pop("terms_accepted", False)
         terms_version = validated_data.pop("terms_version", "")
         payment_currency = validated_data.pop("payment_currency", property_listing.currency)
+        validated_data.pop("otp_challenge_id", None)
+        validated_data.pop("otp_code", None)
+        validated_data.pop("guest_verification_token", None)
 
         PropertyRentalAvailabilityService.validate_availability(
             property_listing,
@@ -3414,9 +3546,9 @@ class CarRentalService:
     @transaction.atomic()
     @staticmethod
     def create_booking(validated_data, user=None):
-        guest_email = validated_data.get("guest_email")
-        if not user and not guest_email and not validated_data.get("renter"):
-            raise ValidationError("Either a user account or guest email is required to complete the booking.")
+        guest_phone = validated_data.get("guest_phone")
+        if not guest_phone or not str(guest_phone).strip():
+            raise ValidationError({"guest_phone": "Phone number is required for every booking."})
 
         rental_items_data = validated_data.pop('rental_items')
         terms_accepted = validated_data.pop("terms_accepted", False)
@@ -3517,6 +3649,304 @@ class CarRentalService:
         return calculation["grand_total"]
 
     @staticmethod
+    def calculate_price_preview(*, start_date, end_date, items, display_currency=None, guest_phone=None):
+        nights = (end_date - start_date).days
+        total_items = []
+        item_subtotals = []
+
+        currencies = {
+            item["car_listing"].currency
+            for item in items
+            if getattr(item["car_listing"], "currency", None)
+        }
+        if len(currencies) > 1:
+            raise ValidationError(
+                {"items": f"All selected items must have the same currency. Found: {', '.join(sorted(currencies))}"}
+            )
+        currency = list(currencies)[0] if currencies else "ETB"
+
+        for item in items:
+            listing = item["car_listing"]
+            units = item["units_rent"]
+
+            availability = CarAvailabilityService.check_daily_availability(
+                car_listing=listing,
+                start_date=start_date,
+                end_date=end_date,
+                quantity=units,
+            )
+            if not availability.get("available", False):
+                raise BookingConflict(
+                    f"{listing.title} is not available: {availability.get('reason', 'unavailable')}"
+                )
+
+            price_details = PriceService.resolve_price_details_batch(listing, start_date, end_date)
+            item_base_total = sum(Decimal(str(detail["price_per_unit"])) for detail in price_details) * units
+            item_subtotals.append(item_base_total)
+            total_items.append(
+                {
+                    "id": str(listing.id),
+                    "title": listing.title,
+                    "units": units,
+                    "price_per_unit": f"{(price_details[0]['price_per_unit'] if price_details else listing.base_price):.2f}",
+                    "subtotal": f"{item_base_total:.2f}",
+                    "breakdown": price_details,
+                }
+            )
+
+        return {
+            "nights": nights,
+            "items": total_items,
+            **PriceCalculationService.calculate_preview_totals(
+                item_subtotals,
+                currency,
+                display_currency,
+                items=total_items,
+                fee_rate=get_effective_platform_fee_rate(phone=guest_phone),
+            ),
+        }
+
+    @staticmethod
+    def _extension_fee_rate(rental: "CarRental") -> Decimal:
+        snapshot = rental.snapshot if isinstance(rental.snapshot, dict) else {}
+        billing = snapshot.get("billing") if isinstance(snapshot, dict) else None
+        if isinstance(billing, dict):
+            try:
+                subtotal = Decimal(str(billing.get("subtotal_items", "0")))
+                platform_fee = Decimal(str(billing.get("platform_fee", "0")))
+                if subtotal > 0:
+                    return (platform_fee / subtotal).quantize(Decimal("0.0001"))
+            except Exception:
+                pass
+        return get_effective_platform_fee_rate(booking=rental)
+
+    @staticmethod
+    def _validate_extension_target(rental: "CarRental", *, new_end_date):
+        if rental.status != CarRental.RentStatus.CONFIRMED:
+            raise ValidationError(
+                {"detail": "Only confirmed car rentals can be extended."}
+            )
+        if new_end_date <= rental.end_date:
+            raise ValidationError(
+                {"new_end_date": "New end date must be after the current end date."}
+            )
+
+    @staticmethod
+    def _get_extension_items_subtotal(rental: "CarRental", *, extra_days: int) -> Decimal:
+        subtotal = Decimal("0.00")
+        for item in rental.rental_items.all():
+            subtotal += Decimal(item.subtotal(days=extra_days))
+        return subtotal
+
+    @staticmethod
+    def check_extension_availability(rental: "CarRental", *, new_end_date):
+        CarRentalService._validate_extension_target(rental, new_end_date=new_end_date)
+
+        for item in rental.rental_items.select_related("car_listing").all():
+            result = CarAvailabilityService.check_daily_availability(
+                car_listing=item.car_listing,
+                start_date=rental.end_date,
+                end_date=new_end_date,
+                quantity=item.units_rent,
+            )
+            if not result.get("available", False):
+                raise BookingConflict(
+                    f"{item.car_listing.title} is not available for the requested extension: "
+                    f"{result.get('reason', 'unavailable')}"
+                )
+
+    @staticmethod
+    def hold_extension_availability(rental: "CarRental", *, new_end_date):
+        CarRentalService.check_extension_availability(rental, new_end_date=new_end_date)
+        for item in rental.rental_items.select_related("car_listing").all():
+            CarAvailabilityService.reserve_daily_units(
+                item.car_listing,
+                rental.end_date,
+                new_end_date,
+                item.units_rent,
+            )
+
+    @staticmethod
+    def release_extension_hold(extension_request: "CarRentalExtensionRequest"):
+        if not extension_request.availability_held:
+            return extension_request
+
+        rental = extension_request.rental
+        for item in rental.rental_items.select_related("car_listing").all():
+            CarAvailabilityService.release_daily_units(
+                item.car_listing,
+                extension_request.original_end_date,
+                extension_request.requested_end_date,
+                item.units_rent,
+            )
+
+        extension_request.availability_held = False
+        extension_request.save(update_fields=["availability_held", "updated_at"])
+        return extension_request
+
+    @staticmethod
+    def expire_stale_extension_requests():
+        stale_statuses = [
+            CarRentalExtensionRequest.ExtensionStatus.REQUESTED,
+            CarRentalExtensionRequest.ExtensionStatus.PAYMENT_INITIATED,
+        ]
+        stale_requests = list(
+            CarRentalExtensionRequest.objects.select_related("rental")
+            .filter(status__in=stale_statuses, expires_at__lte=timezone.now())
+        )
+        for extension_request in stale_requests:
+            CarRentalService.mark_extension_request_failed(
+                extension_request,
+                status=CarRentalExtensionRequest.ExtensionStatus.EXPIRED,
+                reason="Extension request expired before payment verification.",
+            )
+        return len(stale_requests)
+
+    @staticmethod
+    def calculate_extension_preview(rental: "CarRental", *, new_end_date, payment_currency=None):
+        CarRentalService.expire_stale_extension_requests()
+        CarRentalService.check_extension_availability(rental, new_end_date=new_end_date)
+
+        extra_days = (new_end_date - rental.end_date).days
+        fee_rate = CarRentalService._extension_fee_rate(rental)
+        base_subtotal = CarRentalService._get_extension_items_subtotal(
+            rental,
+            extra_days=extra_days,
+        )
+        totals = PriceCalculationService.calculate_totals([base_subtotal], fee_rate=fee_rate)
+        payment_currency = payment_currency or rental.currency or "ETB"
+        payable_amount = totals["grand_total"]
+        exchange_rate = Decimal("1.0")
+
+        if payment_currency != rental.currency:
+            payable_amount, exchange_rate = convert_currency(
+                amount=payable_amount,
+                source_currency=rental.currency or "ETB",
+                target_currency=payment_currency,
+                return_rate=True,
+            )
+
+        return {
+            "booking_reference": rental.booking_reference,
+            "current_end_date": rental.end_date,
+            "new_end_date": new_end_date,
+            "extra_days": extra_days,
+            "extension_subtotal": base_subtotal.quantize(Decimal("0.01")),
+            "platform_fee": totals["platform_fee"].quantize(Decimal("0.01")),
+            "original_amount": totals["grand_total"].quantize(Decimal("0.01")),
+            "original_currency": rental.currency or "ETB",
+            "amount": Decimal(str(payable_amount)).quantize(Decimal("0.01")),
+            "currency": payment_currency,
+            "exchange_rate": Decimal(str(exchange_rate)),
+            "fee_rate": fee_rate,
+        }
+
+    @staticmethod
+    @transaction.atomic()
+    def create_extension_request(
+        rental: "CarRental",
+        *,
+        new_end_date,
+        requested_by=None,
+        payment_currency=None,
+    ):
+        CarRentalService.expire_stale_extension_requests()
+
+        active_statuses = [
+            CarRentalExtensionRequest.ExtensionStatus.REQUESTED,
+            CarRentalExtensionRequest.ExtensionStatus.PAYMENT_INITIATED,
+        ]
+        existing = rental.extension_requests.filter(status__in=active_statuses).order_by("-created_at").first()
+        if existing:
+            raise ValidationError(
+                {"detail": "There is already an active extension request for this rental."}
+            )
+
+        preview = CarRentalService.calculate_extension_preview(
+            rental,
+            new_end_date=new_end_date,
+            payment_currency=payment_currency,
+        )
+        CarRentalService.hold_extension_availability(rental, new_end_date=new_end_date)
+
+        extension_request = CarRentalExtensionRequest.objects.create(
+            rental=rental,
+            requested_by=requested_by,
+            original_end_date=rental.end_date,
+            requested_end_date=new_end_date,
+            extra_days=preview["extra_days"],
+            amount=preview["amount"],
+            currency=preview["currency"],
+            availability_held=True,
+            expires_at=timezone.now()
+            + timezone.timedelta(
+                minutes=getattr(settings, "CAR_RENTAL_EXTENSION_REQUEST_TTL_MINUTES", 30)
+            ),
+            snapshot={
+                "booking_reference": rental.booking_reference,
+                "original_end_date": rental.end_date.isoformat(),
+                "requested_end_date": new_end_date.isoformat(),
+                "extra_days": preview["extra_days"],
+                "extension_subtotal": f"{preview['extension_subtotal']:.2f}",
+                "platform_fee": f"{preview['platform_fee']:.2f}",
+                "grand_total": f"{preview['original_amount']:.2f}",
+                "payment_amount": f"{preview['amount']:.2f}",
+                "payment_currency": preview["currency"],
+                "exchange_rate": str(preview["exchange_rate"]),
+            },
+        )
+        return extension_request, preview
+
+    @staticmethod
+    @transaction.atomic()
+    def mark_extension_request_failed(
+        extension_request: "CarRentalExtensionRequest",
+        *,
+        status=None,
+        reason=None,
+    ):
+        if extension_request.status == CarRentalExtensionRequest.ExtensionStatus.PAID_APPLIED:
+            return extension_request
+
+        CarRentalService.release_extension_hold(extension_request)
+        extension_request.status = status or CarRentalExtensionRequest.ExtensionStatus.FAILED
+        snapshot = extension_request.snapshot if isinstance(extension_request.snapshot, dict) else {}
+        if reason:
+            snapshot["failure_reason"] = reason
+            extension_request.snapshot = snapshot
+        extension_request.save(update_fields=["status", "snapshot", "updated_at"])
+        return extension_request
+
+    @staticmethod
+    @transaction.atomic()
+    def apply_paid_extension(extension_request: "CarRentalExtensionRequest"):
+        if extension_request.status == CarRentalExtensionRequest.ExtensionStatus.PAID_APPLIED:
+            return extension_request.rental
+
+        if extension_request.is_expired:
+            raise ValidationError("Car rental extension request has expired.")
+
+        rental = CarRental.objects.select_for_update().get(id=extension_request.rental_id)
+        if rental.status != CarRental.RentStatus.CONFIRMED:
+            raise BookingConflict("Only confirmed car rentals can be extended.")
+
+        if extension_request.availability_held:
+            extension_request.availability_held = False
+
+        rental.end_date = extension_request.requested_end_date
+        fee_rate = CarRentalService._extension_fee_rate(rental)
+        rental.total_price = CarRentalService.get_booking_total(rental, fee_rate=fee_rate)
+        rental.snapshot = CarRentalService._build_snapshot(rental, fee_rate=fee_rate)
+        rental.save(update_fields=["end_date", "total_price", "snapshot", "updated_at"])
+
+        extension_request.status = CarRentalExtensionRequest.ExtensionStatus.PAID_APPLIED
+        extension_request.applied_at = timezone.now()
+        extension_request.save(
+            update_fields=["status", "applied_at", "availability_held", "updated_at"]
+        )
+        return rental
+
+    @staticmethod
     @transaction.atomic()
     def reschedule_booking(rental: "CarRental", *, start_date, end_date):
         if rental.status == CarRental.RentStatus.CANCELLED:
@@ -3568,6 +3998,25 @@ class CarRentalService:
         return rental
 
     @staticmethod
+    @transaction.atomic()
+    def cancel_booking(rental):
+        if rental.status == rental.RentStatus.CANCELLED:
+            raise BookingConflict("Rental is already cancelled.")
+
+        rental.status = rental.RentStatus.CANCELLED
+        rental.save(update_fields=["status", "updated_at"])
+
+        for item in rental.rental_items.select_related("car_listing").all():
+            CarAvailabilityService.update_availability(
+                item.car_listing,
+                item.units_rent,
+                rental.start_date,
+                rental.end_date,
+                increment=True,
+            )
+        return rental
+
+    @staticmethod
     def confirm_booking(rental):
         if rental.status == rental.RentStatus.CONFIRMED:
             return rental
@@ -3583,7 +4032,7 @@ class CarRentalService:
         rental.status = rental.RentStatus.CONFIRMED
         rental.save()
         
-        BookingEmailService.send_booking_confirmation(rental)
+        _send_booking_confirmation_sms_first(rental, label="car rental")
         
         try:
              renter = getattr(rental, 'renter', None) or getattr(rental, 'user', None)

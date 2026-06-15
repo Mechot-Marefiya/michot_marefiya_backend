@@ -6,10 +6,11 @@
 from decimal import Decimal
 
 import pytest
+from django.core.exceptions import ValidationError
 from django.contrib.contenttypes.models import ContentType
 
 from apps.listing.models import Booking
-from apps.payment.models import PaymentTransaction
+from apps.payment.models import PaymentPlatformConfig, PaymentTransaction
 
 pytestmark = pytest.mark.django_db
 
@@ -82,3 +83,53 @@ def test_payment_transaction_allows_property_rental_booking_type(booking):
     )
 
     assert tx.booking_type == "propertyrental"
+
+
+def test_payment_platform_config_accepts_valid_percentage_default():
+    config = PaymentPlatformConfig.objects.create(
+        name="main",
+        default_split_type=PaymentPlatformConfig.SplitType.PERCENTAGE,
+        default_split_value=Decimal("0.0200"),
+        default_car_sale_reveal_fee=Decimal("100.00"),
+        default_property_sale_reveal_fee=Decimal("150.00"),
+    )
+
+    assert config.default_split_type == PaymentPlatformConfig.SplitType.PERCENTAGE
+    assert config.default_split_value == Decimal("0.0200")
+    assert config.default_car_sale_reveal_fee == Decimal("100.00")
+    assert config.default_property_sale_reveal_fee == Decimal("150.00")
+
+
+def test_payment_platform_config_rejects_invalid_percentage_value():
+    config = PaymentPlatformConfig(
+        name="bad-percent",
+        default_split_type=PaymentPlatformConfig.SplitType.PERCENTAGE,
+        default_split_value=Decimal("1.5000"),
+    )
+
+    with pytest.raises(ValidationError):
+        config.full_clean()
+
+
+def test_payment_platform_config_rejects_negative_flat_value():
+    config = PaymentPlatformConfig(
+        name="bad-flat",
+        default_split_type=PaymentPlatformConfig.SplitType.FLAT,
+        default_split_value=Decimal("-1.0000"),
+    )
+
+    with pytest.raises(ValidationError):
+        config.full_clean()
+
+
+def test_payment_platform_config_rejects_non_positive_reveal_fees():
+    config = PaymentPlatformConfig(
+        name="bad-reveal-fee",
+        default_split_type=PaymentPlatformConfig.SplitType.PERCENTAGE,
+        default_split_value=Decimal("0.0200"),
+        default_car_sale_reveal_fee=Decimal("0.00"),
+        default_property_sale_reveal_fee=Decimal("-1.00"),
+    )
+
+    with pytest.raises(ValidationError):
+        config.full_clean()

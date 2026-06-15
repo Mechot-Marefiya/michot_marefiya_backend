@@ -1,7 +1,84 @@
+from decimal import Decimal
+
 from django.db import models
+from django.db.models import Q
+from django.core.exceptions import ValidationError
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 from apps.core.models import AbstractBaseModel
+
+
+class PaymentPlatformConfig(AbstractBaseModel):
+    class SplitType(models.TextChoices):
+        PERCENTAGE = "percentage", "Percentage"
+        FLAT = "flat", "Flat"
+
+    name = models.CharField(max_length=100, default="default", unique=True)
+    is_active = models.BooleanField(default=True)
+    default_split_type = models.CharField(
+        max_length=20,
+        choices=SplitType.choices,
+        default=SplitType.PERCENTAGE,
+        help_text="Default platform commission split type.",
+    )
+    default_split_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        default=Decimal("0.0200"),
+        help_text="Default platform commission. For percentage, 0.02 means 2%.",
+    )
+    default_car_sale_reveal_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("100.00"),
+        help_text="Default contact reveal fee for car sale listings.",
+    )
+    default_property_sale_reveal_fee = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("100.00"),
+        help_text="Default contact reveal fee for property sale listings.",
+    )
+
+    class Meta:
+        verbose_name = "Payment Platform Config"
+        verbose_name_plural = "Payment Platform Configs"
+        db_table = "payment_platform_configs"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["is_active"],
+                condition=Q(is_active=True),
+                name="one_active_payment_platform_config",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        if self.default_split_value < Decimal("0.0000"):
+            raise ValidationError({"default_split_value": "Split value cannot be negative."})
+        if (
+            self.default_split_type == self.SplitType.PERCENTAGE
+            and self.default_split_value > Decimal("1.0000")
+        ):
+            raise ValidationError(
+                {"default_split_value": "Percentage split value must be between 0 and 1."}
+            )
+        if self.default_car_sale_reveal_fee <= Decimal("0.00"):
+            raise ValidationError(
+                {"default_car_sale_reveal_fee": "Car sale reveal fee must be greater than 0."}
+            )
+        if self.default_property_sale_reveal_fee <= Decimal("0.00"):
+            raise ValidationError(
+                {"default_property_sale_reveal_fee": "Property sale reveal fee must be greater than 0."}
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        status = "active" if self.is_active else "inactive"
+        return f"{self.name} payment config ({status})"
 
 
 class PaymentTransaction(AbstractBaseModel):
@@ -33,6 +110,7 @@ class PaymentTransaction(AbstractBaseModel):
             ('guesthouse', 'Guesthouse'),
             ('eventspace', 'Event Space'),
             ('carrental', 'Car Rental'),
+            ('carrental_extension', 'Car Rental Extension'),
             ('propertyrental', 'Property Rental'),
             ('contact_reveal', 'Contact Reveal'),
         ],

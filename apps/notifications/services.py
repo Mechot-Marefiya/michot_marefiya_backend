@@ -3,6 +3,7 @@ from django.utils import timezone
 from django.core.cache import cache
 import logging
 from .models import Notification, NotificationPreference, NotificationTemplate
+from apps.core.services.email_service import has_deliverable_email
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +70,8 @@ class NotificationService:
                 raise ValueError("title and message are required when no notification template exists.")
 
         in_app_allowed = True
-        email_allowed = True
-        sms_allowed = False
+        email_allowed = has_deliverable_email(user)
+        sms_allowed = bool(getattr(user, "phone", None))
         push_allowed = True
         
         try:
@@ -81,9 +82,9 @@ class NotificationService:
             push_allowed = NotificationService._preference_allowed(prefs, "push", notification_type)
             
             if notification_type in NotificationService.MANDATORY_TYPES:
-                email_allowed = True
+                email_allowed = has_deliverable_email(user)
                 in_app_allowed = True
-                sms_allowed = True
+                sms_allowed = bool(getattr(user, "phone", None))
                 push_allowed = True
         except NotificationPreference.DoesNotExist:
             pass
@@ -101,30 +102,6 @@ class NotificationService:
                 delivered_in_app=False
             )
             cache.delete(get_unread_count_cache_key(user.id))
-
-        if template and email_allowed:
-            try:
-                email_subject = NotificationService._render_template(template.email_subject_template, metadata)
-                email_body = NotificationService._render_template(template.email_body_template, metadata)
-                email_html = NotificationService._render_template(template.email_html_template, metadata) if template.email_html_template else None
-                
-                from apps.notifications.tasks import send_notification_email_task
-                send_notification_email_task.delay(
-                    user.id,
-                    email_subject,
-                    email_body,
-                    email_html,
-                    str(notification.id) if notification else None,
-                )
-                
-                if notification:
-                    notification.delivered_email = True  
-                    notification.email_sent_at = timezone.now()
-                    notification.save(update_fields=['delivered_email', 'email_sent_at'])
-
-            except Exception as e:
-                logger.error(f"Failed to send email for notification type {notification_type} to user {user.email}: {str(e)}", exc_info=True)
-                NotificationService._record_delivery_error(notification, "email", e)
 
         if sms_allowed:
             try:
@@ -144,6 +121,25 @@ class NotificationService:
             except Exception as e:
                 logger.error(f"Failed to send SMS for notification type {notification_type} to user {user.email}: {str(e)}", exc_info=True)
                 NotificationService._record_delivery_error(notification, "sms", e)
+
+        if template and email_allowed:
+            try:
+                email_subject = NotificationService._render_template(template.email_subject_template, metadata)
+                email_body = NotificationService._render_template(template.email_body_template, metadata)
+                email_html = NotificationService._render_template(template.email_html_template, metadata) if template.email_html_template else None
+                
+                from apps.notifications.tasks import send_notification_email_task
+                send_notification_email_task.delay(
+                    user.id,
+                    email_subject,
+                    email_body,
+                    email_html,
+                    str(notification.id) if notification else None,
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to send email for notification type {notification_type} to user {user.email}: {str(e)}", exc_info=True)
+                NotificationService._record_delivery_error(notification, "email", e)
 
         if push_allowed:
             try:

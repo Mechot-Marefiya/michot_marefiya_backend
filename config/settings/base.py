@@ -45,6 +45,13 @@ OTP_TTL_SECONDS = OTP_EXPIRY_SECONDS
 OTP_MAX_ATTEMPTS = env("OTP_MAX_ATTEMPTS", default=5, cast=int)
 OTP_COOLDOWN_SECONDS = env("OTP_COOLDOWN_SECONDS", default=60, cast=int)
 OTP_REDIS_KEY_PREFIX = env("OTP_REDIS_KEY_PREFIX", default="otp")
+GUEST_PHONE_VERIFICATION_MAX_AGE_SECONDS = env(
+    "GUEST_PHONE_VERIFICATION_MAX_AGE_SECONDS",
+    default=31536000,
+    cast=int,
+)
+DEFAULT_CAR_SALE_REVEAL_FEE = env("DEFAULT_CAR_SALE_REVEAL_FEE", default=100, cast=Decimal)
+DEFAULT_PROPERTY_SALE_REVEAL_FEE = env("DEFAULT_PROPERTY_SALE_REVEAL_FEE", default=100, cast=Decimal)
 MAP_PROVIDER = env("MAP_PROVIDER", default="geoapify").strip().lower()
 GEOAPIFY_API_KEY = env("GEOAPIFY_API_KEY", default="")
 GEOAPIFY_GEOCODING_URL = env(
@@ -321,6 +328,31 @@ Obtain your token from `/api/v1/auth/token/`.
             ("confirmed", "Confirmed"),
             ("cancelled", "Cancelled"),
         ],
+        "PaymentInitializeBookingTypeEnum": [
+            ("booking", "booking"),
+            ("guesthouse", "guesthouse"),
+            ("eventspace", "eventspace"),
+            ("carrental", "carrental"),
+            ("propertyrental", "propertyrental"),
+        ],
+        "PaymentTransactionBookingTypeEnum": [
+            ("booking", "Hotel Room"),
+            ("guesthouse", "Guesthouse"),
+            ("eventspace", "Event Space"),
+            ("carrental", "Car Rental"),
+            ("carrental_extension", "Car Rental Extension"),
+            ("propertyrental", "Property Rental"),
+            ("contact_reveal", "Contact Reveal"),
+        ],
+        "BookingType7c6Enum": [
+            ("booking", "Hotel Room"),
+            ("guesthouse", "Guesthouse"),
+            ("eventspace", "Event Space"),
+            ("carrental", "Car Rental"),
+            ("carrental_extension", "Car Rental Extension"),
+            ("propertyrental", "Property Rental"),
+            ("contact_reveal", "Contact Reveal"),
+        ],
         "PropertyListingTypeEnum": [
             ("apartment", "Apartment"),
             ("condo", "Condo"),
@@ -419,6 +451,12 @@ CELERY_RESULT_SERIALIZER = 'json'
 BOOKING_PENDING_TIMEOUT_MINUTES = 15
 PROPERTY_RENTAL_TAX_RATE = Decimal("0.15")
 PLATFORM_FEE_RATE = 0.05
+PLATFORM_DEFAULT_SPLIT_TYPE = env("PLATFORM_DEFAULT_SPLIT_TYPE", default="percentage")
+PLATFORM_DEFAULT_SPLIT_VALUE = env(
+    "PLATFORM_DEFAULT_SPLIT_VALUE",
+    default=Decimal("0.02"),
+    cast=Decimal,
+)
 
 
 CELERY_BEAT_SCHEDULE = {

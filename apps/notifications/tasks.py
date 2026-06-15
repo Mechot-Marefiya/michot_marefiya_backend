@@ -41,8 +41,16 @@ def send_notification_email_task(user_id, subject, body, html_body=None, notific
     User = get_user_model()
     try:
         user = User.objects.get(id=user_id)
-        EmailService.send_notification_email(user, subject, body, html_body)
-        _mark_delivery(notification_id, "email")
+        sent = EmailService.send_notification_email(user, subject, body, html_body)
+        if sent:
+            _mark_delivery(notification_id, "email")
+        else:
+            _mark_delivery(
+                notification_id,
+                "email",
+                success=False,
+                error="User has no deliverable email address.",
+            )
     except User.DoesNotExist:
         logger.warning(f"User {user_id} not found for notification email task.")
     except Exception as e:

@@ -107,7 +107,12 @@ from apps.listing.serializers import (
     CarAvailabilitySerializer,
     AvailabilityCheckSerializer,
     CarSearchSerializer,
+    CarRentalPreviewSerializer,
     CarRentalSerializer,
+    CarRentalExtensionInitiateResponseSerializer,
+    CarRentalExtensionInitiateSerializer,
+    CarRentalExtensionPreviewResponseSerializer,
+    CarRentalExtensionPreviewSerializer,
     CarRentalRescheduleSerializer,
     EventSpaceBookingResponseSerializer,
     EventSpaceBookingSerializer,
@@ -115,8 +120,12 @@ from apps.listing.serializers import (
     AddonOfferingSerializer,
     AddonOfferingListSerializer,
     BookingLookupSerializer,
+    GuestCarRentalHistoryAccessSerializer,
+    GuestCarRentalLookupSerializer,
+    GuestCarRentalCancellationSerializer,
     GuestCancellationSerializer,
     GuestBookingOtpRequestSerializer,
+    GuestContactRevealOtpRequestSerializer,
     VerifyActionSerializer,
     SeasonSerializer, SeasonalRateSerializer,
     DiscoveryListingSerializer,
@@ -129,10 +138,11 @@ from apps.listing.services import (
     StayAvailabilityService, BookingService, CarAvailabilityService, 
     PriceService, GuestHouseAvailabilityService, EventSpaceAvailabilityService,
     PriceCalculationService, CarRentalService, PropertyRentalAvailabilityService,
-    PropertyRentalBookingService, get_effective_platform_fee_rate,
+    PropertyRentalBookingService, get_effective_platform_fee_rate, GuestBookingOtpError,
+    GuestContactRevealOtpService, _phone_variants,
     verify_listing, unverify_listing,
 )
-from apps.payment.services import ContactRevealPaymentService
+from apps.payment.services import ChapaPaymentService, ContactRevealPaymentService
 from apps.listing.exceptions import BookingConflict
 from rest_framework.exceptions import PermissionDenied
 from services.maps import build_map_pin, calculate_distance_km, find_listings_near, get_bounding_box
@@ -728,6 +738,64 @@ def _request_guest_booking_otp(request, *, booking_type):
             "phone": challenge.phone,
         },
         status=status.HTTP_201_CREATED,
+    )
+
+
+def _assert_guest_rental_phone_matches(rental, guest_phone):
+    rental_variants = set(_phone_variants(getattr(rental, "guest_phone", "")))
+    request_variants = set(_phone_variants(guest_phone))
+    if not rental_variants or not request_variants or rental_variants.isdisjoint(request_variants):
+        raise PermissionDenied("Verified phone does not match this rental.")
+
+
+def _request_guest_contact_reveal_otp(request, *, reveal_type):
+    serializer = GuestContactRevealOtpRequestSerializer(
+        data=request.data,
+        context={"reveal_type": reveal_type},
+    )
+    serializer.is_valid(raise_exception=True)
+    challenge = serializer.save()
+    return Response(
+        {
+            "success": True,
+            "challenge_id": challenge.challenge_id,
+            "challenge_token": challenge.challenge_id,
+            "purpose": "guest_contact_reveal",
+            "reveal_type": challenge.booking_type,
+            "expires_at": challenge.expires_at,
+            "cooldown_seconds": int(getattr(settings, "OTP_COOLDOWN_SECONDS", 60)),
+            "phone": challenge.phone,
+        },
+        status=status.HTTP_201_CREATED,
+    )
+
+
+def _verify_guest_contact_reveal_request(serializer, *, reveal_type):
+    buyer_phone = serializer.validated_data.get("buyer_phone")
+    guest_verification_token = serializer.validated_data.get("guest_verification_token")
+
+    if not buyer_phone:
+        raise GuestBookingOtpError("Guest contact reveal requires buyer_phone.")
+
+    if guest_verification_token:
+        GuestContactRevealOtpService.verify_guest_token(
+            token=guest_verification_token,
+            phone=buyer_phone,
+        )
+        return guest_verification_token
+
+    otp_challenge_id = serializer.validated_data.get("otp_challenge_id")
+    otp_code = serializer.validated_data.get("otp_code")
+    if not otp_challenge_id or not otp_code:
+        raise GuestBookingOtpError(
+            "Guest contact reveal requires buyer_phone and either guest_verification_token or otp_challenge_id with otp_code."
+        )
+
+    return GuestContactRevealOtpService.verify_challenge(
+        challenge_id=otp_challenge_id,
+        code=otp_code,
+        phone=buyer_phone,
+        reveal_type=reveal_type,
     )
 
 
@@ -2022,8 +2090,8 @@ class CarSaleListingViewSet(SavedListingDeletionNotificationMixin, AbstractModel
     def get_permissions(self):
         if self.action in ["list", "retrieve"]:
             return [AllowAny()]
-        if self.action in ["request_contact", "contact"]:
-            return [IsAuthenticated()]
+        if self.action in ["request_contact", "contact", "guest_otp"]:
+            return [AllowAny()]
         if self.action in ["verify", "unverify"]:
             return [IsAdmin()]
         return [IsListingOwner()]
@@ -2092,27 +2160,47 @@ class CarSaleListingViewSet(SavedListingDeletionNotificationMixin, AbstractModel
     @action(detail=True, methods=["post"], url_path="request-contact")
     def request_contact(self, request, pk=None):
         listing = self.get_object()
-        if self._is_listing_owner(listing):
+        if request.user.is_authenticated and self._is_listing_owner(listing):
             return Response(
                 {"detail": "Listing owners cannot request their own seller contact."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        serializer = ContactRevealRequestSerializer(data=request.data)
+        serializer = ContactRevealRequestSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        buyer = request.user if request.user.is_authenticated else None
+        tx_ref = request.query_params.get("tx_ref") or serializer.validated_data.get("tx_ref")
+        guest_verification_token = None
+
+        if buyer is None:
+            try:
+                guest_verification_token = _verify_guest_contact_reveal_request(
+                    serializer,
+                    reveal_type="car_sale_reveal",
+                )
+            except GuestBookingOtpError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         reveal_request = ContactRevealPaymentService.create_reveal_request(
             listing=listing,
-            buyer=request.user,
+            buyer=buyer,
             buyer_note=serializer.validated_data.get("buyer_note", ""),
             buyer_phone=serializer.validated_data.get("buyer_phone", ""),
         )
 
         if reveal_request.status == ContactRevealRequest.RevealStatus.PAID_REVEALED:
+            contact_kwargs = {"listing": listing}
+            if buyer is not None:
+                contact_kwargs["buyer"] = buyer
+            else:
+                contact_kwargs["tx_ref"] = tx_ref or reveal_request.tx_ref
             return Response(
                 {
                     "success": True,
                     "contact_unlocked": True,
                     "reveal_request": ContactRevealRequestResponseSerializer(reveal_request).data,
+                    "contact": ContactRevealPaymentService.get_unlocked_contact(**contact_kwargs),
+                    "guest_verification_token": guest_verification_token,
                 },
                 status=status.HTTP_200_OK,
             )
@@ -2128,18 +2216,35 @@ class CarSaleListingViewSet(SavedListingDeletionNotificationMixin, AbstractModel
                 "checkout_url": result["checkout_url"],
                 "tx_ref": result["tx_ref"],
                 "reveal_request": ContactRevealRequestResponseSerializer(reveal_request).data,
+                "guest_verification_token": guest_verification_token,
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @extend_schema(
+        summary="Request guest car-sale contact reveal phone OTP",
+        request=GuestContactRevealOtpRequestSerializer,
+        responses={201: OpenApiTypes.OBJECT},
+    )
+    @action(detail=False, methods=["post"], url_path="guest-otp")
+    def guest_otp(self, request):
+        return _request_guest_contact_reveal_otp(request, reveal_type="car_sale_reveal")
 
     @extend_schema(responses={200: CarSaleContactSerializer, 403: OpenApiTypes.OBJECT})
     @action(detail=True, methods=["get"], url_path="contact")
     def contact(self, request, pk=None):
         listing = self.get_object()
-        contact = ContactRevealPaymentService.get_unlocked_contact(
-            listing=listing,
-            buyer=request.user,
-        )
+        if request.user.is_authenticated:
+            contact = ContactRevealPaymentService.get_unlocked_contact(
+                listing=listing,
+                buyer=request.user,
+            )
+        else:
+            tx_ref = request.query_params.get("tx_ref")
+            contact = ContactRevealPaymentService.get_unlocked_contact(
+                listing=listing,
+                tx_ref=tx_ref,
+            )
         serializer = CarSaleContactSerializer(contact)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -2197,8 +2302,8 @@ class PropertySaleListingViewSet(SavedListingDeletionNotificationMixin, Abstract
             return [AllowAny()]
         if self.action in ["verify", "unverify"]:
             return [IsAdmin()]
-        if self.action == "request_contact":
-            return [IsAuthenticated()]
+        if self.action in ["request_contact", "contact", "guest_otp"]:
+            return [AllowAny()]
         return [IsAuthenticated()]
 
     def get_serializer_class(self):
@@ -2292,32 +2397,47 @@ class PropertySaleListingViewSet(SavedListingDeletionNotificationMixin, Abstract
     @action(detail=True, methods=["post"], url_path="request-contact")
     def request_contact(self, request, pk=None):
         listing = self.get_object()
-        if self._is_listing_owner(listing):
+        if request.user.is_authenticated and self._is_listing_owner(listing):
             return Response(
                 {"detail": "Listing owners cannot request their own seller contact."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        serializer = ContactRevealRequestSerializer(data=request.data)
+        serializer = ContactRevealRequestSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        buyer = request.user if request.user.is_authenticated else None
+        guest_verification_token = None
+
+        if buyer is None:
+            try:
+                guest_verification_token = _verify_guest_contact_reveal_request(
+                    serializer,
+                    reveal_type="property_sale_reveal",
+                )
+            except GuestBookingOtpError as exc:
+                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         reveal_request = ContactRevealPaymentService.create_reveal_request(
             listing=listing,
-            buyer=request.user,
+            buyer=buyer,
             buyer_note=serializer.validated_data.get("buyer_note", ""),
             buyer_phone=serializer.validated_data.get("buyer_phone", ""),
         )
 
         if reveal_request.status == PropertyContactRevealRequest.RevealStatus.PAID_REVEALED:
-            contact = ContactRevealPaymentService.get_unlocked_contact(
-                listing=listing,
-                buyer=request.user,
-            )
+            contact_kwargs = {"listing": listing}
+            if buyer is not None:
+                contact_kwargs["buyer"] = buyer
+            else:
+                contact_kwargs["tx_ref"] = reveal_request.tx_ref
+            contact = ContactRevealPaymentService.get_unlocked_contact(**contact_kwargs)
             return Response(
                 {
                     "success": True,
                     "contact_unlocked": True,
                     "reveal_request": PropertyContactRevealRequestResponseSerializer(reveal_request).data,
                     "contact": contact,
+                    "guest_verification_token": guest_verification_token,
                 },
                 status=status.HTTP_200_OK,
             )
@@ -2333,9 +2453,36 @@ class PropertySaleListingViewSet(SavedListingDeletionNotificationMixin, Abstract
                 "checkout_url": result["checkout_url"],
                 "tx_ref": result["tx_ref"],
                 "reveal_request": PropertyContactRevealRequestResponseSerializer(reveal_request).data,
+                "guest_verification_token": guest_verification_token,
             },
             status=status.HTTP_201_CREATED,
         )
+
+    @extend_schema(
+        summary="Request guest property-sale contact reveal phone OTP",
+        request=GuestContactRevealOtpRequestSerializer,
+        responses={201: OpenApiTypes.OBJECT},
+    )
+    @action(detail=False, methods=["post"], url_path="guest-otp")
+    def guest_otp(self, request):
+        return _request_guest_contact_reveal_otp(request, reveal_type="property_sale_reveal")
+
+    @extend_schema(responses={200: CarSaleContactSerializer, 403: OpenApiTypes.OBJECT})
+    @action(detail=True, methods=["get"], url_path="contact")
+    def contact(self, request, pk=None):
+        listing = self.get_object()
+        if request.user.is_authenticated:
+            contact = ContactRevealPaymentService.get_unlocked_contact(
+                listing=listing,
+                buyer=request.user,
+            )
+        else:
+            contact = ContactRevealPaymentService.get_unlocked_contact(
+                listing=listing,
+                tx_ref=request.query_params.get("tx_ref"),
+            )
+        serializer = CarSaleContactSerializer(contact)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
     @extend_schema(
         request=VerifyActionSerializer,
@@ -2382,7 +2529,7 @@ class CarRentalViewSet(AbstractModelViewSet):
         return context
 
     def get_permissions(self):
-        if self.action in ['create', 'lookup', 'guest_otp']:
+        if self.action in ['create', 'lookup', 'guest_otp', 'guest_rentals', 'price_preview', 'extension_price_preview', 'request_extension']:
             return [AllowAny()]
         elif self.action in ['list', 'retrieve', 'my_rentals', 'rental_stats']:
             return [IsAuthenticated()]
@@ -2392,6 +2539,9 @@ class CarRentalViewSet(AbstractModelViewSet):
     def get_throttles(self):
         if self.action in ['create', 'guest_otp']:
             self.throttle_scope = 'booking_create'
+            return [ScopedRateThrottle()]
+        if self.action == 'price_preview':
+            self.throttle_scope = 'availability_check'
             return [ScopedRateThrottle()]
         return super().get_throttles()
 
@@ -2427,27 +2577,36 @@ class CarRentalViewSet(AbstractModelViewSet):
 
     @extend_schema(
         summary="Lookup car rental status (Guest)",
-        description="Retrieve rental details using reference and guest email. No login required.",
-        parameters=[
-            OpenApiParameter("reference", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
-            OpenApiParameter("email", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
-        ],
+        description=(
+            "Retrieve guest car rental details using a verified guest phone session. "
+            "A legacy email compatibility bridge remains available temporarily."
+        ),
+        parameters=[GuestCarRentalLookupSerializer],
         responses={200: CarRentalSerializer, 404: OpenApiTypes.OBJECT}
     )
     @action(detail=False, methods=['get'], url_path='lookup', permission_classes=[AllowAny])
     def lookup(self, request):
-        serializer = BookingLookupSerializer(data=request.query_params)
+        serializer = GuestCarRentalLookupSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
-        
+
         reference = serializer.validated_data['reference']
-        email = serializer.validated_data['email']
-        
-        rental = get_object_or_404(
-            CarRental.objects.prefetch_related("rental_items", "rental_items__car_listing"),
-            booking_reference=reference,
-            guest_email=email
-        )
-        
+        queryset = CarRental.objects.prefetch_related("rental_items", "rental_items__car_listing")
+        email = serializer.validated_data.get("email")
+
+        if email:
+            rental = get_object_or_404(
+                queryset,
+                booking_reference=reference,
+                guest_email__iexact=email,
+            )
+        else:
+            rental = get_object_or_404(
+                queryset,
+                booking_reference=reference,
+                renter__isnull=True,
+            )
+            _assert_guest_rental_phone_matches(rental, serializer.validated_data["guest_phone"])
+
         response_serializer = CarRentalSerializer(rental, context=self.get_serializer_context())
         return Response(response_serializer.data)
 
@@ -2487,6 +2646,41 @@ class CarRentalViewSet(AbstractModelViewSet):
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    @extend_schema(
+        summary="Price preview for car rental selection",
+        description="Get a consolidated price quote for one or more cars before creating the rental or starting payment.",
+        request=CarRentalPreviewSerializer,
+        parameters=[
+            OpenApiParameter(
+                name="display_currency",
+                type=OpenApiTypes.STR,
+                location=OpenApiParameter.QUERY,
+                description="Optional: Request price preview in a specific currency (e.g., USD) using triangulation.",
+            )
+        ],
+        responses={200: PricePreviewResponseSerializer, 400: OpenApiTypes.OBJECT, 409: OpenApiTypes.OBJECT},
+    )
+    @action(detail=False, methods=['post'], url_path='price-preview')
+    def price_preview(self, request):
+        serializer = CarRentalPreviewSerializer(data=request.data, context=self.get_serializer_context())
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+        preview_phone = data.get('guest_phone') or (request.user.phone if request.user.is_authenticated else None)
+
+        try:
+            payload = CarRentalService.calculate_price_preview(
+                start_date=data['start_date'],
+                end_date=data['end_date'],
+                items=data['items'],
+                display_currency=get_display_currency(request),
+                guest_phone=preview_phone,
+            )
+        except BookingConflict as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        return Response(payload, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=['post'])
     def confirm(self, request, pk=None):
         rental = self.get_object()
@@ -2510,13 +2704,19 @@ class CarRentalViewSet(AbstractModelViewSet):
         summary="Cancel a car rental",
         description=(
             "Cancel a car rental and restore availability. "
+            "Authenticated owners keep the existing flow, while guest rentals can be cancelled "
+            "with a verified guest phone session. "
             "Booking cancellation does not create a refund because the platform does not support refunds."
         ),
-        responses={200: CarRentalSerializer, 400: OpenApiTypes.OBJECT},
+        request=GuestCarRentalCancellationSerializer,
+        responses={200: CarRentalSerializer, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
     )
-    @action(detail=True, methods=['post'])
+    @action(detail=True, methods=['post'], permission_classes=[AllowAny])
     def cancel(self, request, pk=None):
-        rental = self.get_object()
+        rental = get_object_or_404(
+            CarRental.objects.prefetch_related("rental_items", "rental_items__car_listing"),
+            pk=pk,
+        )
         if rental.status == CarRental.RentStatus.CANCELLED:
             return Response(
                 _with_booking_no_refund_policy(
@@ -2526,17 +2726,24 @@ class CarRentalViewSet(AbstractModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        rental.status = CarRental.RentStatus.CANCELLED
-        rental.save()
+        if request.user.is_authenticated:
+            if not IsCarRentalOwner().has_object_permission(request, self, rental):
+                return Response(
+                    {"detail": "You do not have permission to cancel this rental."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        else:
+            if rental.renter_id:
+                return Response(
+                    {"detail": "This rental belongs to a registered user. Please sign in to cancel."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
 
-        for item in rental.rental_items.all():
-            CarAvailabilityService.update_availability(
-                item.car_listing,
-                item.units_rent,
-                rental.start_date,
-                rental.end_date,
-                increment=True,
-            )
+            serializer = GuestCarRentalCancellationSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            _assert_guest_rental_phone_matches(rental, serializer.validated_data["guest_phone"])
+
+        rental = CarRentalService.cancel_booking(rental)
         return Response(
             _with_booking_no_refund_policy(self.get_serializer(rental).data)
         )
@@ -2568,15 +2775,192 @@ class CarRentalViewSet(AbstractModelViewSet):
         response_serializer = self.get_serializer(rental)
         return Response(response_serializer.data, status=status.HTTP_200_OK)
 
+    @extend_schema(
+        summary="Preview car rental extension price",
+        description="Validate extra-day availability and calculate the extension payment before initiating payment.",
+        request=CarRentalExtensionPreviewSerializer,
+        responses={200: CarRentalExtensionPreviewResponseSerializer, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=["post"], url_path="extension-price-preview", permission_classes=[AllowAny])
+    def extension_price_preview(self, request, pk=None):
+        rental = get_object_or_404(
+            CarRental.objects.prefetch_related("rental_items", "rental_items__car_listing"),
+            pk=pk,
+        )
+        serializer = CarRentalExtensionPreviewSerializer(
+            data=request.data,
+            context={"request": request, "rental": rental},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        if user.is_authenticated:
+            is_admin = user.is_superuser or (
+                getattr(user, "role", None) and user.role.code == RoleCode.ADMIN.value
+            )
+            if not is_admin and rental.renter != user:
+                return Response(
+                    {"detail": "You can only extend your own car rental."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        else:
+            _assert_guest_rental_phone_matches(rental, serializer.validated_data["guest_phone"])
+
+        try:
+            preview = CarRentalService.calculate_extension_preview(
+                rental,
+                new_end_date=serializer.validated_data["new_end_date"],
+                payment_currency=serializer.validated_data.get("payment_currency"),
+            )
+        except BookingConflict as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+        payload = {
+            "booking_reference": rental.booking_reference,
+            "current_end_date": rental.end_date,
+            "new_end_date": preview["new_end_date"],
+            "extra_days": preview["extra_days"],
+            "extension_subtotal": preview["extension_subtotal"],
+            "platform_fee": preview["platform_fee"],
+            "original_amount": preview["original_amount"],
+            "original_currency": preview["original_currency"],
+            "amount": preview["amount"],
+            "currency": preview["currency"],
+            "exchange_rate": preview["exchange_rate"],
+        }
+        token = serializer.validated_data.get("guest_verification_token") or serializer.context.get(
+            "guest_verification_token"
+        )
+        if token:
+            payload["guest_verification_token"] = token
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        summary="Initiate a car rental extension payment",
+        description="Hold the requested extra days, create an extension request, and initialize a dedicated Chapa payment.",
+        request=CarRentalExtensionInitiateSerializer,
+        responses={200: CarRentalExtensionInitiateResponseSerializer, 400: OpenApiTypes.OBJECT, 403: OpenApiTypes.OBJECT},
+    )
+    @action(detail=True, methods=["post"], url_path="request-extension", permission_classes=[AllowAny])
+    def request_extension(self, request, pk=None):
+        rental = get_object_or_404(
+            CarRental.objects.prefetch_related("rental_items", "rental_items__car_listing"),
+            pk=pk,
+        )
+        serializer = CarRentalExtensionInitiateSerializer(
+            data=request.data,
+            context={"request": request, "rental": rental},
+        )
+        serializer.is_valid(raise_exception=True)
+
+        user = request.user
+        if user.is_authenticated:
+            is_admin = user.is_superuser or (
+                getattr(user, "role", None) and user.role.code == RoleCode.ADMIN.value
+            )
+            if not is_admin and rental.renter != user:
+                return Response(
+                    {"detail": "You can only extend your own car rental."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        else:
+            _assert_guest_rental_phone_matches(rental, serializer.validated_data["guest_phone"])
+
+        try:
+            extension_request, preview = CarRentalService.create_extension_request(
+                rental,
+                new_end_date=serializer.validated_data["new_end_date"],
+                requested_by=user if user.is_authenticated else None,
+                payment_currency=serializer.validated_data.get("payment_currency"),
+            )
+        except BookingConflict as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_409_CONFLICT)
+
+        if user.is_authenticated:
+            payer_email = user.email
+            payer_first_name = user.first_name
+            payer_last_name = user.last_name
+        else:
+            payer_email = getattr(rental, "guest_email", None) or "guest@michotmarefia.com"
+            payer_first_name = getattr(rental, "guest_first_name", None) or "Guest"
+            payer_last_name = getattr(rental, "guest_last_name", None) or "User"
+
+        result = ChapaPaymentService.initialize_car_rental_extension_payment(
+            extension_request,
+            email=payer_email,
+            first_name=payer_first_name,
+            last_name=payer_last_name,
+        )
+        if not result["success"]:
+            return Response(result, status=status.HTTP_400_BAD_REQUEST)
+
+        payload = {
+            "booking_reference": rental.booking_reference,
+            "current_end_date": rental.end_date,
+            "new_end_date": preview["new_end_date"],
+            "extra_days": preview["extra_days"],
+            "extension_subtotal": preview["extension_subtotal"],
+            "platform_fee": preview["platform_fee"],
+            "original_amount": preview["original_amount"],
+            "original_currency": preview["original_currency"],
+            "amount": preview["amount"],
+            "currency": preview["currency"],
+            "exchange_rate": preview["exchange_rate"],
+            "extension_request_id": extension_request.id,
+            "status": extension_request.ExtensionStatus.PAYMENT_INITIATED,
+            "tx_ref": result["tx_ref"],
+            "checkout_url": result["checkout_url"],
+        }
+        token = serializer.validated_data.get("guest_verification_token") or serializer.context.get(
+            "guest_verification_token"
+        )
+        if token:
+            payload["guest_verification_token"] = token
+        return Response(payload, status=status.HTTP_200_OK)
+
     @action(detail=False, methods=['get'])
     def my_rentals(self, request):
-        rentals = self.get_queryset().filter(renter=request.user)
+        rentals = self.get_queryset().filter(renter=request.user).order_by("-created_at")
         page = self.paginate_queryset(rentals)
         if page:
             serializer = self.get_serializer(page, many=True)
             return self.get_paginated_response(serializer.data)
         serializer = self.get_serializer(rentals, many=True)
         return Response(serializer.data)
+
+    @extend_schema(
+        summary="List guest car rentals by verified phone",
+        description=(
+            "Retrieve guest-created car rentals tied to a verified phone number. "
+            "Registered-user rentals are excluded from this guest self-service view."
+        ),
+        parameters=[GuestCarRentalHistoryAccessSerializer],
+        responses={200: CarRentalSerializer(many=True), 400: OpenApiTypes.OBJECT},
+    )
+    @action(detail=False, methods=["get"], url_path="guest-rentals", permission_classes=[AllowAny])
+    def guest_rentals(self, request):
+        serializer = GuestCarRentalHistoryAccessSerializer(data=request.query_params)
+        serializer.is_valid(raise_exception=True)
+
+        verified_phone = serializer.validated_data["verified_phone"]
+        guest_verification_token = serializer.validated_data.get("guest_verification_token")
+        rentals = (
+            CarRental.objects.prefetch_related("rental_items", "rental_items__car_listing")
+            .filter(renter__isnull=True, guest_phone__in=_phone_variants(verified_phone))
+            .order_by("-created_at")
+        )
+
+        page = self.paginate_queryset(rentals)
+        if page is not None:
+            response = self.get_paginated_response(self.get_serializer(page, many=True).data)
+            if guest_verification_token:
+                response.data["guest_verification_token"] = guest_verification_token
+            return response
+
+        data = self.get_serializer(rentals, many=True).data
+        payload = {"results": data, "count": len(data)}
+        if guest_verification_token:
+            payload["guest_verification_token"] = guest_verification_token
+        return Response(payload, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['get'])
     def rental_stats(self, request):
@@ -2842,12 +3226,12 @@ class PropertyRentalBookingViewSet(
         return PropertyRentalBookingSerializer
 
     def get_permissions(self):
-        if self.action in ["create", "price_preview"]:
+        if self.action in ["create", "price_preview", "guest_otp"]:
             return [AllowAny()]
         return [IsAuthenticated()]
 
     def get_throttles(self):
-        if self.action == "create":
+        if self.action in ["create", "guest_otp"]:
             self.throttle_scope = "booking_create"
             return [ScopedRateThrottle()]
         return super().get_throttles()
@@ -2956,6 +3340,16 @@ class PropertyRentalBookingViewSet(
                 display_currency=get_display_currency(request),
             )
         )
+
+    @extend_schema(
+        summary="Request property rental booking guest phone OTP",
+        description="Issue a phone OTP challenge before creating a property rental booking as a guest.",
+        request=GuestBookingOtpRequestSerializer,
+        responses={201: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+    )
+    @action(detail=False, methods=["post"], url_path="guest-otp/request", permission_classes=[AllowAny])
+    def guest_otp(self, request):
+        return _request_guest_booking_otp(request, booking_type="property_rental")
 
 
 class AmenityViewSet(AbstractModelViewSet):

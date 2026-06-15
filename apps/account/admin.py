@@ -70,10 +70,35 @@ def reject_companies(modeladmin, request, queryset):
 
 @admin.register(CompanyProfile)
 class CompanyProfileAdmin(admin.ModelAdmin):
-    list_display = ("name", "user", "status", "approved_at", "approved_by")
+    list_display = (
+        "name",
+        "user",
+        "status",
+        "split_config_active",
+        "split_type",
+        "split_value",
+        "approved_at",
+        "approved_by",
+    )
+    list_filter = ("status", "split_config_active", "split_type")
+    search_fields = ("name", "user__email", "chapa_subaccount_id")
     actions = [approve_companies, reject_companies]
 
-admin.site.register(IndividualOwnerProfile)
+
+@admin.register(IndividualOwnerProfile)
+class IndividualOwnerProfileAdmin(admin.ModelAdmin):
+    list_display = (
+        "first_name",
+        "last_name",
+        "phone",
+        "split_config_active",
+        "split_type",
+        "split_value",
+    )
+    list_filter = ("split_config_active", "split_type")
+    search_fields = ("first_name", "last_name", "phone", "chapa_subaccount_id")
+
+
 admin.site.register(User)
 
 

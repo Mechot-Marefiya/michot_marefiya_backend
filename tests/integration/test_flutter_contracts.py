@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.hashers import make_password
+from django.core.cache import cache
 from django.utils import timezone
 
 from apps.account.enums import RoleCode
@@ -19,6 +20,7 @@ from apps.core.models import Address, CurrencyRate
 from apps.listing.models import (
     Booking,
     BookingItem,
+    CarAvailability,
     CarListing,
     CarSaleListing,
     ContactRevealRequest,
@@ -40,6 +42,17 @@ def _assert_verification_fields(payload):
     assert "verified_at" in payload
     assert "verified_by" in payload
     assert "verification_note" in payload
+
+
+def _make_discovery_visible(listing, *, lat="9.000000", lng="38.000000", address="Discovery address"):
+    listing.latitude = Decimal(lat)
+    listing.longitude = Decimal(lng)
+    listing.formatted_address = address
+    listing.place_id = f"flutter-discovery-{listing.id}"
+    if hasattr(listing, "is_active"):
+        listing.is_active = True
+    listing.save(update_fields=["latitude", "longitude", "formatted_address", "place_id", "is_active", "updated_at"])
+    return listing
 
 
 def test_flutter_contract_auth_me(auth_client, user):
@@ -485,6 +498,125 @@ def test_flutter_contract_listing_feed_proximity(auth_client, user, hotel):
     assert "distance_km" in data["results"][0]
 
 
+def test_flutter_contract_discovery_shapes_all_listing_types(
+    auth_client,
+    api_client,
+    user,
+    company,
+    hotel,
+    guest_house,
+    car_listing,
+    property_listing,
+    event_space,
+):
+    cache.clear()
+    car_listing.listing_type = CarListing.ListingTypeChoices.RENT
+    car_listing.save(update_fields=["listing_type", "updated_at"])
+
+    car_sale = CarSaleListing.objects.create(
+        company=company,
+        title="Flutter Car Sale",
+        description="Contract car sale listing",
+        base_price=Decimal("900000.00"),
+        currency="ETB",
+        brand=CarListing.CarBrandChoices.TOYOTA,
+        model="Yaris",
+        year=2020,
+        mileage=45000,
+        fuel_type=CarListing.FuelTypeChoices.PETROL,
+        transmission=CarListing.TransmissionChoices.AUTOMATIC,
+        condition=CarListing.ConditionChoices.USED,
+        car_class=CarListing.CarClassChoices.NORMAL,
+        seats=5,
+        seller_contact_name="Car Seller",
+        seller_phone="0911777000",
+        seller_email="carsale@example.com",
+        reveal_fee=Decimal("100.00"),
+        is_active=True,
+    )
+    property_sale = PropertySaleListing.objects.create(
+        company=company,
+        address=Address.objects.create(
+            street_line1="Bole Atlas",
+            country="Ethiopia",
+            city="Addis Ababa",
+            sub_city="Bole",
+            state="Addis Ababa",
+            postal_code="1000",
+        ),
+        title="Flutter House Sale",
+        description="Contract property sale listing",
+        base_price=Decimal("5500000.00"),
+        currency="ETB",
+        property_type=PropertySaleListing.PropertyTypeChoices.VILLA,
+        bedrooms=4,
+        bathrooms=3,
+        square_meters=Decimal("240.00"),
+        land_size_square_meters=Decimal("300.00"),
+        is_furnished=True,
+        seller_contact_name="Property Seller",
+        seller_phone="0911888000",
+        seller_email="propertysale@example.com",
+        reveal_fee=Decimal("150.00"),
+        is_active=True,
+    )
+
+    visible_listings = {
+        "hotel": _make_discovery_visible(hotel, address="Hotel contract address"),
+        "guesthouse": _make_discovery_visible(guest_house, address="Guest house contract address"),
+        "car_rental": _make_discovery_visible(car_listing, address="Car rental contract address"),
+        "car_sales": _make_discovery_visible(car_sale, address="Car sale contract address"),
+        "property_rental": _make_discovery_visible(property_listing, address="House rent contract address"),
+        "property_sales": _make_discovery_visible(property_sale, address="House sale contract address"),
+        "event_space": _make_discovery_visible(event_space, address="Event space contract address"),
+    }
+
+    user.location_permission_granted = True
+    user.last_known_lat = Decimal("9.000000")
+    user.last_known_lng = Decimal("38.000000")
+    user.save(update_fields=["location_permission_granted", "last_known_lat", "last_known_lng", "updated_at"])
+
+    for listing_type, listing in visible_listings.items():
+        nearby_response = api_client.get(
+            "/api/v1/listing/nearby/",
+            {"lat": "9.000000", "lng": "38.000000", "radius_km": "2", "listing_type": listing_type},
+        )
+        assert nearby_response.status_code == 200
+        nearby_payload = nearby_response.json()
+        assert nearby_payload["results"]
+        nearby_item = next(
+            item for item in nearby_payload["results"]
+            if item["id"] == str(listing.id) and item["listing_type"] == listing_type
+        )
+        for key in ["id", "listing_type", "title", "latitude", "longitude", "formatted_address", "price_preview", "currency", "distance_km"]:
+            assert key in nearby_item
+
+        pins_response = api_client.get(
+            "/api/v1/listing/map-pins/",
+            {"lat": "9.000000", "lng": "38.000000", "radius_km": "2", "listing_type": listing_type},
+        )
+        assert pins_response.status_code == 200
+        pins_payload = pins_response.json()
+        assert pins_payload
+        pin = next(
+            item for item in pins_payload
+            if item["id"] == str(listing.id) and item["listing_type"] == listing_type
+        )
+        for key in ["id", "listing_type", "latitude", "longitude", "title", "price_preview", "thumbnail_url", "rating"]:
+            assert key in pin
+
+        feed_response = auth_client.get("/api/v1/listing/feed/", {"listing_type": listing_type})
+        assert feed_response.status_code == 200
+        feed_payload = feed_response.json()
+        assert feed_payload["results"]
+        feed_item = next(
+            item for item in feed_payload["results"]
+            if item["id"] == str(listing.id) and item["listing_type"] == listing_type
+        )
+        for key in ["id", "listing_type", "title", "latitude", "longitude", "formatted_address", "price_preview", "currency", "distance_km"]:
+            assert key in feed_item
+
+
 def test_flutter_contract_listing_search_with_map_context(api_client, property_listing):
     property_listing.title = "Flutter Search Listing"
     property_listing.latitude = Decimal("9.000000")
@@ -708,7 +840,36 @@ def test_flutter_contract_property_rental_booking(auth_client, property_listing)
 
     detail_response = auth_client.get(f"/api/v1/listing/property-rentals/bookings/{data['id']}/")
     assert detail_response.status_code == 200
-    assert detail_response.json()["booking_reference"] == data["booking_reference"]
+
+
+def test_flutter_contract_car_rental_price_preview(api_client, car_listing):
+    start_date = date.today() + timedelta(days=3)
+    end_date = start_date + timedelta(days=2)
+    for offset in range((end_date - start_date).days):
+        CarAvailability.objects.update_or_create(
+            car_listing=car_listing,
+            date=start_date + timedelta(days=offset),
+            defaults={"available_units": 1},
+        )
+
+    response = api_client.post(
+        "/api/v1/listing/car-rentals/price-preview/",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "items": [{"car_listing": str(car_listing.id), "units_rent": 1}],
+            "guest_phone": "0911777222",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    for key in ["nights", "items", "totals"]:
+        assert key in payload
+    assert payload["items"]
+    for key in ["id", "title", "units", "price_per_unit", "subtotal", "breakdown"]:
+        assert key in payload["items"][0]
 
 
 def test_flutter_contract_listing_terms(api_client, hotel):

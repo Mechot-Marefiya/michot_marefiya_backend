@@ -2,7 +2,11 @@ from rest_framework import serializers
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema_field
 from apps.payment.models import PaymentTransaction
-from apps.payment.services import get_payment_tax_breakdown
+from apps.payment.services import (
+    get_chapa_receipt_url,
+    get_payment_tax_breakdown,
+    validate_split_config,
+)
 
 
 class PaymentInitializeSerializer(serializers.Serializer):
@@ -55,10 +59,69 @@ class PaymentInitializeResponseSerializer(serializers.Serializer):
     tax_liability_status = serializers.CharField(required=False, allow_null=True)
 
 
+class ChapaSubaccountCreateSerializer(serializers.Serializer):
+    OWNER_TYPE_COMPANY = "company"
+    OWNER_TYPE_INDIVIDUAL = "individual_owner"
+
+    bank_code = serializers.CharField(max_length=50)
+    account_number = serializers.CharField(max_length=64, write_only=True)
+    business_name = serializers.CharField(max_length=255)
+    account_name = serializers.CharField(max_length=255)
+    owner_type = serializers.ChoiceField(
+        choices=[OWNER_TYPE_COMPANY, OWNER_TYPE_INDIVIDUAL],
+        required=False,
+        help_text="Required when an admin creates a subaccount for another owner.",
+    )
+    owner_id = serializers.UUIDField(
+        required=False,
+        help_text="Required when an admin creates a subaccount for another owner.",
+    )
+    split_type = serializers.ChoiceField(choices=["percentage", "flat"], required=False)
+    split_value = serializers.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        required=False,
+        help_text="Platform commission value. For percentage, 0.02 means 2%.",
+    )
+    allow_overwrite = serializers.BooleanField(required=False, default=False)
+
+    def validate(self, attrs):
+        split_type = attrs.get("split_type")
+        split_value = attrs.get("split_value")
+        if split_type is not None or split_value is not None:
+            if split_type is None or split_value is None:
+                raise serializers.ValidationError(
+                    {"split_value": "Both split_type and split_value are required together."}
+                )
+            try:
+                validate_split_config(split_type, split_value)
+            except Exception as exc:
+                raise serializers.ValidationError({"split_value": str(exc)}) from exc
+
+        owner_type = attrs.get("owner_type")
+        owner_id = attrs.get("owner_id")
+        if (owner_type is None) != (owner_id is None):
+            raise serializers.ValidationError(
+                {"owner_id": "owner_type and owner_id are required together."}
+            )
+
+        return attrs
+
+
+class ChapaSubaccountResponseSerializer(serializers.Serializer):
+    owner_type = serializers.CharField()
+    owner_id = serializers.UUIDField()
+    chapa_subaccount_id = serializers.CharField(allow_null=True)
+    split_type = serializers.CharField(allow_null=True)
+    split_value = serializers.DecimalField(max_digits=12, decimal_places=4, allow_null=True)
+    split_config_active = serializers.BooleanField()
+
+
 class PaymentTransactionSerializer(serializers.ModelSerializer):
     owner_price = serializers.SerializerMethodField()
     service_fee = serializers.SerializerMethodField()
     grand_total = serializers.SerializerMethodField()
+    receipt_url = serializers.SerializerMethodField()
 
     class Meta:
         model = PaymentTransaction
@@ -71,6 +134,7 @@ class PaymentTransactionSerializer(serializers.ModelSerializer):
             "status",
             "payment_method",
             "chapa_transaction_id",
+            "receipt_url",
             "owner_price",
             "service_fee",
             "tax_amount",
@@ -106,6 +170,10 @@ class PaymentTransactionSerializer(serializers.ModelSerializer):
     def get_grand_total(self, obj):
         value = self._breakdown(obj)["grand_total"]
         return str(value) if value is not None else None
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_receipt_url(self, obj):
+        return get_chapa_receipt_url(obj)
 
 
 class ChapaCallbackSerializer(serializers.Serializer):
@@ -174,6 +242,7 @@ class OwnerPaymentTransactionSerializer(serializers.ModelSerializer):
     owner_price = serializers.SerializerMethodField()
     service_fee = serializers.SerializerMethodField()
     grand_total = serializers.SerializerMethodField()
+    receipt_url = serializers.SerializerMethodField()
 
     class Meta:
         model = PaymentTransaction
@@ -184,6 +253,7 @@ class OwnerPaymentTransactionSerializer(serializers.ModelSerializer):
             "currency",
             "status",
             "payment_method",
+            "receipt_url",
             "created_at",
             "booking_type",
             "booking_reference",
@@ -231,6 +301,10 @@ class OwnerPaymentTransactionSerializer(serializers.ModelSerializer):
     def get_grand_total(self, obj):
         value = self._breakdown(obj)["grand_total"]
         return str(value) if value is not None else None
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_receipt_url(self, obj):
+        return get_chapa_receipt_url(obj)
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_listing_title(self, obj):
@@ -284,6 +358,7 @@ class TransactionMonitorListSerializer(serializers.ModelSerializer):
     listing_reference = serializers.SerializerMethodField()
     user_reference = serializers.SerializerMethodField()
     grand_total = serializers.SerializerMethodField()
+    receipt_url = serializers.SerializerMethodField()
 
     class Meta:
         model = PaymentTransaction
@@ -299,6 +374,7 @@ class TransactionMonitorListSerializer(serializers.ModelSerializer):
             "payout_status",
             "tax_amount",
             "grand_total",
+            "receipt_url",
             "dispute_status",
             "created_at",
         ]
@@ -352,6 +428,10 @@ class TransactionMonitorListSerializer(serializers.ModelSerializer):
             return str(obj.amount)
         value = get_payment_tax_breakdown(booking, amount=obj.amount)["grand_total"]
         return str(value) if value is not None else None
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_receipt_url(self, obj):
+        return get_chapa_receipt_url(obj)
 
 
 class TransactionMonitorDetailSerializer(TransactionMonitorListSerializer):

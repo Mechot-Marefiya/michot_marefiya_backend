@@ -6,10 +6,20 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def has_deliverable_email(user_or_email) -> bool:
+    email = getattr(user_or_email, "email", user_or_email) or ""
+    email = str(email).strip().lower()
+    if not email or "@" not in email:
+        return False
+    return not email.endswith("@phone.local")
+
+
 
 class EmailService:    
     @staticmethod
     def send_booking_confirmation(booking):
+        if not has_deliverable_email(getattr(booking, "guest_email", "")):
+            return False
         
         # send confirmation email to guest after successful booking.
         try:
@@ -84,6 +94,8 @@ Support: support@michotmarefia.com
 
     @staticmethod
     def send_account_credentials(user, password):
+        if not has_deliverable_email(user):
+            return False
         try:
             frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com').rstrip('/')
             login_url = f"{frontend_url}/login"
@@ -119,6 +131,8 @@ Support: support@michotmarefia.com
 
     @staticmethod
     def send_password_reset(user, reset_url):
+        if not has_deliverable_email(user):
+            return False
         try:
             context = {
                 'first_name': user.first_name or "User",
@@ -149,6 +163,8 @@ Support: support@michotmarefia.com
 
     @staticmethod
     def send_verification_email(user, activation_url):
+        if not has_deliverable_email(user):
+            return False
         try:
             context = {
                 'first_name': user.first_name or "User",
@@ -179,6 +195,8 @@ Support: support@michotmarefia.com
 
     @staticmethod
     def send_email_change_verification(user, new_email, verification_url):
+        if not has_deliverable_email(new_email):
+            return False
         try:
             context = {
                 'first_name': user.first_name or "User",
@@ -210,6 +228,8 @@ Support: support@michotmarefia.com
 
     @staticmethod
     def send_email_change_notice(user, old_email, new_email):
+        if not has_deliverable_email(old_email):
+            return False
         try:
             frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com').rstrip('/')
             context = {
@@ -260,6 +280,8 @@ Support: support@michotmarefia.com
 
     @staticmethod
     def send_notification_email(user, subject, body, html_body=None):
+        if not has_deliverable_email(user):
+            return False
         try:
             if html_body:
                 html_content = render_to_string('emails/generic_notification.html', {

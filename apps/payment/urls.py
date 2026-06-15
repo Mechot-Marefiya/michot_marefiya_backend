@@ -6,6 +6,8 @@ from .views import (
     verify_payment, 
     verify_payment_public,
     cancel_payment,
+    ChapaSubaccountView,
+    ChapaSubaccountMeView,
     OwnerPaymentViewSet,
     AdminTransactionMonitorViewSet,
 )
@@ -22,6 +24,8 @@ urlpatterns = [
     path('verify/<str:tx_ref>/', verify_payment, name='verify-payment'),
     path('verify-public/<str:tx_ref>/', verify_payment_public, name='verify-payment-public'),
     path('cancel/<str:tx_ref>/', cancel_payment, name='cancel-payment'),
+    path('subaccounts/', ChapaSubaccountView.as_view(), name='chapa-subaccount-create'),
+    path('subaccounts/me/', ChapaSubaccountMeView.as_view(), name='chapa-subaccount-me'),
 ]
 
 urlpatterns += router.urls

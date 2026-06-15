@@ -1,5 +1,5 @@
 from django.contrib import admin
-from apps.payment.models import PaymentTransaction
+from apps.payment.models import PaymentPlatformConfig, PaymentTransaction
 from apps.payment.services import open_dispute, resolve_dispute
 
 
@@ -50,3 +50,19 @@ class PaymentTransactionAdmin(admin.ModelAdmin):
         "dispute_handled_by",
     )
     actions = [open_dispute_triage, resolve_dispute_triage]
+
+
+@admin.register(PaymentPlatformConfig)
+class PaymentPlatformConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "name",
+        "is_active",
+        "default_split_type",
+        "default_split_value",
+        "default_car_sale_reveal_fee",
+        "default_property_sale_reveal_fee",
+        "updated_at",
+    )
+    list_filter = ("is_active", "default_split_type")
+    search_fields = ("name",)
+    readonly_fields = ("created_at", "updated_at")

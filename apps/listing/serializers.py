@@ -28,11 +28,13 @@ from apps.listing.services import (
     BookingService,
     GuestBookingOtpError,
     GuestBookingOtpService,
+    GuestContactRevealOtpService,
     ListingService,
     EventSpaceAvailabilityService,
     GuestHouseAvailabilityService,
     StayAvailabilityService,
 )
+from apps.payment.services import get_effective_contact_reveal_fee
 
 from apps.listing.models import (
     Amenity,
@@ -42,7 +44,7 @@ from apps.listing.models import (
     GuestHouseProfile, GuestHouseRoom,
     PropertyListing,PropertyRentalBooking,PropertySaleListing,PropertyContactRevealRequest,
     RoomListing,EventSpaceListing,
-    CarRental,CarRentalItem,GuestHouseBookingItem,GuestHouseBooking,
+    CarRental,CarRentalExtensionRequest,CarRentalItem,GuestHouseBookingItem,GuestHouseBooking,
     TermsAndConditions,
     Season, SeasonalRate,
 )
@@ -519,6 +521,15 @@ class SanitizeGuestDetailsMixin:
     def validate_guest_phone(self, value):
         return strip_tags(value) if value else value
 
+    def require_booking_phone(self, data):
+        if self.instance is not None:
+            return
+        guest_phone = data.get("guest_phone")
+        if not guest_phone or not str(guest_phone).strip():
+            raise serializers.ValidationError(
+                {"guest_phone": "Phone number is required for every booking."}
+            )
+
     def _is_guest_booking_request(self):
         request = self.context.get("request")
         if request is None:
@@ -532,9 +543,20 @@ class SanitizeGuestDetailsMixin:
         if self.context.get("is_walk_in", False):
             return
 
+        guest_verification_token = data.get("guest_verification_token")
         challenge_id = data.get("otp_challenge_id")
         code = data.get("otp_code")
         requires_otp = getattr(settings, "REQUIRE_GUEST_BOOKING_OTP", False)
+
+        if guest_verification_token:
+            try:
+                GuestBookingOtpService.verify_guest_token(
+                    token=guest_verification_token,
+                    phone=data.get("guest_phone"),
+                )
+                return
+            except GuestBookingOtpError as exc:
+                raise serializers.ValidationError({"guest_verification_token": str(exc)})
 
         if challenge_id or code:
             if not challenge_id or not code:
@@ -542,12 +564,13 @@ class SanitizeGuestDetailsMixin:
                     {"otp_code": "Both otp_challenge_id and otp_code are required for guest booking OTP verification."}
                 )
             try:
-                GuestBookingOtpService.verify_challenge(
+                guest_verification_token = GuestBookingOtpService.verify_challenge(
                     challenge_id=challenge_id,
                     code=code,
                     phone=data.get("guest_phone"),
                     booking_type=self.guest_booking_type,
                 )
+                self.context["guest_verification_token"] = guest_verification_token
             except GuestBookingOtpError as exc:
                 raise serializers.ValidationError({"otp_code": str(exc)})
         elif requires_otp:
@@ -558,6 +581,7 @@ class SanitizeGuestDetailsMixin:
     def remove_guest_booking_otp_fields(self, validated_data):
         validated_data.pop("otp_challenge_id", None)
         validated_data.pop("otp_code", None)
+        validated_data.pop("guest_verification_token", None)
         return validated_data
 
 
@@ -568,6 +592,16 @@ class GuestBookingOtpRequestSerializer(serializers.Serializer):
         return GuestBookingOtpService.create_challenge(
             phone=validated_data["guest_phone"],
             booking_type=self.context["booking_type"],
+        )
+
+
+class GuestContactRevealOtpRequestSerializer(serializers.Serializer):
+    buyer_phone = serializers.CharField(max_length=20)
+
+    def create(self, validated_data):
+        return GuestContactRevealOtpService.create_challenge(
+            phone=validated_data["buyer_phone"],
+            reveal_type=self.context["reveal_type"],
         )
 
 
@@ -1067,11 +1101,12 @@ class GuestHouseBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetail
     
     guest_first_name = serializers.CharField(max_length=100, required=False, help_text="First name of the guest (Required if not logged in)")
     guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the guest (Required if not logged in)")
-    guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
-    guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
+    guest_email = serializers.EmailField(required=False, help_text="Optional contact email")
+    guest_phone = serializers.CharField(max_length=20, required=True, help_text="Contact phone number required for every booking")
     special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests for the guesthouse stay")
     otp_challenge_id = serializers.UUIDField(required=False, write_only=True)
     otp_code = serializers.CharField(required=False, write_only=True, max_length=12, trim_whitespace=True)
+    guest_verification_token = serializers.CharField(required=False, write_only=True, allow_blank=True)
     
     payment_currency = serializers.ChoiceField(
         choices=["USD", "ETB"],
@@ -1108,7 +1143,7 @@ class GuestHouseBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetail
             "is_legacy",
             "stay_total",
             "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency", "is_walk_in",
-            "otp_challenge_id", "otp_code",
+            "otp_challenge_id", "otp_code", "guest_verification_token",
         ]
 
         read_only_fields = ["id", "status", "renter", "total_price", "created_at", "updated_at", "booking_reference", "currency"]
@@ -1169,9 +1204,7 @@ class GuestHouseBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetail
             raise serializers.ValidationError("At least one room booking item is required.")
 
         user = self.context['request'].user
-        guest_email = data.get('guest_email')
-        if (not user or not user.is_authenticated) and not guest_email:
-             raise serializers.ValidationError("Either log in or provide guest email.")
+        self.require_booking_phone(data)
         self.validate_guest_booking_otp(data)
 
         room_infos = [
@@ -1535,10 +1568,21 @@ class CarSaleListingResponseSerializer(CurrencyConversionMixin, serializers.Mode
     def get_reveal_state(self, obj):
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        if not user or not user.is_authenticated:
-            return None
+        tx_ref = request.query_params.get("tx_ref") if request else None
 
-        reveal = obj.contact_reveal_requests.filter(buyer=user).order_by("-created_at").first()
+        if user and user.is_authenticated:
+            reveal = obj.contact_reveal_requests.filter(buyer=user).order_by("-created_at").first()
+        elif tx_ref:
+            reveal = obj.contact_reveal_requests.filter(tx_ref=tx_ref).order_by("-created_at").first()
+        else:
+            return {
+                "status": "guest_verification_required",
+                "request_id": None,
+                "tx_ref": "",
+                "expires_at": None,
+                "unlocked_at": None,
+            }
+
         if not reveal:
             return None
 
@@ -1599,6 +1643,14 @@ class CarSaleListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer
     def validate(self, data):
         request = self.context.get("request")
         request_user = getattr(request, "user", None)
+        is_admin = bool(
+            request_user
+            and request_user.is_authenticated
+            and (
+                request_user.is_superuser
+                or (getattr(request_user, "role", None) and request_user.role.code == RoleCode.ADMIN.value)
+            )
+        )
         request_company = getattr(request_user, "company", None) or getattr(request_user, "profile", None)
         request_individual_owner = getattr(request_user, "individual_owner", None) or getattr(
             request_user, "individual_owner_profile", None
@@ -1623,6 +1675,11 @@ class CarSaleListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer
         base_price = data.get("base_price", getattr(self.instance, "base_price", None))
         if base_price is not None and base_price <= 0:
             raise serializers.ValidationError({"base_price": "Sale price must be greater than 0."})
+
+        if not is_admin and self.instance is None:
+            data["reveal_fee"] = get_effective_contact_reveal_fee("car_sale")
+        elif not is_admin and self.instance is not None:
+            data["reveal_fee"] = self.instance.reveal_fee
 
         reveal_fee = data.get("reveal_fee", getattr(self.instance, "reveal_fee", Decimal("0.00")))
         if reveal_fee <= 0:
@@ -1663,6 +1720,9 @@ class CarSaleListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer
 class ContactRevealRequestSerializer(serializers.Serializer):
     buyer_note = serializers.CharField(required=False, allow_blank=True)
     buyer_phone = serializers.CharField(required=False, allow_blank=True, max_length=20)
+    otp_challenge_id = serializers.UUIDField(required=False)
+    otp_code = serializers.CharField(required=False, allow_blank=True, max_length=12)
+    guest_verification_token = serializers.CharField(required=False, allow_blank=True)
 
 
 class CarSaleContactSerializer(serializers.Serializer):
@@ -1747,10 +1807,21 @@ class PropertySaleListingResponseSerializer(CurrencyConversionMixin, serializers
     def get_reveal_state(self, obj):
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        if not user or not user.is_authenticated:
-            return None
+        tx_ref = request.query_params.get("tx_ref") if request else None
 
-        reveal = obj.contact_reveal_requests.filter(buyer=user).order_by("-created_at").first()
+        if user and user.is_authenticated:
+            reveal = obj.contact_reveal_requests.filter(buyer=user).order_by("-created_at").first()
+        elif tx_ref:
+            reveal = obj.contact_reveal_requests.filter(tx_ref=tx_ref).order_by("-created_at").first()
+        else:
+            return {
+                "status": "guest_verification_required",
+                "request_id": None,
+                "tx_ref": "",
+                "expires_at": None,
+                "unlocked_at": None,
+            }
+
         if not reveal:
             return None
 
@@ -1817,6 +1888,14 @@ class PropertySaleListingSerializer(PlaceResolutionMixin, serializers.ModelSeria
     def validate(self, data):
         request = self.context.get("request")
         request_user = getattr(request, "user", None)
+        is_admin = bool(
+            request_user
+            and request_user.is_authenticated
+            and (
+                request_user.is_superuser
+                or (getattr(request_user, "role", None) and request_user.role.code == RoleCode.ADMIN.value)
+            )
+        )
         request_company = getattr(request_user, "company", None) or getattr(request_user, "profile", None)
         request_individual_owner = getattr(request_user, "individual_owner", None) or getattr(
             request_user, "individual_owner_profile", None
@@ -1844,6 +1923,11 @@ class PropertySaleListingSerializer(PlaceResolutionMixin, serializers.ModelSeria
         base_price = data.get("base_price", getattr(self.instance, "base_price", None))
         if base_price is not None and base_price <= 0:
             raise serializers.ValidationError({"base_price": "Sale price must be greater than 0."})
+
+        if not is_admin and self.instance is None:
+            data["reveal_fee"] = get_effective_contact_reveal_fee("property_sale")
+        elif not is_admin and self.instance is not None:
+            data["reveal_fee"] = self.instance.reveal_fee
 
         reveal_fee = data.get("reveal_fee", getattr(self.instance, "reveal_fee", Decimal("0.00")))
         if reveal_fee <= 0:
@@ -2125,11 +2209,12 @@ class CarRentalSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, 
     
     guest_first_name = serializers.CharField(max_length=100, required=False, help_text="First name of the renter (Required if not logged in)")
     guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the renter (Required if not logged in)")
-    guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
-    guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
+    guest_email = serializers.EmailField(required=False, help_text="Optional contact email")
+    guest_phone = serializers.CharField(max_length=20, required=True, help_text="Contact phone number required for every booking")
     special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests for the rental")
     otp_challenge_id = serializers.UUIDField(required=False, write_only=True)
     otp_code = serializers.CharField(required=False, write_only=True, max_length=12, trim_whitespace=True)
+    guest_verification_token = serializers.CharField(required=False, write_only=True, allow_blank=True)
     renter_driver_license_number = serializers.CharField(
         max_length=64,
         required=False,
@@ -2167,7 +2252,7 @@ class CarRentalSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, 
             'is_legacy',
             'stay_total',
             'guest_first_name', 'guest_last_name', 'guest_email', 'guest_phone', 'special_requests',
-            'otp_challenge_id', 'otp_code',
+            'otp_challenge_id', 'otp_code', 'guest_verification_token',
             'renter_driver_license_number', 'renter_code_3_license_number', 'renter_business_license_number',
             'payment_currency',
         ]
@@ -2248,9 +2333,7 @@ class CarRentalSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, 
             })
 
         user = self.context['request'].user
-        guest_email = data.get('guest_email')
-        if (not user or not user.is_authenticated) and not guest_email:
-             raise serializers.ValidationError("Either log in or provide guest email.")
+        self.require_booking_phone(data)
         self.validate_guest_booking_otp(data)
 
         currencies = {
@@ -2389,6 +2472,106 @@ class CarRentalRescheduleSerializer(serializers.Serializer):
             )
 
         return data
+
+
+class CarRentalPreviewItemSerializer(serializers.Serializer):
+    car_listing = serializers.PrimaryKeyRelatedField(queryset=CarListing.objects.filter(is_active=True))
+    units_rent = serializers.IntegerField(min_value=1)
+
+
+class CarRentalPreviewSerializer(ForwardBookingWindowMixin, serializers.Serializer):
+    start_date = serializers.DateField(help_text="Rental start date. Must be within the configured forward booking window.")
+    end_date = serializers.DateField(help_text="Rental end date.")
+    items = CarRentalPreviewItemSerializer(many=True, help_text="List of cars and quantities selected.")
+    guest_phone = serializers.CharField(required=False, allow_blank=True, help_text="Optional phone number used to determine the first-booking fee waiver.")
+
+    def validate(self, data):
+        start_date = data.get("start_date")
+        end_date = data.get("end_date")
+        items = data.get("items", [])
+
+        if start_date and end_date and start_date >= end_date:
+            raise serializers.ValidationError({"end_date": "End date must be after start date."})
+
+        if start_date and start_date < date.today():
+            raise serializers.ValidationError({"start_date": "Start date cannot be in the past."})
+
+        car_listings = [item["car_listing"] for item in items]
+        self.validate_forward_booking_window(
+            start_date,
+            field_name="start_date",
+            label="Start date",
+            listings=car_listings,
+        )
+
+        if not items:
+            raise serializers.ValidationError("At least one rental item is required.")
+
+        return data
+
+
+class CarRentalExtensionBaseSerializer(SanitizeGuestDetailsMixin, serializers.Serializer):
+    guest_booking_type = "car_rental"
+    new_end_date = serializers.DateField(required=True)
+    guest_phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    otp_challenge_id = serializers.UUIDField(required=False, write_only=True)
+    otp_code = serializers.CharField(required=False, write_only=True, max_length=12, trim_whitespace=True)
+    guest_verification_token = serializers.CharField(required=False, write_only=True, allow_blank=True)
+
+    def validate(self, data):
+        rental = self.context["rental"]
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        new_end_date = data["new_end_date"]
+
+        if new_end_date <= rental.end_date:
+            raise serializers.ValidationError(
+                {"new_end_date": "New end date must be after the current end date."}
+            )
+
+        if not user or not user.is_authenticated:
+            if rental.renter_id:
+                raise PermissionDenied(
+                    "This rental belongs to a registered user. Please log in to extend it."
+                )
+            if not data.get("guest_phone"):
+                raise serializers.ValidationError(
+                    {"guest_phone": "Guest phone is required to extend this rental."}
+                )
+            self.validate_guest_booking_otp(data)
+
+        return data
+
+
+class CarRentalExtensionPreviewSerializer(CarRentalExtensionBaseSerializer):
+    payment_currency = serializers.ChoiceField(choices=["USD", "ETB"], required=False)
+
+
+class CarRentalExtensionInitiateSerializer(CarRentalExtensionBaseSerializer):
+    payment_currency = serializers.ChoiceField(choices=["USD", "ETB"], required=False)
+
+
+class CarRentalExtensionPreviewResponseSerializer(serializers.Serializer):
+    booking_reference = serializers.CharField()
+    current_end_date = serializers.DateField()
+    new_end_date = serializers.DateField()
+    extra_days = serializers.IntegerField()
+    extension_subtotal = serializers.DecimalField(max_digits=10, decimal_places=2)
+    platform_fee = serializers.DecimalField(max_digits=10, decimal_places=2)
+    original_amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    original_currency = serializers.CharField()
+    amount = serializers.DecimalField(max_digits=10, decimal_places=2)
+    currency = serializers.CharField()
+    exchange_rate = serializers.DecimalField(max_digits=12, decimal_places=6)
+    guest_verification_token = serializers.CharField(required=False, allow_blank=True)
+
+
+class CarRentalExtensionInitiateResponseSerializer(CarRentalExtensionPreviewResponseSerializer):
+    extension_request_id = serializers.UUIDField()
+    status = serializers.CharField()
+    tx_ref = serializers.CharField()
+    checkout_url = serializers.URLField()
+    guest_verification_token = serializers.CharField(required=False, allow_blank=True)
 
 
 class AvailabilityCheckSerializer(serializers.Serializer):
@@ -2640,8 +2823,11 @@ class PropertyRentalBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDe
     guest_first_name = serializers.CharField(max_length=100, required=False)
     guest_last_name = serializers.CharField(max_length=100, required=False)
     guest_email = serializers.EmailField(required=False)
-    guest_phone = serializers.CharField(max_length=20, required=False)
+    guest_phone = serializers.CharField(max_length=20, required=True)
     special_requests = serializers.CharField(required=False, allow_blank=True)
+    otp_challenge_id = serializers.UUIDField(required=False, write_only=True)
+    otp_code = serializers.CharField(required=False, write_only=True, max_length=12, trim_whitespace=True)
+    guest_verification_token = serializers.CharField(required=False, write_only=True, allow_blank=True)
     payment_currency = serializers.ChoiceField(choices=["USD", "ETB"], required=False, write_only=True)
 
     class Meta:
@@ -2660,6 +2846,9 @@ class PropertyRentalBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDe
             "guest_phone",
             "special_requests",
             "payment_currency",
+            "otp_challenge_id",
+            "otp_code",
+            "guest_verification_token",
         ]
         read_only_fields = ["status", "currency"]
 
@@ -2686,9 +2875,8 @@ class PropertyRentalBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDe
 
         request = self.context.get("request")
         user = getattr(request, "user", None)
-        guest_email = data.get("guest_email")
-        if (not user or not user.is_authenticated) and not guest_email:
-            raise serializers.ValidationError("Either log in or provide guest email.")
+        self.require_booking_phone(data)
+        self.validate_guest_booking_otp(data)
 
         if user and user.is_authenticated and listing:
             company = getattr(user, "company", None) or getattr(user, "profile", None)
@@ -3004,6 +3192,99 @@ class BookingLookupSerializer(serializers.Serializer):
         help_text="The guest email associated with the booking"
     )
 
+
+class GuestPhoneVerifiedAccessSerializer(serializers.Serializer):
+    guest_phone = serializers.CharField(
+        required=True,
+        help_text="The guest phone number tied to the booking or rentals.",
+    )
+    guest_verification_token = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="Reusable verified guest phone session token.",
+    )
+    otp_challenge_id = serializers.UUIDField(required=False)
+    otp_code = serializers.CharField(required=False, max_length=12, trim_whitespace=True)
+    booking_type = "car_rental"
+
+    def validate(self, attrs):
+        phone = attrs.get("guest_phone")
+        guest_verification_token = attrs.get("guest_verification_token")
+        challenge_id = attrs.get("otp_challenge_id")
+        code = attrs.get("otp_code")
+
+        if guest_verification_token:
+            try:
+                attrs["verified_phone"] = GuestBookingOtpService.verify_guest_token(
+                    token=guest_verification_token,
+                    phone=phone,
+                )
+                return attrs
+            except GuestBookingOtpError as exc:
+                raise serializers.ValidationError({"guest_verification_token": str(exc)})
+
+        if challenge_id or code:
+            if not challenge_id or not code:
+                raise serializers.ValidationError(
+                    {"otp_code": "Both otp_challenge_id and otp_code are required for guest booking OTP verification."}
+                )
+            try:
+                guest_verification_token = GuestBookingOtpService.verify_challenge(
+                    challenge_id=challenge_id,
+                    code=code,
+                    phone=phone,
+                    booking_type=self.booking_type,
+                )
+            except GuestBookingOtpError as exc:
+                raise serializers.ValidationError({"otp_code": str(exc)})
+
+            attrs["guest_verification_token"] = guest_verification_token
+            attrs["verified_phone"] = GuestBookingOtpService.verify_guest_token(
+                token=guest_verification_token,
+                phone=phone,
+            )
+            return attrs
+
+        raise serializers.ValidationError(
+            {
+                "guest_verification_token": (
+                    "Provide guest_verification_token or otp_challenge_id with otp_code."
+                )
+            }
+        )
+
+
+class GuestCarRentalHistoryAccessSerializer(GuestPhoneVerifiedAccessSerializer):
+    pass
+
+
+class GuestCarRentalLookupSerializer(GuestPhoneVerifiedAccessSerializer):
+    reference = serializers.CharField(
+        required=True,
+        help_text="The unique car rental reference (e.g., C-X7Y2Z9).",
+    )
+    guest_phone = serializers.CharField(
+        required=False,
+        help_text="The guest phone number tied to the booking.",
+    )
+    email = serializers.EmailField(
+        required=False,
+        allow_blank=True,
+        help_text="Legacy compatibility field for guest lookup. Verified phone is preferred.",
+    )
+
+    def validate(self, attrs):
+        email = (attrs.get("email") or "").strip()
+        if email:
+            attrs["email"] = email
+            return attrs
+        return super().validate(attrs)
+
+
+class GuestCarRentalCancellationSerializer(GuestPhoneVerifiedAccessSerializer):
+    reason = serializers.CharField(required=False, allow_blank=True)
+
+
 class BookingItemSerializer(serializers.ModelSerializer):
     price_per_unit = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     units_booked = serializers.IntegerField(min_value=1)
@@ -3042,12 +3323,12 @@ class BookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, se
 
     guest_first_name = serializers.CharField(max_length=100, required=False, help_text="First name of the person staying (Required if not logged in)")
     guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the person staying (Required if not logged in)")
-    guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
-    guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
-    guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
+    guest_email = serializers.EmailField(required=False, help_text="Optional contact email")
+    guest_phone = serializers.CharField(max_length=20, required=True, help_text="Contact phone number required for every booking")
     special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests (e.g., late check-in, room preferences)")
     otp_challenge_id = serializers.UUIDField(required=False, write_only=True)
     otp_code = serializers.CharField(required=False, write_only=True, max_length=12, trim_whitespace=True)
+    guest_verification_token = serializers.CharField(required=False, write_only=True, allow_blank=True)
 
     payment_currency = serializers.ChoiceField(
         choices=["USD", "ETB"],
@@ -3062,7 +3343,7 @@ class BookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, se
         fields = ["items", "check_in_date", "check_out_date", "currency", "status", 
                    "terms_accepted", "terms_version",
                   "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency",
-                  "otp_challenge_id", "otp_code"]
+                  "otp_challenge_id", "otp_code", "guest_verification_token"]
         read_only_fields = ["status", "currency"]
         
 
@@ -3101,10 +3382,7 @@ class BookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, se
         if not terms_version:
             raise serializers.ValidationError({"terms_version": "Terms version is required."})
 
-        if request and (not user or not user.is_authenticated):
-            guest_email = data.get("guest_email")
-            if not guest_email:
-                raise serializers.ValidationError("Either log in or provide guest email.")
+        self.require_booking_phone(data)
 
         self.validate_guest_booking_otp(data)
 
@@ -3529,11 +3807,11 @@ class EventSpaceBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetail
     guest_first_name = serializers.CharField(max_length=100, required=False, help_text="First name of the guest (Required if not logged in)")
     guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the guest (Required if not logged in)")
     guest_email = serializers.EmailField(required=False, help_text="Contact email for confirmations (Required if not logged in)")
-    guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
-    guest_phone = serializers.CharField(max_length=20, required=False, help_text="Contact phone number (Required if not logged in)")
+    guest_phone = serializers.CharField(max_length=20, required=True, help_text="Contact phone number required for every booking")
     special_requests = serializers.CharField(required=False, allow_blank=True, help_text="Special requests for the event")
     otp_challenge_id = serializers.UUIDField(required=False, write_only=True)
     otp_code = serializers.CharField(required=False, write_only=True, max_length=12, trim_whitespace=True)
+    guest_verification_token = serializers.CharField(required=False, write_only=True, allow_blank=True)
 
     payment_currency = serializers.ChoiceField(
         choices=["USD", "ETB"],
@@ -3548,7 +3826,7 @@ class EventSpaceBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetail
         fields = ["items", "check_in_date", "check_out_date", "currency", "event_type",
                   "terms_accepted", "terms_version",
                   "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency",
-                  "otp_challenge_id", "otp_code"]
+                  "otp_challenge_id", "otp_code", "guest_verification_token"]
         read_only_fields = ["status", "currency"]
 
     def validate_terms_accepted(self, value):
@@ -3583,9 +3861,7 @@ class EventSpaceBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetail
             )
 
         user = self.context['request'].user
-        guest_email = data.get('guest_email')
-        if (not user or not user.is_authenticated) and not guest_email:
-             raise serializers.ValidationError("Either log in or provide guest email.")
+        self.require_booking_phone(data)
         self.validate_guest_booking_otp(data)
         
         terms_version = data.get("terms_version")

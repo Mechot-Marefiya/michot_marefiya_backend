@@ -26,6 +26,7 @@ from apps.account.models import (
     CompanyProfile,
     HotelProfile,
     IndividualOwnerProfile,
+    OtpChallenge,
     OwnerComplianceAgreement,
     User,
 )
@@ -83,6 +84,9 @@ from apps.account.permissions import (
     IsPublicReadOnly,
 )
 from apps.account.services import (
+    GuestBookingConversionError,
+    GuestBookingConversionService,
+    GuestPhoneVerificationService,
     create_agreement,
     get_latest_agreement,
     revoke_agreement,
@@ -102,8 +106,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
     @extend_schema(
         summary="Obtain JWT Token",
-        description="Deprecated migration endpoint. Phone OTP login is primary; email/password login remains temporarily available.",
-        deprecated=True,
+        description="Obtain JWT tokens with phone and password.",
         responses={
             200: CustomTokenObtainPairSerializer,
             401: OpenApiTypes.OBJECT
@@ -120,14 +123,14 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             if getattr(settings, "DEBUG", False):
                 return Response(
                     {
-                        "detail": "Invalid email or password.",
+                        "detail": "Invalid phone or password.",
                         "error": str(exc),
                         "trace": traceback.format_exc(),
                     },
                     status=status.HTTP_401_UNAUTHORIZED,
                 )
 
-            return Response({"detail": "Invalid email or password."}, status=status.HTTP_401_UNAUTHORIZED)
+            return Response({"detail": "Invalid phone or password."}, status=status.HTTP_401_UNAUTHORIZED)
 
 
 @extend_schema(tags=["Identity & Auth"])
@@ -181,12 +184,37 @@ class OtpVerifyView(APIView):
         data = {
             "success": True,
             "purpose": result.challenge.purpose,
-            "user": UserResponseSerializer(result.user, context={"request": request}).data,
+            "user": (
+                UserResponseSerializer(result.user, context={"request": request}).data
+                if result.user
+                else None
+            ),
         }
         if result.tokens:
             data.update(result.tokens)
             if result.user.role:
                 data["role"] = result.user.role.code
+        if result.user and result.challenge.purpose == OtpChallenge.Purpose.SIGNUP:
+            try:
+                conversion = GuestBookingConversionService.convert_for_user(user=result.user)
+                data["guest_history_transfer"] = {
+                    "success": True,
+                    "phone": conversion.phone,
+                    "verified_via": conversion.verified_via,
+                    "linked_counts": conversion.linked_counts,
+                    "already_linked_counts": conversion.already_linked_counts,
+                    "linked_total": conversion.linked_total,
+                    "already_linked_total": conversion.already_linked_total,
+                }
+            except GuestBookingConversionError as exc:
+                data["guest_history_transfer"] = {
+                    "success": False,
+                    "detail": str(exc),
+                }
+        if result.user is None:
+            data["guest_verification_token"] = GuestPhoneVerificationService.create_token(
+                result.challenge.phone
+            )
         return Response(data, status=status.HTTP_200_OK)
 
 
@@ -1000,7 +1028,7 @@ class PasswordResetView(APIView):
 
     @extend_schema(
         summary="Request Password Reset",
-        description="Send a password reset link to the provided email address.",
+        description="Send a password reset OTP to the provided phone number.",
         request=PasswordResetSerializer,
         responses={200: OpenApiTypes.OBJECT}
     )
@@ -1008,7 +1036,18 @@ class PasswordResetView(APIView):
         serializer = PasswordResetSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        return Response({"detail": "If an account with this email exists, a reset link has been sent."}, status=status.HTTP_200_OK)
+        challenge = getattr(serializer, "challenge", None)
+        data = {"detail": "If an account with this phone exists, a reset code has been sent."}
+        if challenge:
+            data.update(
+                {
+                    "challenge_id": str(challenge.id),
+                    "challenge_token": str(challenge.id),
+                    "expires_at": challenge.expires_at,
+                    "phone": challenge.phone,
+                }
+            )
+        return Response(data, status=status.HTTP_200_OK)
 
 
 @extend_schema(tags=["Identity & Auth"])
@@ -1020,7 +1059,7 @@ class PasswordResetConfirmView(APIView):
 
     @extend_schema(
         summary="Confirm Password Reset",
-        description="Reset password using the token received in email.",
+        description="Reset password using the OTP received by phone.",
         request=PasswordResetConfirmSerializer,
         responses={200: OpenApiTypes.OBJECT}
     )

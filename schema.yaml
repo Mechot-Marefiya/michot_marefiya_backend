@@ -942,7 +942,7 @@ paths:
   /api/v1/account/password-reset/:
     post:
       operationId: v1_account_password_reset_create
-      description: Send a password reset link to the provided email address.
+      description: Send a password reset OTP to the provided phone number.
       summary: Request Password Reset
       tags:
       - Identity & Auth
@@ -972,7 +972,7 @@ paths:
   /api/v1/account/password-reset/confirm/:
     post:
       operationId: v1_account_password_reset_confirm_create
-      description: Reset password using the token received in email.
+      description: Reset password using the OTP received by phone.
       summary: Confirm Password Reset
       tags:
       - Identity & Auth
@@ -1947,8 +1947,7 @@ paths:
   /api/v1/auth/token/:
     post:
       operationId: v1_auth_token_create
-      description: Deprecated migration endpoint. Phone OTP login is primary; email/password
-        login remains temporarily available.
+      description: Obtain JWT tokens with phone and password.
       summary: Obtain JWT Token
       tags:
       - Identity & Auth
@@ -1966,7 +1965,6 @@ paths:
         required: true
       security:
       - {}
-      deprecated: true
       responses:
         '200':
           description: No response body
@@ -3615,8 +3613,10 @@ paths:
   /api/v1/listing/car-rentals/{id}/cancel/:
     post:
       operationId: v1_listing_car_rentals_cancel_create
-      description: Cancel a car rental and restore availability. Booking cancellation
-        does not create a refund because the platform does not support refunds.
+      description: Cancel a car rental and restore availability. Authenticated owners
+        keep the existing flow, while guest rentals can be cancelled with a verified
+        guest phone session. Booking cancellation does not create a refund because
+        the platform does not support refunds.
       summary: Cancel a car rental
       parameters:
       - in: path
@@ -3632,13 +3632,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CarRentalRequest'
+              $ref: '#/components/schemas/GuestCarRentalCancellationRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/CarRentalRequest'
+              $ref: '#/components/schemas/GuestCarRentalCancellationRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/CarRentalRequest'
+              $ref: '#/components/schemas/GuestCarRentalCancellationRequest'
         required: true
       security:
       - jwtAuth: []
@@ -3650,6 +3650,13 @@ paths:
                 $ref: '#/components/schemas/CarRental'
           description: ''
         '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
           content:
             application/json:
               schema:
@@ -3689,6 +3696,110 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CarRental'
+          description: ''
+  /api/v1/listing/car-rentals/{id}/extension-price-preview/:
+    post:
+      operationId: v1_listing_car_rentals_extension_price_preview_create
+      description: Validate extra-day availability and calculate the extension payment
+        before initiating payment.
+      summary: Preview car rental extension price
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Car Rental.
+        required: true
+      tags:
+      - Car Rentals
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CarRentalExtensionPreviewRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CarRentalExtensionPreviewRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CarRentalExtensionPreviewRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarRentalExtensionPreviewResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/listing/car-rentals/{id}/request-extension/:
+    post:
+      operationId: v1_listing_car_rentals_request_extension_create
+      description: Hold the requested extra days, create an extension request, and
+        initialize a dedicated Chapa payment.
+      summary: Initiate a car rental extension payment
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Car Rental.
+        required: true
+      tags:
+      - Car Rentals
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CarRentalExtensionInitiateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CarRentalExtensionInitiateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CarRentalExtensionInitiateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarRentalExtensionInitiateResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /api/v1/listing/car-rentals/{id}/reschedule/:
     post:
@@ -3779,22 +3890,127 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/v1/listing/car-rentals/guest-rentals/:
+    get:
+      operationId: v1_listing_car_rentals_guest_rentals_list
+      description: Retrieve guest-created car rentals tied to a verified phone number.
+        Registered-user rentals are excluded from this guest self-service view.
+      summary: List guest car rentals by verified phone
+      parameters:
+      - in: query
+        name: guest_phone
+        schema:
+          type: string
+          minLength: 1
+        description: The guest phone number tied to the booking or rentals.
+        required: true
+      - in: query
+        name: guest_verification_token
+        schema:
+          type: string
+        description: Reusable verified guest phone session token.
+      - name: ordering
+        required: false
+        in: query
+        description: Which field to use when ordering the results.
+        schema:
+          type: string
+      - in: query
+        name: otp_challenge_id
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: otp_code
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 12
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: status
+        schema:
+          type: string
+          enum:
+          - cancelled
+          - confirmed
+          - pending
+        description: |-
+          * `pending` - Pending
+          * `confirmed` - Confirmed
+          * `cancelled` - Cancelled
+      tags:
+      - Car Rentals
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedCarRentalList'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/listing/car-rentals/lookup/:
     get:
       operationId: v1_listing_car_rentals_lookup_retrieve
-      description: Retrieve rental details using reference and guest email. No login
-        required.
+      description: Retrieve guest car rental details using a verified guest phone
+        session. A legacy email compatibility bridge remains available temporarily.
       summary: Lookup car rental status (Guest)
       parameters:
       - in: query
         name: email
         schema:
           type: string
-        required: true
+          format: email
+        description: Legacy compatibility field for guest lookup. Verified phone is
+          preferred.
+      - in: query
+        name: guest_phone
+        schema:
+          type: string
+          minLength: 1
+        description: The guest phone number tied to the booking.
+      - in: query
+        name: guest_verification_token
+        schema:
+          type: string
+        description: Reusable verified guest phone session token.
+      - in: query
+        name: otp_challenge_id
+        schema:
+          type: string
+          format: uuid
+      - in: query
+        name: otp_code
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 12
       - in: query
         name: reference
         schema:
           type: string
+          minLength: 1
+        description: The unique car rental reference (e.g., C-X7Y2Z9).
         required: true
       tags:
       - Car Rentals
@@ -3828,6 +4044,57 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CarRental'
+          description: ''
+  /api/v1/listing/car-rentals/price-preview/:
+    post:
+      operationId: v1_listing_car_rentals_price_preview_create
+      description: Get a consolidated price quote for one or more cars before creating
+        the rental or starting payment.
+      summary: Price preview for car rental selection
+      parameters:
+      - in: query
+        name: display_currency
+        schema:
+          type: string
+        description: 'Optional: Request price preview in a specific currency (e.g.,
+          USD) using triangulation.'
+      tags:
+      - Car Rentals
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CarRentalPreviewRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/CarRentalPreviewRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/CarRentalPreviewRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PricePreviewResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '409':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /api/v1/listing/car-rentals/rental_stats/:
     get:
@@ -4091,6 +4358,7 @@ paths:
       - Car Sales
       security:
       - jwtAuth: []
+      - {}
       responses:
         '200':
           content:
@@ -4131,6 +4399,7 @@ paths:
               $ref: '#/components/schemas/ContactRevealRequestRequest'
       security:
       - jwtAuth: []
+      - {}
       responses:
         '200':
           content:
@@ -4225,6 +4494,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/CarSaleListingResponse'
+          description: ''
+  /api/v1/listing/car-sales/guest-otp/:
+    post:
+      operationId: v1_listing_car_sales_guest_otp_create
+      summary: Request guest car-sale contact reveal phone OTP
+      tags:
+      - Car Sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuestContactRevealOtpRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GuestContactRevealOtpRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GuestContactRevealOtpRequestRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /api/v1/listing/cars/:
     get:
@@ -6435,6 +6733,44 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
+  /api/v1/listing/property-rentals/bookings/guest-otp/request/:
+    post:
+      operationId: v1_listing_property_rentals_bookings_guest_otp_request_create
+      description: Issue a phone OTP challenge before creating a property rental booking
+        as a guest.
+      summary: Request property rental booking guest phone OTP
+      tags:
+      - Property Rental Bookings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuestBookingOtpRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GuestBookingOtpRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GuestBookingOtpRequestRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/listing/property-rentals/bookings/price-preview/:
     post:
       operationId: v1_listing_property_rentals_bookings_price_preview_create
@@ -6585,6 +6921,36 @@ paths:
               schema:
                 $ref: '#/components/schemas/PropertySaleListingResponse'
           description: ''
+  /api/v1/listing/property-sales/{id}/contact/:
+    get:
+      operationId: v1_listing_property_sales_contact_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Property Sale Listing.
+        required: true
+      tags:
+      - Property Sales
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CarSaleContact'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/listing/property-sales/{id}/request-contact/:
     post:
       operationId: v1_listing_property_sales_request_contact_create
@@ -6611,6 +6977,7 @@ paths:
               $ref: '#/components/schemas/ContactRevealRequestRequest'
       security:
       - jwtAuth: []
+      - {}
       responses:
         '200':
           content:
@@ -6705,6 +7072,35 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/PropertySaleListingResponse'
+          description: ''
+  /api/v1/listing/property-sales/guest-otp/:
+    post:
+      operationId: v1_listing_property_sales_guest_otp_create
+      summary: Request guest property-sale contact reveal phone OTP
+      tags:
+      - Property Sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GuestContactRevealOtpRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/GuestContactRevealOtpRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/GuestContactRevealOtpRequestRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
           description: ''
   /api/v1/listing/rooms/:
     get:
@@ -8785,6 +9181,79 @@ paths:
               schema:
                 $ref: '#/components/schemas/OwnerPaymentTransaction'
           description: ''
+  /api/v1/payment/subaccounts/:
+    post:
+      operationId: v1_payment_subaccounts_create
+      description: Register or update the authenticated owner's Chapa subaccount.
+        Admins may target any supported owner.
+      summary: Register Chapa subaccount
+      tags:
+      - Payments
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChapaSubaccountCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/ChapaSubaccountCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/ChapaSubaccountCreateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChapaSubaccountResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+  /api/v1/payment/subaccounts/me/:
+    get:
+      operationId: v1_payment_subaccounts_me_retrieve
+      description: Return the authenticated owner's Chapa subaccount and split configuration.
+      summary: Current owner Chapa subaccount
+      tags:
+      - Payments
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChapaSubaccountResponse'
+          description: ''
+        '400':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
   /api/v1/payment/verify-public/{tx_ref}/:
     get:
       operationId: v1_payment_verify_public_retrieve
@@ -9688,10 +10157,10 @@ components:
         guest_email:
           type: string
           format: email
-          description: Contact email for confirmations (Required if not logged in)
+          description: Optional contact email
         guest_phone:
           type: string
-          description: Contact phone number (Required if not logged in)
+          description: Contact phone number required for every booking
           maxLength: 20
         special_requests:
           type: string
@@ -9700,6 +10169,7 @@ components:
       - check_in_date
       - check_out_date
       - currency
+      - guest_phone
       - items
       - status
     BookingAddon:
@@ -9951,11 +10421,11 @@ components:
           type: string
           format: email
           minLength: 1
-          description: Contact email for confirmations (Required if not logged in)
+          description: Optional contact email
         guest_phone:
           type: string
           minLength: 1
-          description: Contact phone number (Required if not logged in)
+          description: Contact phone number required for every booking
           maxLength: 20
         special_requests:
           type: string
@@ -9978,9 +10448,13 @@ components:
           writeOnly: true
           minLength: 1
           maxLength: 12
+        guest_verification_token:
+          type: string
+          writeOnly: true
       required:
       - check_in_date
       - check_out_date
+      - guest_phone
       - items
     BookingResponse:
       type: object
@@ -10119,6 +10593,24 @@ components:
         * `confirmed` - Confirmed
         * `cancelled` - Cancelled
         * `walk_in` - Walk-In
+    BookingType7c6Enum:
+      enum:
+      - booking
+      - guesthouse
+      - eventspace
+      - carrental
+      - carrental_extension
+      - propertyrental
+      - contact_reveal
+      type: string
+      description: |-
+        * `booking` - Hotel Room
+        * `guesthouse` - Guesthouse
+        * `eventspace` - Event Space
+        * `carrental` - Car Rental
+        * `carrental_extension` - Car Rental Extension
+        * `propertyrental` - Property Rental
+        * `contact_reveal` - Contact Reveal
     BrandEnum:
       enum:
       - toyota
@@ -10911,10 +11403,10 @@ components:
         guest_email:
           type: string
           format: email
-          description: Contact email for confirmations (Required if not logged in)
+          description: Optional contact email
         guest_phone:
           type: string
-          description: Contact phone number (Required if not logged in)
+          description: Contact phone number required for every booking
           maxLength: 20
         special_requests:
           type: string
@@ -10938,6 +11430,7 @@ components:
       - conversion
       - created_at
       - end_date
+      - guest_phone
       - id
       - is_legacy
       - items_details
@@ -10951,6 +11444,172 @@ components:
       - total_price
       - total_rental_cost
       - updated_at
+    CarRentalExtensionInitiateRequest:
+      type: object
+      properties:
+        new_end_date:
+          type: string
+          format: date
+        guest_phone:
+          type: string
+          maxLength: 20
+        otp_challenge_id:
+          type: string
+          format: uuid
+          writeOnly: true
+        otp_code:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 12
+        guest_verification_token:
+          type: string
+          writeOnly: true
+        payment_currency:
+          $ref: '#/components/schemas/PaymentCurrencyEnum'
+      required:
+      - new_end_date
+    CarRentalExtensionInitiateResponse:
+      type: object
+      properties:
+        booking_reference:
+          type: string
+        current_end_date:
+          type: string
+          format: date
+        new_end_date:
+          type: string
+          format: date
+        extra_days:
+          type: integer
+        extension_subtotal:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        platform_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        original_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        original_currency:
+          type: string
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        currency:
+          type: string
+        exchange_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+        guest_verification_token:
+          type: string
+        extension_request_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        tx_ref:
+          type: string
+        checkout_url:
+          type: string
+          format: uri
+      required:
+      - amount
+      - booking_reference
+      - checkout_url
+      - currency
+      - current_end_date
+      - exchange_rate
+      - extension_request_id
+      - extension_subtotal
+      - extra_days
+      - new_end_date
+      - original_amount
+      - original_currency
+      - platform_fee
+      - status
+      - tx_ref
+    CarRentalExtensionPreviewRequest:
+      type: object
+      properties:
+        new_end_date:
+          type: string
+          format: date
+        guest_phone:
+          type: string
+          maxLength: 20
+        otp_challenge_id:
+          type: string
+          format: uuid
+          writeOnly: true
+        otp_code:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 12
+        guest_verification_token:
+          type: string
+          writeOnly: true
+        payment_currency:
+          $ref: '#/components/schemas/PaymentCurrencyEnum'
+      required:
+      - new_end_date
+    CarRentalExtensionPreviewResponse:
+      type: object
+      properties:
+        booking_reference:
+          type: string
+        current_end_date:
+          type: string
+          format: date
+        new_end_date:
+          type: string
+          format: date
+        extra_days:
+          type: integer
+        extension_subtotal:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        platform_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        original_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        original_currency:
+          type: string
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        currency:
+          type: string
+        exchange_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,6}(?:\.\d{0,6})?$
+        guest_verification_token:
+          type: string
+      required:
+      - amount
+      - booking_reference
+      - currency
+      - current_end_date
+      - exchange_rate
+      - extension_subtotal
+      - extra_days
+      - new_end_date
+      - original_amount
+      - original_currency
+      - platform_fee
     CarRentalItem:
       type: object
       properties:
@@ -11042,6 +11701,43 @@ components:
       required:
       - car_listing
       - price_per_unit
+    CarRentalPreviewItemRequest:
+      type: object
+      properties:
+        car_listing:
+          type: string
+          format: uuid
+        units_rent:
+          type: integer
+          minimum: 1
+      required:
+      - car_listing
+      - units_rent
+    CarRentalPreviewRequest:
+      type: object
+      properties:
+        start_date:
+          type: string
+          format: date
+          description: Rental start date. Must be within the configured forward booking
+            window.
+        end_date:
+          type: string
+          format: date
+          description: Rental end date.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarRentalPreviewItemRequest'
+          description: List of cars and quantities selected.
+        guest_phone:
+          type: string
+          description: Optional phone number used to determine the first-booking fee
+            waiver.
+      required:
+      - end_date
+      - items
+      - start_date
     CarRentalRequest:
       type: object
       properties:
@@ -11088,11 +11784,11 @@ components:
           type: string
           format: email
           minLength: 1
-          description: Contact email for confirmations (Required if not logged in)
+          description: Optional contact email
         guest_phone:
           type: string
           minLength: 1
-          description: Contact phone number (Required if not logged in)
+          description: Contact phone number required for every booking
           maxLength: 20
         special_requests:
           type: string
@@ -11106,6 +11802,9 @@ components:
           writeOnly: true
           minLength: 1
           maxLength: 12
+        guest_verification_token:
+          type: string
+          writeOnly: true
         renter_driver_license_number:
           type: string
           description: Required for without-driver rentals.
@@ -11131,6 +11830,7 @@ components:
             * `ETB` - ETB
       required:
       - end_date
+      - guest_phone
       - rental_items
       - start_date
       - terms_accepted
@@ -11591,6 +12291,81 @@ components:
       required:
       - confirm_password
       - new_password
+    ChapaSubaccountCreateRequest:
+      type: object
+      properties:
+        bank_code:
+          type: string
+          minLength: 1
+          maxLength: 50
+        account_number:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 64
+        business_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        account_name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        owner_type:
+          allOf:
+          - $ref: '#/components/schemas/OwnerTypeEnum'
+          description: |-
+            Required when an admin creates a subaccount for another owner.
+
+            * `company` - company
+            * `individual_owner` - individual_owner
+        owner_id:
+          type: string
+          format: uuid
+          description: Required when an admin creates a subaccount for another owner.
+        split_type:
+          $ref: '#/components/schemas/SplitTypeEnum'
+        split_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,4})?$
+          description: Platform commission value. For percentage, 0.02 means 2%.
+        allow_overwrite:
+          type: boolean
+          default: false
+      required:
+      - account_name
+      - account_number
+      - bank_code
+      - business_name
+    ChapaSubaccountResponse:
+      type: object
+      properties:
+        owner_type:
+          type: string
+        owner_id:
+          type: string
+          format: uuid
+        chapa_subaccount_id:
+          type: string
+          nullable: true
+        split_type:
+          type: string
+          nullable: true
+        split_value:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,4})?$
+          nullable: true
+        split_config_active:
+          type: boolean
+      required:
+      - chapa_subaccount_id
+      - owner_id
+      - owner_type
+      - split_config_active
+      - split_type
+      - split_value
     ChapaWebhookRequest:
       type: object
       properties:
@@ -11735,7 +12510,6 @@ components:
           type: string
           format: email
           writeOnly: true
-          minLength: 1
         first_name:
           type: string
           writeOnly: true
@@ -11788,7 +12562,6 @@ components:
       - address
       - category
       - confirm_password
-      - email
       - first_name
       - last_name
       - name
@@ -11810,6 +12583,14 @@ components:
         buyer_phone:
           type: string
           maxLength: 20
+        otp_challenge_id:
+          type: string
+          format: uuid
+        otp_code:
+          type: string
+          maxLength: 12
+        guest_verification_token:
+          type: string
     ConversionInputRequest:
       type: object
       description: Serializer for validating currency conversion input.
@@ -11911,13 +12692,14 @@ components:
         email:
           type: string
           writeOnly: true
-          minLength: 1
+        phone:
+          type: string
+          writeOnly: true
         password:
           type: string
           writeOnly: true
           minLength: 1
       required:
-      - email
       - password
     DiscoveryListing:
       type: object
@@ -12055,7 +12837,7 @@ components:
           description: Contact email for confirmations (Required if not logged in)
         guest_phone:
           type: string
-          description: Contact phone number (Required if not logged in)
+          description: Contact phone number required for every booking
           maxLength: 20
         special_requests:
           type: string
@@ -12064,6 +12846,7 @@ components:
       - check_in_date
       - check_out_date
       - currency
+      - guest_phone
       - items
     EventSpaceBookingItem:
       type: object
@@ -12203,7 +12986,7 @@ components:
         guest_phone:
           type: string
           minLength: 1
-          description: Contact phone number (Required if not logged in)
+          description: Contact phone number required for every booking
           maxLength: 20
         special_requests:
           type: string
@@ -12226,9 +13009,13 @@ components:
           writeOnly: true
           minLength: 1
           maxLength: 12
+        guest_verification_token:
+          type: string
+          writeOnly: true
       required:
       - check_in_date
       - check_out_date
+      - guest_phone
       - items
       - terms_accepted
       - terms_version
@@ -12832,6 +13619,36 @@ components:
           type: string
       required:
       - guest_email
+    GuestCarRentalCancellationRequest:
+      type: object
+      properties:
+        guest_phone:
+          type: string
+          minLength: 1
+          description: The guest phone number tied to the booking or rentals.
+        guest_verification_token:
+          type: string
+          description: Reusable verified guest phone session token.
+        otp_challenge_id:
+          type: string
+          format: uuid
+        otp_code:
+          type: string
+          minLength: 1
+          maxLength: 12
+        reason:
+          type: string
+      required:
+      - guest_phone
+    GuestContactRevealOtpRequestRequest:
+      type: object
+      properties:
+        buyer_phone:
+          type: string
+          minLength: 1
+          maxLength: 20
+      required:
+      - buyer_phone
     GuestFavorite:
       type: object
       properties:
@@ -12959,10 +13776,10 @@ components:
         guest_email:
           type: string
           format: email
-          description: Contact email for confirmations (Required if not logged in)
+          description: Optional contact email
         guest_phone:
           type: string
-          description: Contact phone number (Required if not logged in)
+          description: Contact phone number required for every booking
           maxLength: 20
         special_requests:
           type: string
@@ -12972,6 +13789,7 @@ components:
       - conversion
       - currency
       - end_date
+      - guest_phone
       - id
       - is_legacy
       - renter
@@ -13084,11 +13902,11 @@ components:
           type: string
           format: email
           minLength: 1
-          description: Contact email for confirmations (Required if not logged in)
+          description: Optional contact email
         guest_phone:
           type: string
           minLength: 1
-          description: Contact phone number (Required if not logged in)
+          description: Contact phone number required for every booking
           maxLength: 20
         special_requests:
           type: string
@@ -13116,8 +13934,12 @@ components:
           writeOnly: true
           minLength: 1
           maxLength: 12
+        guest_verification_token:
+          type: string
+          writeOnly: true
       required:
       - end_date
+      - guest_phone
       - items
       - start_date
     GuestHouseFacilityPayload:
@@ -14671,13 +15493,17 @@ components:
           type: string
           nullable: true
           maxLength: 100
+        receipt_url:
+          type: string
+          format: uri
+          readOnly: true
         created_at:
           type: string
           format: date-time
           readOnly: true
         booking_type:
           allOf:
-          - $ref: '#/components/schemas/PaymentTransactionBookingTypeEnum'
+          - $ref: '#/components/schemas/BookingType7c6Enum'
           description: |-
             Discriminator for the type of booking
 
@@ -14685,6 +15511,7 @@ components:
             * `guesthouse` - Guesthouse
             * `eventspace` - Event Space
             * `carrental` - Car Rental
+            * `carrental_extension` - Car Rental Extension
             * `propertyrental` - Property Rental
             * `contact_reveal` - Contact Reveal
         booking_reference:
@@ -14770,8 +15597,17 @@ components:
       - id
       - listing_title
       - owner_price
+      - receipt_url
       - service_fee
       - tx_ref
+    OwnerTypeEnum:
+      enum:
+      - company
+      - individual_owner
+      type: string
+      description: |-
+        * `company` - company
+        * `individual_owner` - individual_owner
     PaginatedAddonOfferingListList:
       type: object
       properties:
@@ -15743,12 +16579,13 @@ components:
     PasswordResetConfirmRequest:
       type: object
       properties:
-        uid:
+        challenge_id:
+          type: string
+          format: uuid
+        code:
           type: string
           minLength: 1
-        token:
-          type: string
-          minLength: 1
+          maxLength: 12
         new_password:
           type: string
           writeOnly: true
@@ -15758,19 +16595,18 @@ components:
           writeOnly: true
           minLength: 1
       required:
+      - challenge_id
+      - code
       - confirm_password
       - new_password
-      - token
-      - uid
     PasswordResetRequest:
       type: object
       properties:
-        email:
+        phone:
           type: string
-          format: email
           minLength: 1
       required:
-      - email
+      - phone
     PatchedAddonOfferingRequest:
       type: object
       properties:
@@ -16055,11 +16891,11 @@ components:
           type: string
           format: email
           minLength: 1
-          description: Contact email for confirmations (Required if not logged in)
+          description: Optional contact email
         guest_phone:
           type: string
           minLength: 1
-          description: Contact phone number (Required if not logged in)
+          description: Contact phone number required for every booking
           maxLength: 20
         special_requests:
           type: string
@@ -16073,6 +16909,9 @@ components:
           writeOnly: true
           minLength: 1
           maxLength: 12
+        guest_verification_token:
+          type: string
+          writeOnly: true
         renter_driver_license_number:
           type: string
           description: Required for without-driver rentals.
@@ -16353,11 +17192,11 @@ components:
           type: string
           format: email
           minLength: 1
-          description: Contact email for confirmations (Required if not logged in)
+          description: Optional contact email
         guest_phone:
           type: string
           minLength: 1
-          description: Contact phone number (Required if not logged in)
+          description: Contact phone number required for every booking
           maxLength: 20
         special_requests:
           type: string
@@ -16385,6 +17224,9 @@ components:
           writeOnly: true
           minLength: 1
           maxLength: 12
+        guest_verification_token:
+          type: string
+          writeOnly: true
     PatchedGuestHouseProfileRequest:
       type: object
       properties:
@@ -17050,22 +17892,6 @@ components:
       required:
       - message
       - success
-    PaymentTransactionBookingTypeEnum:
-      enum:
-      - booking
-      - guesthouse
-      - eventspace
-      - carrental
-      - propertyrental
-      - contact_reveal
-      type: string
-      description: |-
-        * `booking` - Hotel Room
-        * `guesthouse` - Guesthouse
-        * `eventspace` - Event Space
-        * `carrental` - Car Rental
-        * `propertyrental` - Property Rental
-        * `contact_reveal` - Contact Reveal
     PaymentTransactionDisputeStatusEnum:
       enum:
       - open
@@ -17836,8 +18662,21 @@ components:
           allOf:
           - $ref: '#/components/schemas/PaymentCurrencyEnum'
           writeOnly: true
+        otp_challenge_id:
+          type: string
+          format: uuid
+          writeOnly: true
+        otp_code:
+          type: string
+          writeOnly: true
+          minLength: 1
+          maxLength: 12
+        guest_verification_token:
+          type: string
+          writeOnly: true
       required:
       - end_date
+      - guest_phone
       - property_listing
       - start_date
       - terms_accepted
@@ -18423,6 +19262,9 @@ components:
       - guest_guesthouse_booking
       - guest_eventspace_booking
       - guest_car_rental_booking
+      - guest_property_rental_booking
+      - guest_car_sale_reveal
+      - guest_property_sale_reveal
       type: string
       description: |-
         * `login` - Login
@@ -18432,6 +19274,9 @@ components:
         * `guest_guesthouse_booking` - Guest Guesthouse Booking
         * `guest_eventspace_booking` - Guest Event Space Booking
         * `guest_car_rental_booking` - Guest Car Rental Booking
+        * `guest_property_rental_booking` - Guest Property Rental Booking
+        * `guest_car_sale_reveal` - Guest Car Sale Reveal
+        * `guest_property_sale_reveal` - Guest Property Sale Reveal
     RentalModeEnum:
       enum:
       - with_driver
@@ -19163,35 +20008,45 @@ components:
         * `auditorium` - Auditorium
         * `conference_hall` - Conference Hall
         * `meeting_room` - Meeting Room
+    SplitTypeEnum:
+      enum:
+      - percentage
+      - flat
+      type: string
+      description: |-
+        * `percentage` - percentage
+        * `flat` - flat
     StaffCreate:
       type: object
       properties:
         email:
           type: string
           format: email
-          maxLength: 254
         first_name:
           type: string
           maxLength: 150
         last_name:
           type: string
           maxLength: 150
+        phone:
+          type: string
       required:
-      - email
+      - phone
     StaffCreateRequest:
       type: object
       properties:
         email:
           type: string
           format: email
-          minLength: 1
-          maxLength: 254
         first_name:
           type: string
           maxLength: 150
         last_name:
           type: string
           maxLength: 150
+        phone:
+          type: string
+          minLength: 1
         workspace_id:
           type: string
           format: uuid
@@ -19201,7 +20056,7 @@ components:
           - $ref: '#/components/schemas/WorkspaceTypeEnum'
           writeOnly: true
       required:
-      - email
+      - phone
       - workspace_id
       - workspace_type
     StaffResponse:
@@ -19363,7 +20218,7 @@ components:
           readOnly: true
         booking_type:
           allOf:
-          - $ref: '#/components/schemas/PaymentTransactionBookingTypeEnum'
+          - $ref: '#/components/schemas/BookingType7c6Enum'
           readOnly: true
           description: |-
             Discriminator for the type of booking
@@ -19372,6 +20227,7 @@ components:
             * `guesthouse` - Guesthouse
             * `eventspace` - Event Space
             * `carrental` - Car Rental
+            * `carrental_extension` - Car Rental Extension
             * `propertyrental` - Property Rental
             * `contact_reveal` - Contact Reveal
         listing_reference:
@@ -19402,6 +20258,10 @@ components:
           description: Tax amount collected for eligible property rental transactions
         grand_total:
           type: string
+          readOnly: true
+        receipt_url:
+          type: string
+          format: uri
           readOnly: true
         dispute_status:
           readOnly: true
@@ -19498,6 +20358,7 @@ components:
       - owner_price
       - payment_method
       - payout_status
+      - receipt_url
       - service_fee
       - status
       - tax_amount
@@ -19531,7 +20392,7 @@ components:
           readOnly: true
         booking_type:
           allOf:
-          - $ref: '#/components/schemas/PaymentTransactionBookingTypeEnum'
+          - $ref: '#/components/schemas/BookingType7c6Enum'
           readOnly: true
           description: |-
             Discriminator for the type of booking
@@ -19540,6 +20401,7 @@ components:
             * `guesthouse` - Guesthouse
             * `eventspace` - Event Space
             * `carrental` - Car Rental
+            * `carrental_extension` - Car Rental Extension
             * `propertyrental` - Property Rental
             * `contact_reveal` - Contact Reveal
         listing_reference:
@@ -19571,6 +20433,10 @@ components:
         grand_total:
           type: string
           readOnly: true
+        receipt_url:
+          type: string
+          format: uri
+          readOnly: true
         dispute_status:
           readOnly: true
           nullable: true
@@ -19598,6 +20464,7 @@ components:
       - id
       - listing_reference
       - payout_status
+      - receipt_url
       - status
       - tax_amount
       - tx_ref
@@ -19616,7 +20483,6 @@ components:
         email:
           type: string
           format: email
-          maxLength: 254
         first_name:
           type: string
           maxLength: 150
@@ -19628,8 +20494,6 @@ components:
           nullable: true
           title: Phone Number
           maxLength: 20
-      required:
-      - email
     UserLocation:
       type: object
       properties:
@@ -19677,8 +20541,6 @@ components:
         email:
           type: string
           format: email
-          minLength: 1
-          maxLength: 254
         password:
           type: string
           writeOnly: true
@@ -19701,7 +20563,6 @@ components:
           maxLength: 20
       required:
       - confirm_password
-      - email
       - password
     UserResponse:
       type: object

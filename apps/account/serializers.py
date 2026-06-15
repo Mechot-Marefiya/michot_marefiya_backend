@@ -3,7 +3,9 @@ from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
 import logging
+import uuid
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.exceptions import AuthenticationFailed
 from apps.account.services import (
     GuestBookingConversionError,
     GuestBookingConversionService,
@@ -45,9 +47,16 @@ from apps.core.serializers import (
     JsonSerializerField,
 )
 from drf_spectacular.utils import extend_schema_field, inline_serializer
+from services.sms import send_sms
 
 
 User = get_user_model()
+
+
+def build_placeholder_email(phone: str | None) -> str:
+    normalized_phone = normalize_phone_number(phone)
+    suffix = normalized_phone or uuid.uuid4().hex
+    return f"{suffix}@phone.local"
 
 
 class PlaceResolutionMixin(metaclass=serializers.SerializerMetaclass):
@@ -96,9 +105,45 @@ WORKSPACE_INFO_SCHEMA = inline_serializer(
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
-    def validate(self, attrs):
+    email = serializers.EmailField(required=False, allow_blank=True)
+    phone = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
-        data = super().validate(attrs)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        username_field = self.username_field
+        if username_field in self.fields:
+            self.fields[username_field].required = False
+            self.fields[username_field].allow_blank = True
+
+    def _get_authenticated_user(self, attrs):
+        password = attrs.get("password")
+        raw_phone = (attrs.get("phone") or "").strip()
+
+        if not raw_phone:
+            raise serializers.ValidationError(
+                {"phone": "This field is required."}
+            )
+
+        phone = normalize_phone_number(raw_phone)
+        user = (
+            User.objects.select_related("role")
+            .filter(phone=phone)
+            .first()
+        )
+        if not user or not user.check_password(password):
+            raise AuthenticationFailed(
+                self.error_messages["no_active_account"],
+                "no_active_account",
+            )
+        return user
+
+    def validate(self, attrs):
+        self.user = self._get_authenticated_user(attrs)
+        refresh = self.get_token(self.user)
+        data = {
+            "refresh": str(refresh),
+            "access": str(refresh.access_token),
+        }
         
         if not self.user.is_active:
             raise serializers.ValidationError(
@@ -192,10 +237,20 @@ class StaffCreateSerializer(serializers.ModelSerializer):
         choices=["hotel", "guesthouse", "car_rental", "event_space"],
         write_only=True
     )
+    phone = serializers.CharField(required=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
 
     class Meta:
         model = User
-        fields = ["email", "first_name", "last_name", "workspace_id", "workspace_type"]
+        fields = ["email", "first_name", "last_name", "phone", "workspace_id", "workspace_type"]
+
+    def validate_phone(self, value):
+        normalized_phone = normalize_phone_number(value)
+        if not normalized_phone:
+            raise serializers.ValidationError("This field may not be blank.")
+        if User.objects.filter(phone=normalized_phone).exists():
+            raise serializers.ValidationError("A user with this phone already exists.")
+        return normalized_phone
 
     def validate(self, attrs):
         from django.apps import apps
@@ -252,13 +307,16 @@ class StaffCreateSerializer(serializers.ModelSerializer):
         validated_data.pop("workspace_type")
         
         email = validated_data.get("email")
+        if not email:
+            email = build_placeholder_email(validated_data.get("phone"))
+            validated_data["email"] = email
         
         try:
             role = Role.objects.get(code=RoleCode.FRONT_DESK.value)
         except Role.DoesNotExist:
             raise serializers.ValidationError({"error": "Front Desk role configuration missing."})
 
-        password = generate_password(email)
+        password = generate_password(email or validated_data.get("phone"))
         
         user = User(
             role=role,
@@ -276,10 +334,16 @@ class StaffCreateSerializer(serializers.ModelSerializer):
         user.save()
         
         try:
-            EmailService.send_account_credentials(user, password)
+            send_sms(
+                user.phone,
+                (
+                    f"Michot Marefiya staff account created. "
+                    f"Phone: {user.phone}. Password: {password}"
+                ),
+            )
         except Exception as e:
             logger = logging.getLogger(__name__)
-            logger.error(f"Failed to send credentials to {user.email}: {str(e)}")
+            logger.error(f"Failed to send staff credentials to {user.phone}: {str(e)}")
         
         return user
 
@@ -298,6 +362,7 @@ class RoleSerializer(serializers.ModelSerializer):
 
 class UserSerializer(serializers.ModelSerializer):
     confirm_password = serializers.CharField(write_only=True)
+    email = serializers.EmailField(required=False, allow_blank=True)
 
     class Meta:
         model = User
@@ -307,7 +372,7 @@ class UserSerializer(serializers.ModelSerializer):
         }
 
     def validate_email(self, value):
-        if User.objects.filter(email=value).exists():
+        if value and User.objects.filter(email=value).exists():
             raise serializers.ValidationError("A user with this email already exists.")
         return value
 
@@ -318,6 +383,8 @@ class UserSerializer(serializers.ModelSerializer):
         return normalized_phone
 
     def validate(self, attrs):
+        if not attrs.get("phone"):
+            raise serializers.ValidationError({"phone": "This field is required."})
         password = attrs.get("password")
         confirm_password = attrs.pop("confirm_password")
         
@@ -343,6 +410,9 @@ class UserSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         password = validated_data.pop("password")
+        validated_data["email"] = validated_data.get("email") or build_placeholder_email(
+            validated_data.get("phone")
+        )
         try:
             role = Role.objects.get(code=RoleCode.USER.value)
         except Role.DoesNotExist:
@@ -354,51 +424,28 @@ class UserSerializer(serializers.ModelSerializer):
         user.set_password(password)
         user.save()
 
-        if user.phone:
-            try:
-                self.otp_challenge = OtpService.create_challenge(
-                    phone=user.phone,
-                    purpose=OtpChallenge.Purpose.SIGNUP,
-                )
-            except Exception as exc:
-                user.delete()
-                raise serializers.ValidationError(
-                    {"phone": "Could not send signup OTP. Please try again."}
-                ) from exc
-            return user
-        else:
-            self.otp_challenge = None
-
         try:
-            uid = urlsafe_base64_encode(force_bytes(user.pk))
-            token = default_token_generator.make_token(user)
-            
-            frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com').rstrip('/')
-            activation_url = f"{frontend_url}/auth/verify-email?uid={uid}&token={token}"
-            
-            EmailService.send_verification_email(user, activation_url)
-        except Exception as e:
-            # log error but don't rollback user creation? 
-            # maybe it's better to perhaps rollback or inform user.
-            # for now, i will log and proceed, but user won't be able to login.
-            # ideally this should be robust.
-            pass
+            self.otp_challenge = OtpService.create_challenge(
+                phone=user.phone,
+                purpose=OtpChallenge.Purpose.SIGNUP,
+            )
+        except Exception as exc:
+            user.delete()
+            raise serializers.ValidationError(
+                {"phone": "Could not send signup OTP. Please try again."}
+            ) from exc
 
         return user
 
     def to_representation(self, instance):
         data = UserResponseSerializer(instance, self.context).to_representation(instance)
-        data["verification_required"] = "phone" if instance.phone else "email"
+        data["verification_required"] = "phone"
         data["phone_verification_required"] = bool(instance.phone and not instance.phone_verified_at)
         challenge = getattr(self, "otp_challenge", None)
         if challenge:
             data["otp_challenge_id"] = str(challenge.id)
             data["otp_expires_at"] = challenge.expires_at
             data["otp_purpose"] = challenge.purpose
-        else:
-            data["registration_warning"] = (
-                "Phone was not provided. This legacy signup path remains temporarily available during migration."
-            )
         return data
 
 
@@ -719,28 +766,26 @@ class GuestBookingConversionSerializer(serializers.Serializer):
 
 
 class PasswordResetSerializer(serializers.Serializer):
-    email = serializers.EmailField()
+    phone = serializers.CharField()
 
-    def validate_email(self, value):
-        self.user = User.objects.filter(email=value).first()
-        return value
+    def validate_phone(self, value):
+        normalized_phone = OtpService.normalize_phone(value)
+        self.user = User.objects.filter(phone=normalized_phone, is_active=True).first()
+        return normalized_phone
 
     def save(self):
         if not getattr(self, 'user', None):
             return
 
-        uid = urlsafe_base64_encode(force_bytes(self.user.pk))
-        token = default_token_generator.make_token(self.user)
-        
-        frontend_url = getattr(settings, 'FRONTEND_URL', 'https://michotmarefia.com').rstrip('/')
-        reset_url = f"{frontend_url}/auth/reset-password?uid={uid}&token={token}"
-        
-        EmailService.send_password_reset(self.user, reset_url)
+        self.challenge = OtpService.create_challenge(
+            phone=self.user.phone,
+            purpose=OtpChallenge.Purpose.PASSWORD_CHANGE,
+        )
 
 
 class PasswordResetConfirmSerializer(serializers.Serializer):
-    uid = serializers.CharField()
-    token = serializers.CharField()
+    challenge_id = serializers.UUIDField()
+    code = serializers.CharField(max_length=12, trim_whitespace=True)
     new_password = serializers.CharField(write_only=True)
     confirm_password = serializers.CharField(write_only=True)
 
@@ -757,13 +802,17 @@ class PasswordResetConfirmSerializer(serializers.Serializer):
             raise serializers.ValidationError({"new_password": "Password must contain at least one letter."})
 
         try:
-            uid = force_str(urlsafe_base64_decode(attrs['uid']))
-            self.user = User.objects.get(pk=uid)
-        except (TypeError, ValueError, OverflowError, User.DoesNotExist):
-            raise serializers.ValidationError({"token": "Invalid reset link."})
+            result = OtpService.verify_challenge(
+                challenge_id=attrs["challenge_id"],
+                code=attrs["code"],
+                purpose=OtpChallenge.Purpose.PASSWORD_CHANGE,
+            )
+        except OtpError as exc:
+            raise serializers.ValidationError({"code": str(exc)}) from exc
 
-        if not default_token_generator.check_token(self.user, attrs['token']):
-            raise serializers.ValidationError({"token": "Invalid or expired reset link."})
+        if not result.user:
+            raise serializers.ValidationError({"code": "Invalid OTP challenge or code."})
+        self.user = result.user
 
         return attrs
 
@@ -937,7 +986,7 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
 
         password = generate_password(email)
 
-        user = User(email=email, role=role)
+        user = User(email=email, role=role, phone=validated_data.get("phone"))
         user.set_password(password)
         user.save()
         address = ListingService.get_or_create_address(address_data)
@@ -948,6 +997,21 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
             approved_at=timezone.now(),
             **validated_data,
         )
+
+        try:
+            send_sms(
+                user.phone,
+                (
+                    f"Michot Marefiya company account created. "
+                    f"Phone: {user.phone}. Password: {password}"
+                ),
+            )
+        except Exception as exc:
+            logging.getLogger(__name__).error(
+                "Failed to send company credentials by SMS to %s: %s",
+                user.phone,
+                exc,
+            )
 
         EmailService.send_account_credentials(user, password)
 
@@ -1167,7 +1231,7 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
 
 
 class CompanyRegistrationSerializer(serializers.ModelSerializer):
-    email = serializers.EmailField(write_only=True)
+    email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
     first_name = serializers.CharField(write_only=True)
     last_name = serializers.CharField(write_only=True)
     password = serializers.CharField(write_only=True, style={'input_type': 'password'})
@@ -1184,9 +1248,15 @@ class CompanyRegistrationSerializer(serializers.ModelSerializer):
         ]
 
     def validate_email(self, value):
-        if User.objects.filter(email=value).exists():
+        if value and User.objects.filter(email=value).exists():
             raise serializers.ValidationError("A user with this email already exists.")
         return value
+
+    def validate_phone(self, value):
+        normalized_phone = OtpService.normalize_phone(value)
+        if normalized_phone and User.objects.filter(phone=normalized_phone).exists():
+            raise serializers.ValidationError("A user with this phone already exists.")
+        return normalized_phone
 
     def validate_address(self, attr):
         serializer = AddressSerializer(data=attr)
@@ -1194,18 +1264,20 @@ class CompanyRegistrationSerializer(serializers.ModelSerializer):
         return serializer.validated_data
 
     def validate(self, attrs):
+        if not attrs.get("phone"):
+            raise serializers.ValidationError({"phone": "This field is required."})
         if attrs.get("password") != attrs.get("confirm_password"):
              raise serializers.ValidationError({"password": "Passwords do not match."})
         return attrs
 
     @transaction.atomic()
     def create(self, validated_data):
-        email = validated_data.pop("email")
+        email = validated_data.pop("email", "") or build_placeholder_email(validated_data.get("phone"))
         first_name = validated_data.pop("first_name")
         last_name = validated_data.pop("last_name")
         password = validated_data.pop("password")
         validated_data.pop("confirm_password")
-        
+        phone = validated_data.get("phone")
         address_data = validated_data.pop("address")
         
         try:
@@ -1217,6 +1289,7 @@ class CompanyRegistrationSerializer(serializers.ModelSerializer):
             email=email,
             first_name=first_name,
             last_name=last_name,
+            phone=phone,
             role=role,
             is_active=False
         )
@@ -1231,8 +1304,17 @@ class CompanyRegistrationSerializer(serializers.ModelSerializer):
             status=CompanyProfile.StatusChoice.PENDING,
             **validated_data
         )
-        
-        self._send_verification(user)
+
+        try:
+            self.otp_challenge = OtpService.create_challenge(
+                phone=user.phone,
+                purpose=OtpChallenge.Purpose.SIGNUP,
+            )
+        except Exception as exc:
+            user.delete()
+            raise serializers.ValidationError(
+                {"phone": "Could not send signup OTP. Please try again."}
+            ) from exc
         
         return profile
 
@@ -1247,11 +1329,21 @@ class CompanyRegistrationSerializer(serializers.ModelSerializer):
             pass
 
     def to_representation(self, instance):
-        return CompanyProfileResponseSerializer(instance, context=self.context).to_representation(instance)
+        data = CompanyProfileResponseSerializer(instance, context=self.context).to_representation(instance)
+        data["verification_required"] = "phone"
+        data["phone_verification_required"] = bool(
+            instance.user.phone and not instance.user.phone_verified_at
+        )
+        challenge = getattr(self, "otp_challenge", None)
+        if challenge:
+            data["otp_challenge_id"] = str(challenge.id)
+            data["otp_expires_at"] = challenge.expires_at
+            data["otp_purpose"] = challenge.purpose
+        return data
 
 
 class IndividualOwnerRegistrationSerializer(serializers.ModelSerializer):
-    email = serializers.EmailField(write_only=True)
+    email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
     password = serializers.CharField(write_only=True, style={'input_type': 'password'})
     confirm_password = serializers.CharField(write_only=True, style={'input_type': 'password'})
     
@@ -1265,7 +1357,7 @@ class IndividualOwnerRegistrationSerializer(serializers.ModelSerializer):
         ]
 
     def validate_email(self, value):
-        if User.objects.filter(email=value).exists():
+        if value and User.objects.filter(email=value).exists():
              raise serializers.ValidationError("A user with this email already exists.")
         return value
 
@@ -1275,13 +1367,15 @@ class IndividualOwnerRegistrationSerializer(serializers.ModelSerializer):
         return serializer.validated_data
         
     def validate(self, attrs):
+        if not attrs.get("phone"):
+            raise serializers.ValidationError({"phone": "This field is required."})
         if attrs.get("password") != attrs.get("confirm_password"):
              raise serializers.ValidationError({"password": "Passwords do not match."})
         return attrs
 
     @transaction.atomic()
     def create(self, validated_data):
-        email = validated_data.pop("email")
+        email = validated_data.pop("email", "") or build_placeholder_email(validated_data.get("phone"))
         password = validated_data.pop("password")
         validated_data.pop("confirm_password")
         
@@ -1290,7 +1384,7 @@ class IndividualOwnerRegistrationSerializer(serializers.ModelSerializer):
         address_data = validated_data.pop("address")
         
         try:
-            role = Role.objects.get(code=RoleCode.COMPANY.value) 
+            role = Role.objects.get(code=RoleCode.INDIVIDUAL_OWNER.value)
         except Role.DoesNotExist:
              raise serializers.ValidationError({"error": "Role configuration error."})
 
@@ -1298,6 +1392,7 @@ class IndividualOwnerRegistrationSerializer(serializers.ModelSerializer):
             email=email,
             first_name=first_name,
             last_name=last_name,
+            phone=validated_data.get("phone"),
             role=role,
             is_active=False
         )

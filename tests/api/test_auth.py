@@ -6,13 +6,16 @@
 import pytest
 import time
 from django.core.cache import cache
+from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.hashers import make_password
 from django.utils import timezone
 from rest_framework_simplejwt.tokens import RefreshToken
 from unittest.mock import patch
 
-from apps.account.models import OtpChallenge
+from apps.account.enums import RoleCode
+from apps.account.models import OtpChallenge, Role
 from apps.account.tasks import OtpChallengeCache, cleanup_expired_otp_challenges
+from apps.favorites.models import Favorite, GuestFavorite
 from services.sms import normalize_phone_number
 
 pytestmark = pytest.mark.django_db
@@ -25,9 +28,10 @@ def test_afromessage_phone_normalization_uses_provider_supported_format():
 
 
 def test_post_token_obtain_success(api_client, user):
+    cache.clear()
     response = api_client.post(
         "/api/v1/auth/token/",
-        {"email": user.email, "password": "pass1234"},
+        {"phone": user.phone, "password": "pass1234"},
         format="json",
     )
 
@@ -36,6 +40,167 @@ def test_post_token_obtain_success(api_client, user):
     assert isinstance(data["access"], str)
     assert isinstance(data["refresh"], str)
     assert data["role"] == user.role.code
+
+
+@patch("apps.account.services.OtpService.generate_code", return_value="123456")
+@patch("services.sms.send_sms", return_value=True)
+def test_phone_first_signup_login_and_password_reset_flow(mock_send_sms, mock_generate_code, api_client):
+    cache.clear()
+    Role.objects.get_or_create(name="User", code=RoleCode.USER.value)
+    phone = "0911222444"
+
+    signup_response = api_client.post(
+        "/api/v1/account/users/",
+        {
+            "password": "pass1234",
+            "confirm_password": "pass1234",
+            "first_name": "Phone",
+            "last_name": "Flow",
+            "phone": phone,
+        },
+        format="json",
+    )
+
+    assert signup_response.status_code == 201, signup_response.json()
+    signup_data = signup_response.json()
+    assert signup_data["phone"] == phone
+    assert signup_data["email"] == f"{phone}@phone.local"
+    assert signup_data["verification_required"] == "phone"
+    assert signup_data["phone_verification_required"] is True
+
+    verify_response = api_client.post(
+        "/api/v1/auth/otp/verify/",
+        {
+            "challenge_id": signup_data["otp_challenge_id"],
+            "code": "123456",
+            "purpose": "signup",
+        },
+        format="json",
+    )
+
+    assert verify_response.status_code == 200, verify_response.json()
+    verify_data = verify_response.json()
+    assert verify_data["success"] is True
+    assert verify_data["user"]["is_active"] is True
+    assert verify_data["user"]["phone_verified"] is True
+
+    login_response = api_client.post(
+        "/api/v1/auth/token/",
+        {"phone": phone, "password": "pass1234"},
+        format="json",
+    )
+
+    assert login_response.status_code == 200, login_response.json()
+    assert isinstance(login_response.json()["access"], str)
+
+    reset_response = api_client.post(
+        "/api/v1/account/password-reset/",
+        {"phone": phone},
+        format="json",
+    )
+
+    assert reset_response.status_code == 200, reset_response.json()
+    reset_data = reset_response.json()
+    assert reset_data["phone"] == phone
+    assert "challenge_id" in reset_data
+
+    reset_confirm_response = api_client.post(
+        "/api/v1/account/password-reset/confirm/",
+        {
+            "challenge_id": reset_data["challenge_id"],
+            "code": "123456",
+            "new_password": "newpass123",
+            "confirm_password": "newpass123",
+        },
+        format="json",
+    )
+
+    assert reset_confirm_response.status_code == 200, reset_confirm_response.json()
+
+    new_login_response = api_client.post(
+        "/api/v1/auth/token/",
+        {"phone": phone, "password": "newpass123"},
+        format="json",
+    )
+
+    assert new_login_response.status_code == 200, new_login_response.json()
+    assert isinstance(new_login_response.json()["refresh"], str)
+    assert mock_send_sms.call_count == 2
+
+
+@patch("apps.account.services.OtpService.generate_code", return_value="123456")
+@patch("services.sms.send_sms", return_value=True)
+def test_signup_phone_verification_transfers_guest_favorites(mock_send_sms, mock_generate_code, api_client, hotel):
+    cache.clear()
+    Role.objects.get_or_create(name="User", code=RoleCode.USER.value)
+    phone = "0911444555"
+    GuestFavorite.objects.create(
+        guest_phone=phone,
+        content_type=ContentType.objects.get_for_model(hotel.__class__),
+        object_id=str(hotel.id),
+        snapshot={"id": str(hotel.id), "type": "account.hotelprofile", "title": "Saved Before Signup"},
+        snapshot_at=timezone.now(),
+    )
+
+    signup_response = api_client.post(
+        "/api/v1/account/users/",
+        {
+            "password": "pass1234",
+            "confirm_password": "pass1234",
+            "first_name": "Guest",
+            "last_name": "Convert",
+            "phone": phone,
+        },
+        format="json",
+    )
+    assert signup_response.status_code == 201, signup_response.json()
+
+    verify_response = api_client.post(
+        "/api/v1/auth/otp/verify/",
+        {
+            "challenge_id": signup_response.json()["otp_challenge_id"],
+            "code": "123456",
+            "purpose": "signup",
+        },
+        format="json",
+    )
+
+    assert verify_response.status_code == 200, verify_response.json()
+    data = verify_response.json()
+    assert data["guest_history_transfer"]["success"] is True
+    assert data["guest_history_transfer"]["linked_counts"]["guest_favorites"] == 1
+    assert Favorite.objects.filter(
+        user_id=data["user"]["id"],
+        object_id=str(hotel.id),
+    ).exists()
+
+
+def test_post_token_obtain_front_desk_success_with_phone(api_client, front_desk_user):
+    cache.clear()
+    response = api_client.post(
+        "/api/v1/auth/token/",
+        {"phone": front_desk_user.phone, "password": "pass1234"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert isinstance(data["access"], str)
+    assert isinstance(data["refresh"], str)
+    assert data["role"] == front_desk_user.role.code
+    assert data["workspace"]["id"] == str(front_desk_user.workspace.id)
+
+
+def test_post_token_obtain_rejects_email_login(api_client, front_desk_user):
+    cache.clear()
+    response = api_client.post(
+        "/api/v1/auth/token/",
+        {"email": front_desk_user.email, "password": "pass1234"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "phone" in response.json()
 
 
 @patch("apps.account.services.OtpService.generate_code", return_value="123456")
@@ -121,9 +286,10 @@ def test_post_otp_verify_invalid_code(api_client, user):
 
 
 def test_post_token_obtain_invalid_credentials(api_client):
+    cache.clear()
     response = api_client.post(
         "/api/v1/auth/token/",
-        {"email": "missing@example.com", "password": "wrong"},
+        {"phone": "0999999999", "password": "wrong"},
         format="json",
     )
 
@@ -379,3 +545,36 @@ def test_guest_booking_purpose_is_supported_in_shared_service(mock_send_sms, moc
 
     assert challenge.user is None
     assert challenge.purpose == OtpChallenge.Purpose.GUEST_HOTEL_BOOKING
+
+
+def test_post_otp_verify_guest_challenge_returns_reusable_phone_token(api_client):
+    from apps.account.services import GuestPhoneVerificationService
+
+    phone = "0911000777"
+    challenge = OtpChallenge.objects.create(
+        phone=phone,
+        purpose=OtpChallenge.Purpose.GUEST_CAR_SALE_REVEAL,
+        code_hash=make_password("123456"),
+        expires_at=timezone.now() + timezone.timedelta(minutes=5),
+        sent_at=timezone.now(),
+    )
+
+    response = api_client.post(
+        "/api/v1/auth/otp/verify/",
+        {
+            "challenge_id": str(challenge.id),
+            "code": "123456",
+            "purpose": OtpChallenge.Purpose.GUEST_CAR_SALE_REVEAL,
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["user"] is None
+    assert data["guest_verification_token"]
+    assert GuestPhoneVerificationService.verify_token(
+        token=data["guest_verification_token"],
+        phone=phone,
+    )

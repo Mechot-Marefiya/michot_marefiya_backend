@@ -4,6 +4,7 @@ import hmac
 import hashlib
 import logging
 from decimal import Decimal
+from urllib.parse import quote
 from django.conf import settings
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare
@@ -211,21 +212,32 @@ class ContactRevealPaymentService:
         return total
 
     @staticmethod
-    def create_reveal_request(*, listing, buyer, buyer_note="", buyer_phone=""):
+    def create_reveal_request(*, listing, buyer=None, buyer_note="", buyer_phone=""):
+        from apps.account.services import OtpService
         from django.utils import timezone
 
         request_model = ContactRevealPaymentService._request_model_for_listing(listing)
         ContactRevealPaymentService.expire_stale_requests(request_model=request_model)
 
-        existing = request_model.objects.filter(
-            listing=listing,
-            buyer=buyer,
-            status__in=[
+        buyer_phone = OtpService.normalize_phone(buyer_phone)
+        if buyer is None and not buyer_phone:
+            raise ValidationError("Guest contact reveal requires a verified phone number.")
+
+        filters = {
+            "listing": listing,
+            "status__in": [
                 request_model.RevealStatus.REQUESTED,
                 request_model.RevealStatus.PAYMENT_INITIATED,
                 request_model.RevealStatus.PAID_REVEALED,
             ],
-        ).order_by("-created_at").first()
+        }
+        if buyer is not None:
+            filters["buyer"] = buyer
+        else:
+            filters["buyer__isnull"] = True
+            filters["buyer_phone"] = buyer_phone
+
+        existing = request_model.objects.filter(**filters).order_by("-created_at").first()
 
         if existing:
             if existing.status == request_model.RevealStatus.PAID_REVEALED:
@@ -269,9 +281,9 @@ class ContactRevealPaymentService:
             return {"success": False, "error": "Callback URLs not configured", "tx_ref": tx_ref}
 
         buyer = reveal_request.buyer
-        email = buyer.email or f"no-reply+{tx_ref[:8]}@example.com"
-        first_name = buyer.first_name or "User"
-        last_name = buyer.last_name or ""
+        email = (getattr(buyer, "email", "") or f"no-reply+{tx_ref[:8]}@example.com")
+        first_name = getattr(buyer, "first_name", "") or "User"
+        last_name = getattr(buyer, "last_name", "") or ""
         return_url = return_base.rstrip("/") + f"/contact-reveal/complete?tx_ref={tx_ref}"
 
         payload = {
@@ -291,6 +303,7 @@ class ContactRevealPaymentService:
                 "reveal_request_id": str(reveal_request.id),
                 "listing_id": str(reveal_request.listing_id),
                 "payment_type": "contact_reveal",
+                "buyer_phone": reveal_request.buyer_phone,
             },
         }
 
@@ -307,6 +320,7 @@ class ContactRevealPaymentService:
                 metadata={
                     "reveal_request_id": str(reveal_request.id),
                     "listing_id": str(reveal_request.listing_id),
+                    "buyer_phone": reveal_request.buyer_phone,
                     "locked_at": timezone.now().isoformat(),
                 },
                 payout_status=PaymentTransaction.PayoutStatus.NOT_APPLICABLE,
@@ -389,16 +403,23 @@ class ContactRevealPaymentService:
         return {"success": True, "message": "Payment verified and contact unlocked"}
 
     @staticmethod
-    def get_unlocked_contact(*, listing, buyer):
+    def get_unlocked_contact(*, listing, buyer=None, tx_ref=None):
         from rest_framework.exceptions import PermissionDenied
 
         request_model = ContactRevealPaymentService._request_model_for_listing(listing)
         ContactRevealPaymentService.expire_stale_requests(request_model=request_model)
-        reveal_request = request_model.objects.filter(
+        queryset = request_model.objects.filter(
             listing=listing,
-            buyer=buyer,
             status=request_model.RevealStatus.PAID_REVEALED,
-        ).order_by("-unlocked_at").first()
+        )
+        if buyer is not None:
+            queryset = queryset.filter(buyer=buyer)
+        elif tx_ref:
+            queryset = queryset.filter(tx_ref=tx_ref)
+        else:
+            raise PermissionDenied("Contact details are available only after successful payment verification.")
+
+        reveal_request = queryset.order_by("-unlocked_at").first()
 
         if not reveal_request:
             raise PermissionDenied("Contact details are available only after successful payment verification.")
@@ -414,6 +435,29 @@ class ContactRevealPaymentService:
 
 def _money(value):
     return Decimal(str(value or "0.00")).quantize(Decimal("0.01"))
+
+
+def get_chapa_receipt_url(payment_tx):
+    if payment_tx.status != PaymentTransaction.PaymentStatus.SUCCESS:
+        return None
+    if not payment_tx.chapa_transaction_id:
+        return None
+
+    reference = quote(str(payment_tx.chapa_transaction_id), safe="")
+    return f"https://chapa.link/payment-receipt/{reference}"
+
+
+def verify_webhook_signature(raw_body, signature):
+    secret = getattr(settings, "CHAPA_WEBHOOK_SECRET", None)
+    if not secret or not raw_body or not signature:
+        return False
+
+    signature = str(signature).strip()
+    if signature.startswith("sha256="):
+        signature = signature.removeprefix("sha256=")
+
+    computed = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+    return constant_time_compare(computed, signature)
 
 
 def is_tax_applicable(booking) -> bool:
@@ -471,6 +515,250 @@ def apply_tax_to_transaction(transaction, booking) -> None:
     transaction.tax_rate = breakdown["tax_rate"]
     transaction.tax_liability_status = breakdown["tax_liability_status"]
     transaction.save(update_fields=["tax_amount", "tax_rate", "tax_liability_status", "updated_at"])
+
+
+def validate_split_config(split_type, split_value):
+    from apps.payment.models import PaymentPlatformConfig
+
+    normalized_type = str(split_type or "").strip().lower()
+    value = Decimal(str(split_value))
+    valid_types = {choice.value for choice in PaymentPlatformConfig.SplitType}
+
+    if normalized_type not in valid_types:
+        raise ValidationError("Invalid split type.")
+    if value < Decimal("0.0000"):
+        raise ValidationError("Split value cannot be negative.")
+    if (
+        normalized_type == PaymentPlatformConfig.SplitType.PERCENTAGE
+        and value > Decimal("1.0000")
+    ):
+        raise ValidationError("Percentage split value must be between 0 and 1.")
+
+    return {
+        "split_type": normalized_type,
+        "split_value": value,
+    }
+
+
+def get_effective_platform_split_config():
+    from apps.payment.models import PaymentPlatformConfig
+
+    config = (
+        PaymentPlatformConfig.objects.filter(is_active=True)
+        .order_by("-updated_at", "-created_at")
+        .first()
+    )
+    if config:
+        return validate_split_config(
+            config.default_split_type,
+            config.default_split_value,
+        )
+
+    return validate_split_config(
+        getattr(settings, "PLATFORM_DEFAULT_SPLIT_TYPE", "percentage"),
+        getattr(settings, "PLATFORM_DEFAULT_SPLIT_VALUE", Decimal("0.02")),
+    )
+
+
+def get_effective_contact_reveal_fee(listing_kind: str) -> Decimal:
+    from apps.payment.models import PaymentPlatformConfig
+
+    config = (
+        PaymentPlatformConfig.objects.filter(is_active=True)
+        .order_by("-updated_at", "-created_at")
+        .first()
+    )
+
+    if listing_kind == "car_sale":
+        if config:
+            return Decimal(str(config.default_car_sale_reveal_fee))
+        return Decimal(str(getattr(settings, "DEFAULT_CAR_SALE_REVEAL_FEE", Decimal("100.00"))))
+
+    if listing_kind == "property_sale":
+        if config:
+            return Decimal(str(config.default_property_sale_reveal_fee))
+        return Decimal(
+            str(getattr(settings, "DEFAULT_PROPERTY_SALE_REVEAL_FEE", Decimal("100.00")))
+        )
+
+    raise ValidationError("Unsupported reveal fee listing type.")
+
+
+def resolve_payment_owner_for_split(booking):
+    if booking is None:
+        return None
+
+    if booking.__class__.__name__ in {"ContactRevealRequest", "PropertyContactRevealRequest"}:
+        return None
+
+    if booking.__class__.__name__ == "PropertyRentalBooking":
+        listing = getattr(booking, "property_listing", None)
+        if listing:
+            return getattr(listing, "company", None) or getattr(listing, "individual_owner", None)
+        return None
+
+    items = getattr(booking, "items", None)
+    if items is not None and items.exists():
+        first_item = items.first()
+
+        room = getattr(first_item, "room", None)
+        if room is not None:
+            hotel = getattr(room, "hotel", None)
+            if hotel is not None:
+                return getattr(hotel, "company", None)
+
+            guest_house = getattr(room, "guest_house", None)
+            if guest_house is not None:
+                return getattr(guest_house, "company", None) or getattr(
+                    guest_house,
+                    "individual_owner",
+                    None,
+                )
+
+        event_space = getattr(first_item, "event_space", None)
+        if event_space is not None:
+            hotel = getattr(event_space, "hotel", None)
+            if hotel is not None:
+                return getattr(hotel, "company", None)
+            return getattr(event_space, "company", None) or getattr(
+                event_space,
+                "individual_owner",
+                None,
+            )
+
+    rental_items = getattr(booking, "rental_items", None)
+    if rental_items is not None and rental_items.exists():
+        first_item = rental_items.first()
+        car_listing = getattr(first_item, "car_listing", None)
+        if car_listing is not None:
+            return getattr(car_listing, "company", None) or getattr(
+                car_listing,
+                "individual_owner",
+                None,
+            )
+
+    return None
+
+
+def _owner_split_config_is_complete(owner):
+    return bool(
+        owner
+        and getattr(owner, "split_config_active", False)
+        and getattr(owner, "split_type", None)
+        and getattr(owner, "split_value", None) is not None
+    )
+
+
+def get_effective_split_config_for_owner(owner):
+    if _owner_split_config_is_complete(owner):
+        return validate_split_config(owner.split_type, owner.split_value)
+
+    return get_effective_platform_split_config()
+
+
+def get_effective_split_config_for_booking(booking):
+    owner = resolve_payment_owner_for_split(booking)
+    return get_effective_split_config_for_owner(owner)
+
+
+def _chapa_base_url():
+    return getattr(settings, "CHAPA_BASE_URL", ChapaPaymentService.BASE_URL).rstrip("/") + "/"
+
+
+def _extract_chapa_subaccount_id(response_data):
+    data = response_data.get("data") if isinstance(response_data, dict) else None
+    if not isinstance(data, dict):
+        return None
+
+    subaccount = data.get("subaccount")
+    nested_id = subaccount.get("id") if isinstance(subaccount, dict) else None
+    return data.get("subaccounts[id]") or data.get("subaccount_id") or data.get("id") or nested_id
+
+
+def register_chapa_subaccount(
+    *,
+    owner,
+    bank_code,
+    account_number,
+    business_name,
+    account_name,
+    split_type=None,
+    split_value=None,
+    allow_overwrite=False,
+):
+    if owner is None:
+        raise ValidationError("Unsupported owner target.")
+
+    existing_subaccount_id = getattr(owner, "chapa_subaccount_id", None)
+    if existing_subaccount_id and not allow_overwrite:
+        raise ValidationError("Owner already has a Chapa subaccount.")
+
+    if split_type is not None or split_value is not None:
+        if split_type is None or split_value is None:
+            raise ValidationError("Both split_type and split_value are required together.")
+        split_config = validate_split_config(split_type, split_value)
+        owner_split_update = True
+    else:
+        split_config = get_effective_split_config_for_owner(owner)
+        owner_split_update = False
+
+    payload = {
+        "bank_code": bank_code,
+        "account_number": account_number,
+        "business_name": business_name,
+        "account_name": account_name,
+        "split_type": split_config["split_type"],
+        "split_value": float(split_config["split_value"]),
+    }
+
+    try:
+        response = requests.post(
+            _chapa_base_url() + "subaccount",
+            headers=ChapaPaymentService._get_headers(),
+            data=json.dumps(payload),
+            timeout=15,
+        )
+        response_data = response.json()
+    except Exception as exc:
+        logger.warning("Chapa subaccount registration failed before response: %s", exc)
+        return {
+            "success": False,
+            "error": "Unable to register Chapa subaccount.",
+            "status_code": 400,
+        }
+
+    if response_data.get("status") != "success":
+        return {
+            "success": False,
+            "error": response_data.get("message") or "Unable to register Chapa subaccount.",
+            "status_code": 400,
+        }
+
+    subaccount_id = _extract_chapa_subaccount_id(response_data)
+    if not subaccount_id:
+        logger.warning("Chapa subaccount success response did not include subaccount id.")
+        return {
+            "success": False,
+            "error": "Chapa subaccount response did not include an ID.",
+            "status_code": 400,
+        }
+
+    owner.chapa_subaccount_id = subaccount_id
+    update_fields = ["chapa_subaccount_id", "updated_at"]
+    if owner_split_update:
+        owner.split_type = split_config["split_type"]
+        owner.split_value = split_config["split_value"]
+        owner.split_config_active = True
+        update_fields.extend(["split_type", "split_value", "split_config_active"])
+    owner.save(update_fields=update_fields)
+
+    return {
+        "success": True,
+        "chapa_subaccount_id": subaccount_id,
+        "split_type": owner.split_type,
+        "split_value": owner.split_value,
+        "split_config_active": owner.split_config_active,
+    }
 
 
 class ChapaPaymentService:
@@ -545,8 +833,14 @@ class ChapaPaymentService:
         total_dec = Decimal(str(amount))
 
         if ChapaPaymentService._is_walk_in_booking(booking):
+            split_config = {
+                "split_type": "flat",
+                "split_value": Decimal("0.0000"),
+            }
             return {
-                "commission_rate": Decimal("0.00"),
+                "split_type": split_config["split_type"],
+                "split_value": split_config["split_value"],
+                "commission_rate": None,
                 "commission_amount": Decimal("0.00"),
                 "vendor_payout_amount": total_dec,
                 "commissionable_amount": Decimal("0.00"),
@@ -554,16 +848,26 @@ class ChapaPaymentService:
                 "walk_in": True,
             }
 
-        fee_rate = get_effective_platform_fee_rate(booking=booking)
-        commissionable_amount = ChapaPaymentService._booking_base_subtotal(booking)
+        split_config = get_effective_split_config_for_booking(booking)
+        split_value = Decimal(str(split_config["split_value"]))
+        commissionable_amount = total_dec
         addon_amount = ChapaPaymentService._booking_addon_subtotal(booking)
-        commission_amount = commissionable_amount * fee_rate
+        if split_config["split_type"] == "percentage":
+            commission_amount = commissionable_amount * split_value
+            commission_rate = split_value
+        else:
+            commission_amount = split_value
+            commission_rate = None
+
+        if commission_amount > total_dec:
+            raise ValidationError("Split commission cannot exceed payment amount.")
+
         vendor_payout_amount = total_dec - commission_amount
-        if booking.__class__.__name__ == "PropertyRentalBooking":
-            vendor_payout_amount = commissionable_amount
 
         return {
-            "commission_rate": fee_rate,
+            "split_type": split_config["split_type"],
+            "split_value": split_value,
+            "commission_rate": commission_rate,
             "commission_amount": commission_amount,
             "vendor_payout_amount": vendor_payout_amount,
             "commissionable_amount": commissionable_amount,
@@ -628,29 +932,8 @@ class ChapaPaymentService:
         vendor_individual = None
         
         try:
+            vendor_obj = resolve_payment_owner_for_split(booking)
             subaccount_id = None
-            if hasattr(booking, 'items') and booking.items.exists():
-                first_item = booking.items.first()
-                
-                # 1. Hotel Room / Event Space (via Hotel)
-                if hasattr(first_item, 'room') and first_item.room and hasattr(first_item.room, 'hotel') and first_item.room.hotel:
-                    vendor_obj = first_item.room.hotel.company
-                elif hasattr(first_item, 'event_space') and first_item.event_space and hasattr(first_item.event_space, 'hotel') and first_item.event_space.hotel:
-                    vendor_obj = first_item.event_space.hotel.company
-                
-                # 2. Guest House (direct Company link or Individual)
-                elif hasattr(first_item, 'room') and first_item.room:
-                     if hasattr(first_item.room, 'guest_house') and first_item.room.guest_house:
-                        gh = first_item.room.guest_house
-                        if gh.company:
-                            vendor_obj = gh.company
-                        elif gh.individual_owner:
-                            vendor_obj = gh.individual_owner
-            elif hasattr(booking, 'rental_items') and booking.rental_items.exists():
-                first_item = booking.rental_items.first()
-                if hasattr(first_item, 'car_listing') and first_item.car_listing:
-                    vendor_obj = first_item.car_listing.company
-            
             if vendor_obj:
                 if hasattr(vendor_obj, 'chapa_subaccount_id'):
                     subaccount_id = vendor_obj.chapa_subaccount_id
@@ -668,9 +951,11 @@ class ChapaPaymentService:
                 vendor_share_fixed = split["vendor_payout_amount"].quantize(Decimal("0.01"))
                 platform_share_fixed = split["commission_amount"].quantize(Decimal("0.01"))
                 
-                payload["subaccount_id"] = subaccount_id
-                payload["split_type"] = "flat"
-                payload["split_value"] = float(vendor_share_fixed)
+                payload["subaccounts"] = {
+                    "id": subaccount_id,
+                    "split_type": split["split_type"],
+                    "split_value": float(split["split_value"]),
+                }
                 
                 commission_rate = split["commission_rate"]
                 commission_amount = platform_share_fixed
@@ -678,8 +963,10 @@ class ChapaPaymentService:
                 payout_status = PaymentTransaction.PayoutStatus.PENDING
 
                 logger.info(
-                    f"Split configured for {tx_ref}: Vendor receives {vendor_share_fixed} (Subaccount {subaccount_id}), "
-                    f"Platform keeps {platform_share_fixed} (Rate {commission_rate})"
+                    "Split configured for %s: platform commission estimate %s, vendor payout estimate %s",
+                    tx_ref,
+                    platform_share_fixed,
+                    vendor_share_fixed,
                 )
             else:
                  # No subaccount found, so money stays in main account
@@ -797,84 +1084,221 @@ class ChapaPaymentService:
             return {"success": False, "error": response_data, "tx_ref": tx_ref}
 
     @staticmethod
+    def initialize_car_rental_extension_payment(
+        extension_request,
+        *,
+        email,
+        first_name,
+        last_name,
+    ):
+        from django.contrib.contenttypes.models import ContentType
+        from apps.account.models import CompanyProfile, IndividualOwnerProfile
+
+        rental = extension_request.rental
+        tx_ref = ChapaPaymentService.generate_tx_ref(prefix="CEXT")
+        callback_url = getattr(settings, "CHAPA_CALLBACK_URL", None)
+        return_base = getattr(settings, "FRONTEND_URL", None)
+
+        if callback_url is None or return_base is None:
+            CarRentalService = __import__("apps.listing.services", fromlist=["CarRentalService"]).CarRentalService
+            CarRentalService.mark_extension_request_failed(
+                extension_request,
+                reason="Callback URLs not configured.",
+            )
+            return {"success": False, "error": "Callback URLs not configured", "tx_ref": tx_ref}
+
+        return_url = return_base.rstrip("/") + f"/payments/complete?tx_ref={tx_ref}"
+
+        from django.core.validators import validate_email
+
+        try:
+            validate_email(email)
+            user_email = email
+        except Exception:
+            user_email = f"no-reply+{tx_ref[:8]}@example.com"
+
+        payload = {
+            "amount": str(extension_request.amount),
+            "currency": extension_request.currency,
+            "email": user_email,
+            "first_name": first_name or "User",
+            "last_name": last_name or "",
+            "tx_ref": tx_ref,
+            "callback_url": callback_url,
+            "return_url": return_url,
+            "customization": {
+                "title": "Michot Marefiya",
+                "description": f"Car rental extension payment - {rental.booking_reference}",
+            },
+            "meta": {
+                "payment_type": "carrental_extension",
+                "extension_request_id": str(extension_request.id),
+                "rental_id": str(rental.id),
+                "booking_reference": rental.booking_reference,
+                "original_end_date": extension_request.original_end_date.isoformat(),
+                "requested_end_date": extension_request.requested_end_date.isoformat(),
+            },
+        }
+
+        commission_rate = None
+        commission_amount = None
+        vendor_payout_amount = None
+        payout_status = PaymentTransaction.PayoutStatus.NOT_APPLICABLE
+        vendor_company = None
+        vendor_individual = None
+
+        try:
+            vendor_obj = resolve_payment_owner_for_split(rental)
+            subaccount_id = getattr(vendor_obj, "chapa_subaccount_id", None) if vendor_obj else None
+            if isinstance(vendor_obj, CompanyProfile):
+                vendor_company = vendor_obj
+            elif isinstance(vendor_obj, IndividualOwnerProfile):
+                vendor_individual = vendor_obj
+
+            if subaccount_id:
+                split = ChapaPaymentService._calculate_split_amounts(rental, extension_request.amount)
+                vendor_share_fixed = split["vendor_payout_amount"].quantize(Decimal("0.01"))
+                platform_share_fixed = split["commission_amount"].quantize(Decimal("0.01"))
+                payload["subaccounts"] = {
+                    "id": subaccount_id,
+                    "split_type": split["split_type"],
+                    "split_value": float(split["split_value"]),
+                }
+                commission_rate = split["commission_rate"]
+                commission_amount = platform_share_fixed
+                vendor_payout_amount = vendor_share_fixed
+                payout_status = PaymentTransaction.PayoutStatus.PENDING
+            elif vendor_obj:
+                payout_status = PaymentTransaction.PayoutStatus.FAILED
+        except Exception as exc:
+            logger.error("Failed to configure extension split payment for %s: %s", tx_ref, exc)
+            payout_status = PaymentTransaction.PayoutStatus.FAILED
+
+        content_type = ContentType.objects.get_for_model(extension_request)
+        payment_tx = PaymentTransaction.objects.create(
+            content_type=content_type,
+            object_id=extension_request.id,
+            booking_type="carrental_extension",
+            tx_ref=tx_ref,
+            amount=extension_request.amount,
+            currency=extension_request.currency,
+            status=PaymentTransaction.PaymentStatus.PENDING,
+            metadata={
+                "payment_type": "carrental_extension",
+                "extension_request_id": str(extension_request.id),
+                "rental_id": str(rental.id),
+                "booking_reference": rental.booking_reference,
+            },
+            commission_rate=commission_rate,
+            commission_amount=commission_amount,
+            vendor_payout_amount=vendor_payout_amount,
+            payout_status=payout_status,
+            vendor_company=vendor_company,
+            vendor_individual=vendor_individual,
+        )
+
+        try:
+            res = requests.post(
+                ChapaPaymentService.BASE_URL + "transaction/initialize",
+                headers=ChapaPaymentService._get_headers(),
+                data=json.dumps(payload),
+                timeout=15,
+            )
+            response_data = res.json()
+        except Exception as exc:
+            payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
+            if isinstance(payment_tx.metadata, dict):
+                payment_tx.metadata["error"] = str(exc)
+            else:
+                payment_tx.metadata = {"error": str(exc)}
+            payment_tx.save(update_fields=["status", "metadata", "updated_at"])
+            __import__("apps.listing.services", fromlist=["CarRentalService"]).CarRentalService.mark_extension_request_failed(
+                extension_request,
+                reason=str(exc),
+            )
+            return {"success": False, "error": str(exc), "tx_ref": tx_ref}
+
+        if response_data.get("status") == "success":
+            extension_request.status = extension_request.ExtensionStatus.PAYMENT_INITIATED
+            extension_request.tx_ref = tx_ref
+            extension_request.save(update_fields=["status", "tx_ref", "updated_at"])
+            return {
+                "success": True,
+                "checkout_url": response_data["data"]["checkout_url"],
+                "tx_ref": tx_ref,
+            }
+
+        payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
+        if isinstance(payment_tx.metadata, dict):
+            payment_tx.metadata["chapa_response"] = response_data
+        else:
+            payment_tx.metadata = response_data
+        payment_tx.save(update_fields=["status", "metadata", "updated_at"])
+        __import__("apps.listing.services", fromlist=["CarRentalService"]).CarRentalService.mark_extension_request_failed(
+            extension_request,
+            reason=str(response_data),
+        )
+        return {"success": False, "error": response_data, "tx_ref": tx_ref}
+
+    @staticmethod
+    def _release_car_rental_extension_after_failure(payment_tx, *, status):
+        extension_request = payment_tx.resolved_booking
+        if extension_request is None:
+            return
+        CarRentalService = __import__("apps.listing.services", fromlist=["CarRentalService"]).CarRentalService
+        CarRentalService.mark_extension_request_failed(
+            extension_request,
+            status=status,
+            reason=f"Extension payment moved to {status}.",
+        )
+
+    @staticmethod
     def cancel_transaction(tx_ref):
         try:
             tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
             if tx.status == PaymentTransaction.PaymentStatus.PENDING:
-                tx.status = PaymentTransaction.PaymentStatus.CANCELLED
-                tx.save()
-                return {"success": True, "message": "Transaction cancelled successfully"}
+                try:
+                    res = requests.put(
+                        _chapa_base_url() + f"transaction/cancel/{tx_ref}",
+                        headers=ChapaPaymentService._get_headers(),
+                        timeout=10,
+                    )
+                    response_data = res.json()
+                except Exception as exc:
+                    logger.warning("Chapa cancellation failed before response for %s: %s", tx_ref, exc)
+                    return {"success": False, "error": "Unable to cancel transaction with Chapa."}
+
+                message = response_data.get("message") or "Transaction cancellation failed"
+                response_status = str(response_data.get("status") or "").lower()
+                already_expired = (
+                    response_status == "failed"
+                    and "already expired" in str(message).lower()
+                )
+
+                if response_status == "success" or already_expired:
+                    metadata = tx.metadata if isinstance(tx.metadata, dict) else {}
+                    metadata["chapa_cancel_response"] = response_data
+                    tx.metadata = metadata
+                    tx.status = PaymentTransaction.PaymentStatus.CANCELLED
+                    tx.save(update_fields=["status", "metadata", "updated_at"])
+                    if tx.booking_type == "carrental_extension":
+                        ChapaPaymentService._release_car_rental_extension_after_failure(
+                            tx,
+                            status="cancelled",
+                        )
+                    return {"success": True, "message": message}
+
+                metadata = tx.metadata if isinstance(tx.metadata, dict) else {}
+                metadata["chapa_cancel_error"] = response_data
+                tx.metadata = metadata
+                tx.save(update_fields=["metadata", "updated_at"])
+                return {"success": False, "error": message}
             else:
                 return {"success": False, "error": f"Cannot cancel transaction in status {tx.status}"}
         except PaymentTransaction.DoesNotExist:
             return {"success": False, "error": "Transaction not found"}
         except Exception as e:
             return {"success": False, "error": str(e)}
-
-
-            try:
-                logger.debug("Chapa initialize payload: %s", payload)
-                res = requests.post(
-                    ChapaPaymentService.BASE_URL + "transaction/initialize",
-                    headers=ChapaPaymentService._get_headers(),
-                    data=json.dumps(payload),
-                    timeout=15
-                )
-                response_data = res.json()
-                logger.debug("Chapa initialize response: %s", response_data)
-
-                msg = response_data.get("message") or {}
-                email_errors = None
-                try:
-                    if isinstance(msg, dict):
-                        email_errors = msg.get("email")
-                except Exception:
-                    email_errors = None
-
-                if email_errors and any("validation.email" in str(e) for e in email_errors):
-                    fallback = getattr(settings, "CHAPA_FALLBACK_EMAIL", None) or f"no-reply+{tx_ref[:8]}@gmail.com"
-                    logger.warning("Chapa rejected email %s, retrying initialize with fallback %s", user_email, fallback)
-                    payload["email"] = fallback
-                    try:
-                        res2 = requests.post(
-                            ChapaPaymentService.BASE_URL + "transaction/initialize",
-                            headers=ChapaPaymentService._get_headers(),
-                            data=json.dumps(payload),
-                            timeout=15,
-                        )
-                        response_data = res2.json()
-                        logger.debug("Chapa initialize response (retry): %s", response_data)
-                    except Exception as e2:
-                        payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
-                        if isinstance(payment_tx.metadata, dict):
-                            payment_tx.metadata["error"] = str(e2)
-                        else:
-                            payment_tx.metadata = {"error": str(e2)}
-                        payment_tx.save()
-                        return {"success": False, "error": str(e2), "tx_ref": tx_ref}
-            except Exception as e:
-                payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
-                if isinstance(payment_tx.metadata, dict):
-                    payment_tx.metadata["error"] = str(e)
-                else:
-                    payment_tx.metadata = {"error": str(e)}
-                payment_tx.save()
-                return {"success": False, "error": str(e), "tx_ref": tx_ref}
-
-            if response_data.get("status") == "success":
-                return {
-                    "success": True,
-                    "checkout_url": response_data["data"]["checkout_url"],
-                    "tx_ref": tx_ref,
-                }
-
-            payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
-            if isinstance(payment_tx.metadata, dict):
-                payment_tx.metadata["chapa_response"] = response_data
-            else:
-                payment_tx.metadata = response_data
-            payment_tx.save()
-            return {"success": False, "error": response_data, "tx_ref": tx_ref}
 
     @staticmethod
     def verify_payment(tx_ref):
@@ -884,6 +1308,104 @@ class ChapaPaymentService:
             return res.json()
         except Exception as e:
             return {"status": "failed", "error": str(e)}
+
+    @staticmethod
+    def _webhook_tx_ref(data):
+        return (
+            data.get("tx_ref")
+            or data.get("trx_ref")
+            or data.get("reference")
+            or data.get("ref_id")
+        )
+
+    @staticmethod
+    def _safe_webhook_metadata(data):
+        allowed = {
+            "event",
+            "status",
+            "reference",
+            "tx_ref",
+            "trx_ref",
+            "ref_id",
+            "amount",
+            "currency",
+            "charge",
+            "mode",
+            "type",
+            "payment_method",
+            "chapa_reference",
+            "bank_reference",
+            "created_at",
+            "updated_at",
+        }
+        return {key: data.get(key) for key in allowed if key in data}
+
+    @staticmethod
+    def _append_webhook_metadata(payment_tx, data, *, key="webhook_events"):
+        metadata = payment_tx.metadata if isinstance(payment_tx.metadata, dict) else {}
+        events = metadata.get(key)
+        if not isinstance(events, list):
+            events = []
+        event_data = ChapaPaymentService._safe_webhook_metadata(data)
+        event_fingerprint = (
+            event_data.get("event"),
+            event_data.get("reference") or event_data.get("chapa_reference"),
+            event_data.get("tx_ref") or event_data.get("trx_ref") or event_data.get("ref_id"),
+        )
+        for existing in events:
+            existing_fingerprint = (
+                existing.get("event"),
+                existing.get("reference") or existing.get("chapa_reference"),
+                existing.get("tx_ref") or existing.get("trx_ref") or existing.get("ref_id"),
+            )
+            if existing_fingerprint == event_fingerprint:
+                payment_tx.metadata = metadata
+                return False
+        events.append(event_data)
+        metadata[key] = events
+        payment_tx.metadata = metadata
+        return True
+
+    @staticmethod
+    def _cancel_booking_after_webhook_failure(payment_tx):
+        if payment_tx.booking_type == "carrental_extension":
+            ChapaPaymentService._release_car_rental_extension_after_failure(
+                payment_tx,
+                status="failed",
+            )
+            return
+
+        booking = payment_tx.resolved_booking
+        if not booking:
+            return
+
+        booking_model_name = booking.__class__.__name__.lower()
+        from apps.listing.services import (
+            BookingService,
+            GuestHouseBookingService,
+            EventSpaceBookingService,
+            CarRentalService,
+            PropertyRentalBookingService,
+        )
+
+        service_map = {
+            "booking": BookingService,
+            "guesthousebooking": GuestHouseBookingService,
+            "eventspacebooking": EventSpaceBookingService,
+            "carrental": CarRentalService,
+            "propertyrentalbooking": PropertyRentalBookingService,
+        }
+        service = service_map.get(booking_model_name)
+        if service and hasattr(service, "cancel_booking"):
+            try:
+                service.cancel_booking(booking)
+            except Exception as exc:
+                logger.error(
+                    "Failed to release booking after failed webhook for %s %s: %s",
+                    booking_model_name,
+                    getattr(booking, "id", None),
+                    exc,
+                )
 
     @staticmethod
     def handle_callback(payload):
@@ -928,6 +1450,61 @@ class ChapaPaymentService:
                         verification["data"],
                     )
                     return result if result["success"] else {"success": False, "message": result["message"]}
+
+                if payment_tx.booking_type == "carrental_extension":
+                    from apps.listing.services import CarRentalService
+
+                    extension_request = payment_tx.resolved_booking
+                    if extension_request is None:
+                        return {"success": False, "message": "No extension request associated with payment"}
+
+                    if payment_tx.status == PaymentTransaction.PaymentStatus.SUCCESS:
+                        CarRentalService.apply_paid_extension(extension_request)
+                        return {"success": True, "message": "Car rental extension already applied"}
+
+                    verification = ChapaPaymentService.verify_payment(tx_ref)
+                    if verification.get("status") != "success":
+                        payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
+                        if isinstance(payment_tx.metadata, dict):
+                            payment_tx.metadata["verification_error"] = verification
+                        else:
+                            payment_tx.metadata = {"verification_error": verification}
+                        payment_tx.save()
+                        CarRentalService.mark_extension_request_failed(
+                            extension_request,
+                            reason="Extension payment verification failed.",
+                        )
+                        return {"success": False, "message": "Verification failed"}
+
+                    chapa_data = verification["data"]
+                    verified_amount = Decimal(str(chapa_data.get("amount", "0")))
+                    verified_currency = chapa_data.get("currency")
+
+                    if Decimal(str(payment_tx.amount)) != verified_amount or payment_tx.currency != verified_currency:
+                        payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
+                        error_info = {"error": "Amount/currency mismatch", "chapa_verification": chapa_data}
+                        if isinstance(payment_tx.metadata, dict):
+                            payment_tx.metadata.update(error_info)
+                        else:
+                            payment_tx.metadata = error_info
+                        payment_tx.save()
+                        CarRentalService.mark_extension_request_failed(
+                            extension_request,
+                            reason="Extension payment amount or currency mismatch.",
+                        )
+                        return {"success": False, "message": "Amount or currency mismatch"}
+
+                    payment_tx.status = PaymentTransaction.PaymentStatus.SUCCESS
+                    payment_tx.chapa_transaction_id = chapa_data.get("id") or chapa_data.get("reference")
+                    payment_tx.payment_method = chapa_data.get("method") or chapa_data.get("payment_method", "unknown")
+                    if isinstance(payment_tx.metadata, dict):
+                        payment_tx.metadata["verification_success"] = chapa_data
+                    else:
+                        payment_tx.metadata = {"verification_success": chapa_data}
+                    payment_tx.save()
+
+                    CarRentalService.apply_paid_extension(extension_request)
+                    return {"success": True, "message": "Payment verified and car rental extended"}
                 
                 booking_model_name = booking.__class__.__name__.lower()
                 
@@ -1100,41 +1677,67 @@ class ChapaPaymentService:
         try:
             raw = request.body
             if not raw:
-                return {"success": False, "message": "Empty webhook body"}
+                return {"success": True, "message": "Webhook ignored"}
 
             headers = {k.lower(): v for k, v in request.headers.items()}
             signature = headers.get("x-chapa-signature") or headers.get("chapa-signature")
 
-            secret = getattr(settings, "CHAPA_WEBHOOK_SECRET", None)
-            if not secret:
-                return {"success": False, "message": "Webhook secret not configured"}
+            if not verify_webhook_signature(raw, signature):
+                return {"success": True, "message": "Webhook ignored"}
 
-            if not signature:
-                return {"success": False, "message": "Missing signature"}
+            try:
+                data = json.loads(raw.decode("utf-8"))
+            except json.JSONDecodeError:
+                return {"success": True, "message": "Webhook ignored"}
 
-            computed = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
+            event = str(data.get("event") or "").lower()
+            tx_ref = ChapaPaymentService._webhook_tx_ref(data)
 
-            if not constant_time_compare(computed, signature):
-                return {"success": False, "message": "Invalid signature"}
+            if event.startswith("payout."):
+                if tx_ref:
+                    try:
+                        payment_tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
+                        ChapaPaymentService._append_webhook_metadata(payment_tx, data, key="payout_webhook_events")
+                        payment_tx.save(update_fields=["metadata", "updated_at"])
+                    except PaymentTransaction.DoesNotExist:
+                        pass
+                return {"success": True, "message": "Webhook processed"}
 
-            data = json.loads(raw.decode("utf-8"))
+            if not tx_ref:
+                return {"success": True, "message": "Webhook ignored"}
 
-            tx_ref = (
-                data.get("tx_ref")
-                or data.get("trx_ref")
-                or data.get("reference")
-                or data.get("ref_id")
-            )
+            try:
+                payment_tx = PaymentTransaction.objects.get(tx_ref=tx_ref)
+            except PaymentTransaction.DoesNotExist:
+                if event == "charge.success" or data.get("status") == "success":
+                    return ChapaPaymentService.handle_callback(data)
+                return {"success": True, "message": "Webhook ignored"}
 
-            if tx_ref:
-                try:
-                    ex = PaymentTransaction.objects.get(tx_ref=tx_ref)
-                    if ex.status == PaymentTransaction.PaymentStatus.SUCCESS:
-                        return {"success": True, "message": "Already processed"}
-                except:
-                    pass
+            if not ChapaPaymentService._append_webhook_metadata(payment_tx, data):
+                payment_tx.save(update_fields=["metadata", "updated_at"])
+                return {"success": True, "message": "Already processed"}
 
-            return ChapaPaymentService.handle_callback(data)
+            if event == "charge.success" or data.get("status") == "success":
+                payment_tx.save(update_fields=["metadata", "updated_at"])
+                return ChapaPaymentService.handle_callback(data)
+
+            if event == "charge.failed/cancelled" or data.get("status") in {"failed", "cancelled"}:
+                event_status = str(data.get("status") or "").lower()
+                payment_tx.status = (
+                    PaymentTransaction.PaymentStatus.CANCELLED
+                    if event_status == "cancelled"
+                    else PaymentTransaction.PaymentStatus.FAILED
+                )
+                payment_tx.save(update_fields=["status", "metadata", "updated_at"])
+                ChapaPaymentService._cancel_booking_after_webhook_failure(payment_tx)
+                return {"success": True, "message": "Webhook processed"}
+
+            if event in {"charge.refunded", "charge.reversed"}:
+                payment_tx.save(update_fields=["metadata", "updated_at"])
+                return {"success": True, "message": "Webhook processed"}
+
+            payment_tx.save(update_fields=["metadata", "updated_at"])
+            return {"success": True, "message": "Webhook processed"}
 
         except Exception as e:
             logger.exception("Webhook error: %s", e)

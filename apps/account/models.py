@@ -215,6 +215,9 @@ class OtpChallenge(AbstractBaseModel):
         GUEST_GUESTHOUSE_BOOKING = "guest_guesthouse_booking", _("Guest Guesthouse Booking")
         GUEST_EVENTSPACE_BOOKING = "guest_eventspace_booking", _("Guest Event Space Booking")
         GUEST_CAR_RENTAL_BOOKING = "guest_car_rental_booking", _("Guest Car Rental Booking")
+        GUEST_PROPERTY_RENTAL_BOOKING = "guest_property_rental_booking", _("Guest Property Rental Booking")
+        GUEST_CAR_SALE_REVEAL = "guest_car_sale_reveal", _("Guest Car Sale Reveal")
+        GUEST_PROPERTY_SALE_REVEAL = "guest_property_sale_reveal", _("Guest Property Sale Reveal")
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -300,6 +303,10 @@ class ListingImage(AbstractBaseModel):
 
 
 class CompanyProfile(AbstractBaseModel):
+    class SplitTypeChoice(models.TextChoices):
+        PERCENTAGE = "percentage", _("Percentage")
+        FLAT = "flat", _("Flat")
+
     class CategoryChoice(models.TextChoices):
         HOTEL = "hotel", _("Hotel")
         PENSION = "pension", _("Pension")
@@ -383,6 +390,27 @@ class CompanyProfile(AbstractBaseModel):
         verbose_name=_("Chapa Subaccount ID"),
         help_text=_("The subaccount ID for split payments (e.g., specific to this company)."),
     )
+    split_type = models.CharField(
+        max_length=20,
+        choices=SplitTypeChoice.choices,
+        null=True,
+        blank=True,
+        verbose_name=_("Split Type"),
+        help_text=_("Optional owner-specific platform commission split type."),
+    )
+    split_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        verbose_name=_("Split Value"),
+        help_text=_("Optional owner-specific platform commission value."),
+    )
+    split_config_active = models.BooleanField(
+        default=False,
+        verbose_name=_("Split Config Active"),
+        help_text=_("Use this owner's split config when complete."),
+    )
 
     @property
     def is_approved(self) -> bool:
@@ -395,6 +423,10 @@ class IndividualOwnerProfile(AbstractBaseModel):
     through dashboard like companies. We need our admin to verify them
     in-person and add their detail here than using the AUTH_USER_MODEL.
     """
+
+    class SplitTypeChoice(models.TextChoices):
+        PERCENTAGE = "percentage", _("Percentage")
+        FLAT = "flat", _("Flat")
 
     # class PropertyCategoryChoice(models.TextChoices):
     #     GUEST_HOUSE = "guest_house", _("Guest House")
@@ -442,6 +474,27 @@ class IndividualOwnerProfile(AbstractBaseModel):
         blank=True,
         verbose_name=_("Chapa Subaccount ID"),
         help_text=_("The subaccount ID for split payments (e.g., specific to this owner)."),
+    )
+    split_type = models.CharField(
+        max_length=20,
+        choices=SplitTypeChoice.choices,
+        null=True,
+        blank=True,
+        verbose_name=_("Split Type"),
+        help_text=_("Optional owner-specific platform commission split type."),
+    )
+    split_value = models.DecimalField(
+        max_digits=12,
+        decimal_places=4,
+        null=True,
+        blank=True,
+        verbose_name=_("Split Value"),
+        help_text=_("Optional owner-specific platform commission value."),
+    )
+    split_config_active = models.BooleanField(
+        default=False,
+        verbose_name=_("Split Config Active"),
+        help_text=_("Use this owner's split config when complete."),
     )
 
 

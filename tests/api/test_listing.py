@@ -32,6 +32,7 @@ from apps.listing.models import (
     PropertyListing,
     PropertySaleListing,
     CarRental,
+    CarRentalExtensionRequest,
     CarRentalItem,
     EventSpaceAvailability,
     EventSpaceListing,
@@ -48,8 +49,8 @@ from apps.listing.models import (
     StayAvailability,
     TermsAndConditions,
 )
-from apps.payment.models import PaymentTransaction
-from apps.payment.services import ContactRevealPaymentService
+from apps.payment.models import PaymentPlatformConfig, PaymentTransaction
+from apps.payment.services import ChapaPaymentService, ContactRevealPaymentService
 from apps.notifications.models import Notification
 from apps.account.models import User
 from apps.listing.services import ListingService, BookingService
@@ -89,6 +90,45 @@ def _create_car_availability(car_listing, start_date, end_date, available_units=
             date=start_date + timedelta(days=offset),
             available_units=available_units,
         )
+
+
+def _create_car_rental_record(
+    *,
+    car_listing,
+    renter=None,
+    guest_phone="0911000112",
+    guest_email="guest@example.com",
+    booking_reference=None,
+    status=None,
+    start_date=None,
+    end_date=None,
+):
+    start_date = start_date or (date.today() + timedelta(days=4))
+    end_date = end_date or (date.today() + timedelta(days=6))
+    rental = CarRental.objects.create(
+        renter=renter,
+        start_date=start_date,
+        end_date=end_date,
+        total_price=Decimal("3000.00"),
+        currency="ETB",
+        status=status or CarRental.RentStatus.PENDING,
+        guest_first_name="Guest",
+        guest_last_name="User",
+        guest_email=guest_email,
+        guest_phone=guest_phone,
+        special_requests="Need driver",
+        booking_reference=booking_reference,
+        terms_version=1,
+        terms_accepted=True,
+        terms_content_snapshot="Terms content",
+    )
+    CarRentalItem.objects.create(
+        car_rental=rental,
+        car_listing=car_listing,
+        units_rent=1,
+        price_per_unit=Decimal("1500.00"),
+    )
+    return rental
 
 
 def _create_car_sale_listing(company, **overrides):
@@ -155,6 +195,40 @@ def _mock_contact_reveal_chapa(settings, monkeypatch):
             }
 
     monkeypatch.setattr("apps.payment.services.requests.post", lambda *args, **kwargs: DummyResponse())
+
+
+def _mock_extension_chapa_initialize(settings, monkeypatch, checkout_url="https://checkout.example.com/extension"):
+    settings.CHAPA_CALLBACK_URL = "https://api.example.com/payment/callback"
+    settings.FRONTEND_URL = "https://app.example.com"
+    settings.CHAPA_SECRET_KEY = "test-secret"
+
+    class DummyResponse:
+        def json(self):
+            return {
+                "status": "success",
+                "data": {"checkout_url": checkout_url},
+            }
+
+    monkeypatch.setattr("apps.payment.services.requests.post", lambda *args, **kwargs: DummyResponse())
+
+
+def _mock_contact_reveal_verification(monkeypatch, amount, currency="ETB"):
+    monkeypatch.setattr(
+        "apps.payment.services.ChapaPaymentService.verify_payment",
+        lambda tx_ref: {
+            "status": "success",
+            "data": {
+                "amount": str(amount),
+                "currency": currency,
+                "id": f"chapa-{tx_ref}",
+                "method": "test",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "apps.listing.tasks.send_contact_reveal_unlocked_notification.delay",
+        lambda reveal_id: None,
+    )
 
 
 def _create_guesthouse_inventory(room, start_date, end_date, available_rooms=None):
@@ -262,8 +336,78 @@ def _prepare_guest_booking_otp(monkeypatch):
 def _issue_guest_booking_otp(api_client, path, guest_phone):
     cache.clear()
     response = api_client.post(path, {"guest_phone": guest_phone}, format="json")
-    assert response.status_code == 201
+    assert response.status_code == 201, response.json()
     return response.json()["challenge_id"]
+
+
+def _make_feed_visible(listing, *, lat="9.012345", lng="38.765432", address="Addis Ababa"):
+    listing.latitude = Decimal(lat)
+    listing.longitude = Decimal(lng)
+    listing.formatted_address = address
+    listing.place_id = f"test-place-{listing.id}"
+    if hasattr(listing, "is_active"):
+        listing.is_active = True
+    listing.save(update_fields=["latitude", "longitude", "formatted_address", "place_id", "is_active", "updated_at"])
+    return listing
+
+
+def test_regular_user_listing_feed_dedicated_filters(
+    auth_client,
+    hotel,
+    guest_house,
+    car_listing,
+    property_listing,
+    event_space,
+    company,
+):
+    cache.clear()
+    car_listing.listing_type = CarListing.ListingTypeChoices.RENT
+    car_listing.save(update_fields=["listing_type", "updated_at"])
+
+    visible_listings = {
+        "hotel": _make_feed_visible(hotel, address="Hotel feed address"),
+        "guesthouse": _make_feed_visible(guest_house, address="Guest house feed address"),
+        "car_rental": _make_feed_visible(car_listing, address="Car rental feed address"),
+        "car_sales": _make_feed_visible(
+            _create_car_sale_listing(company, title="Feed car sale"),
+            address="Car sale feed address",
+        ),
+        "property_rental": _make_feed_visible(property_listing, address="House rental feed address"),
+        "property_sales": _make_feed_visible(
+            _create_property_sale_listing(company, title="Feed house sale"),
+            address="House sale feed address",
+        ),
+        "event_space": _make_feed_visible(event_space, address="Event space feed address"),
+    }
+
+    for listing_type, listing in visible_listings.items():
+        response = auth_client.get("/api/v1/listing/feed/", {"listing_type": listing_type})
+
+        assert response.status_code == 200, response.json()
+        data = response.json()
+        assert "count" in data
+        assert "results" in data
+        matching_items = [
+            item for item in data["results"]
+            if item["id"] == str(listing.id) and item["listing_type"] == listing_type
+        ]
+        assert matching_items, f"{listing_type} feed did not include expected listing."
+
+        item = matching_items[0]
+        for key in [
+            "id",
+            "listing_type",
+            "title",
+            "latitude",
+            "longitude",
+            "formatted_address",
+            "price_preview",
+            "currency",
+            "thumbnail_url",
+            "rating",
+            "is_verified",
+        ]:
+            assert key in item
 
 
 def test_get_amenities_public_list_success(api_client):
@@ -311,7 +455,7 @@ def test_car_sales_happy_path_all_four_endpoints(api_client, auth_client, user, 
     assert detail_response.status_code == 200
     detail = detail_response.json()
     assert detail["id"] == str(listing.id)
-    assert detail["reveal_state"] is None
+    assert detail["reveal_state"]["status"] == "guest_verification_required"
     assert "seller_phone" not in detail
 
     _mock_contact_reveal_chapa(settings, monkeypatch)
@@ -334,15 +478,14 @@ def test_car_sales_happy_path_all_four_endpoints(api_client, auth_client, user, 
     assert blocked_contact.status_code == 403
 
     reveal_request = ContactRevealRequest.objects.get(id=request_data["reveal_request"]["id"])
-    reveal_request.status = ContactRevealRequest.RevealStatus.PAID_REVEALED
-    reveal_request.unlocked_at = timezone.now()
-    reveal_request.contact_snapshot = {
-        "seller_contact_name": listing.seller_contact_name,
-        "seller_phone": listing.seller_phone,
-        "seller_email": listing.seller_email,
-        "off_platform_notice": "The sale closes off-platform.",
-    }
-    reveal_request.save(update_fields=["status", "unlocked_at", "contact_snapshot", "updated_at"])
+    _mock_contact_reveal_verification(monkeypatch, reveal_request.amount, reveal_request.currency)
+
+    verify_response = auth_client.get(f"/api/v1/payment/verify/{request_data['tx_ref']}/")
+    assert verify_response.status_code == 200
+    assert verify_response.json()["status"] == PaymentTransaction.PaymentStatus.SUCCESS
+    reveal_request.refresh_from_db()
+    assert reveal_request.status == ContactRevealRequest.RevealStatus.PAID_REVEALED
+    assert reveal_request.contact_snapshot["seller_phone"] == listing.seller_phone
 
     contact_response = auth_client.get(f"/api/v1/listing/car-sales/{listing.id}/contact/")
     assert contact_response.status_code == 200
@@ -377,7 +520,7 @@ def test_car_sales_create_success_for_company_owner(company_client):
         format="json",
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 201, response.json()
     data = response.json()
     assert data["title"] == "Sale Corolla"
     assert data["is_active"] is False
@@ -387,8 +530,12 @@ def test_car_sales_create_success_for_company_owner(company_client):
 def test_car_sales_auth_errors_and_wrong_role(api_client, auth_client, company):
     listing = _create_car_sale_listing(company)
 
-    assert api_client.post(f"/api/v1/listing/car-sales/{listing.id}/request-contact/", {}, format="json").status_code == 401
-    assert api_client.get(f"/api/v1/listing/car-sales/{listing.id}/contact/").status_code == 401
+    assert api_client.post(
+        f"/api/v1/listing/car-sales/{listing.id}/request-contact/",
+        {},
+        format="json",
+    ).status_code == 400
+    assert api_client.get(f"/api/v1/listing/car-sales/{listing.id}/contact/").status_code == 403
 
     response = auth_client.post(
         "/api/v1/listing/car-sales/",
@@ -446,6 +593,114 @@ def test_car_sales_validation_errors(company_client):
     assert response.status_code == 400
 
 
+@patch("apps.account.services.OtpService.generate_code", return_value="123456")
+@patch("services.sms.send_sms", return_value=True)
+def test_guest_car_sales_contact_reveal_flow(mock_send_sms, _mock_generate_code, api_client, settings, monkeypatch, company):
+    _mock_contact_reveal_chapa(settings, monkeypatch)
+    listing = _create_car_sale_listing(company)
+
+    otp_response = api_client.post(
+        "/api/v1/listing/car-sales/guest-otp/",
+        {"buyer_phone": "0911555666"},
+        format="json",
+    )
+    assert otp_response.status_code == 201
+    challenge_id = otp_response.json()["challenge_id"]
+    mock_send_sms.assert_called_once()
+
+    request_response = api_client.post(
+        f"/api/v1/listing/car-sales/{listing.id}/request-contact/",
+        {
+            "buyer_phone": "0911555666",
+            "otp_challenge_id": challenge_id,
+            "otp_code": "123456",
+        },
+        format="json",
+    )
+    assert request_response.status_code == 201
+    request_data = request_response.json()
+    tx_ref = request_data["tx_ref"]
+    guest_verification_token = request_data["guest_verification_token"]
+    assert guest_verification_token
+    assert request_data["reveal_request"]["status"] == ContactRevealRequest.RevealStatus.PAYMENT_INITIATED
+
+    second_listing = _create_car_sale_listing(company, title="Token reuse car sale")
+    token_response = api_client.post(
+        f"/api/v1/listing/car-sales/{second_listing.id}/request-contact/",
+        {
+            "buyer_phone": "0911555666",
+            "guest_verification_token": guest_verification_token,
+        },
+        format="json",
+    )
+    assert token_response.status_code == 201
+    assert token_response.json()["guest_verification_token"] == guest_verification_token
+    assert token_response.json()["reveal_request"]["status"] == ContactRevealRequest.RevealStatus.PAYMENT_INITIATED
+
+    changed_phone_response = api_client.post(
+        f"/api/v1/listing/car-sales/{second_listing.id}/request-contact/",
+        {
+            "buyer_phone": "0911777888",
+            "guest_verification_token": guest_verification_token,
+        },
+        format="json",
+    )
+    assert changed_phone_response.status_code == 400
+
+    detail_response = api_client.get(f"/api/v1/listing/car-sales/{listing.id}/?tx_ref={tx_ref}")
+    assert detail_response.status_code == 200
+    assert detail_response.json()["reveal_state"]["tx_ref"] == tx_ref
+
+    reveal_request = ContactRevealRequest.objects.get(id=request_data["reveal_request"]["id"])
+    _mock_contact_reveal_verification(monkeypatch, reveal_request.amount, reveal_request.currency)
+
+    verify_response = api_client.get(f"/api/v1/payment/verify-public/{tx_ref}/")
+    assert verify_response.status_code == 200
+    assert verify_response.json()["status"] == PaymentTransaction.PaymentStatus.SUCCESS
+    reveal_request.refresh_from_db()
+    assert reveal_request.status == ContactRevealRequest.RevealStatus.PAID_REVEALED
+    assert reveal_request.contact_snapshot["seller_phone"] == listing.seller_phone
+
+    contact_response = api_client.get(f"/api/v1/listing/car-sales/{listing.id}/contact/?tx_ref={tx_ref}")
+    assert contact_response.status_code == 200
+    assert contact_response.json()["seller_phone"] == listing.seller_phone
+
+
+def test_car_sales_company_create_uses_admin_managed_reveal_fee(company_client):
+    PaymentPlatformConfig.objects.create(
+        name="reveal-defaults",
+        default_car_sale_reveal_fee=Decimal("275.00"),
+        default_property_sale_reveal_fee=Decimal("150.00"),
+    )
+
+    response = company_client.post(
+        "/api/v1/listing/car-sales/",
+        {
+            "title": "Managed Fee Corolla",
+            "description": "Ready for transfer",
+            "base_price": "900000.00",
+            "currency": "ETB",
+            "brand": CarListing.CarBrandChoices.TOYOTA,
+            "model": "Corolla",
+            "year": 2020,
+            "mileage": 40000,
+            "fuel_type": CarListing.FuelTypeChoices.PETROL,
+            "transmission": CarListing.TransmissionChoices.AUTOMATIC,
+            "condition": CarListing.ConditionChoices.USED,
+            "car_class": CarListing.CarClassChoices.NORMAL,
+            "seats": 5,
+            "seller_contact_name": "Fleet Seller",
+            "seller_phone": "0911222000",
+            "seller_email": "fleet@example.com",
+            "reveal_fee": "25.00",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201, response.json()
+    assert response.json()["reveal_fee"] == "275.00"
+
+
 def _property_sale_payload(**overrides):
     payload = {
         "title": "Bole villa sale",
@@ -483,7 +738,7 @@ def test_property_sales_happy_path_all_three_endpoints(api_client, auth_client, 
     assert detail_response.status_code == 200
     detail_data = detail_response.json()
     assert detail_data["id"] == str(listing.id)
-    assert detail_data["reveal_state"] is None
+    assert detail_data["reveal_state"]["status"] == "guest_verification_required"
     assert "seller_phone" not in detail_data
 
     request_response = auth_client.post(
@@ -517,7 +772,7 @@ def test_property_sales_create_success_for_company_owner(company_client):
         format="json",
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 201, response.json()
     data = response.json()
     assert data["title"] == "Bole villa sale"
     assert data["property_type"] == PropertySaleListing.PropertyTypeChoices.VILLA
@@ -529,7 +784,11 @@ def test_property_sales_create_success_for_company_owner(company_client):
 def test_property_sales_auth_errors_and_wrong_role(api_client, auth_client, company):
     listing = _create_property_sale_listing(company)
 
-    assert api_client.post(f"/api/v1/listing/property-sales/{listing.id}/request-contact/", {}, format="json").status_code == 401
+    assert api_client.post(
+        f"/api/v1/listing/property-sales/{listing.id}/request-contact/",
+        {},
+        format="json",
+    ).status_code == 400
 
     response = auth_client.post(
         "/api/v1/listing/property-sales/",
@@ -559,6 +818,89 @@ def test_property_sales_validation_errors(company_client):
     )
 
     assert response.status_code == 400
+
+
+@patch("apps.account.services.OtpService.generate_code", return_value="123456")
+@patch("services.sms.send_sms", return_value=True)
+def test_guest_property_sales_contact_reveal_flow(
+    mock_send_sms,
+    _mock_generate_code,
+    api_client,
+    settings,
+    monkeypatch,
+    company,
+):
+    _mock_contact_reveal_chapa(settings, monkeypatch)
+    listing = _create_property_sale_listing(company)
+
+    otp_response = api_client.post(
+        "/api/v1/listing/property-sales/guest-otp/",
+        {"buyer_phone": "0911888000"},
+        format="json",
+    )
+    assert otp_response.status_code == 201
+    challenge_id = otp_response.json()["challenge_id"]
+    mock_send_sms.assert_called_once()
+
+    request_response = api_client.post(
+        f"/api/v1/listing/property-sales/{listing.id}/request-contact/",
+        {
+            "buyer_phone": "0911888000",
+            "otp_challenge_id": challenge_id,
+            "otp_code": "123456",
+        },
+        format="json",
+    )
+    assert request_response.status_code == 201
+    request_data = request_response.json()
+    tx_ref = request_data["tx_ref"]
+    guest_verification_token = request_data["guest_verification_token"]
+    assert guest_verification_token
+
+    second_listing = _create_property_sale_listing(company, title="Token reuse property sale")
+    token_response = api_client.post(
+        f"/api/v1/listing/property-sales/{second_listing.id}/request-contact/",
+        {
+            "buyer_phone": "0911888000",
+            "guest_verification_token": guest_verification_token,
+        },
+        format="json",
+    )
+    assert token_response.status_code == 201
+    assert token_response.json()["guest_verification_token"] == guest_verification_token
+    assert token_response.json()["reveal_request"]["status"] == PropertyContactRevealRequest.RevealStatus.PAYMENT_INITIATED
+
+    reveal_request = PropertyContactRevealRequest.objects.get(id=request_data["reveal_request"]["id"])
+    reveal_request.status = PropertyContactRevealRequest.RevealStatus.PAID_REVEALED
+    reveal_request.unlocked_at = timezone.now()
+    reveal_request.contact_snapshot = {
+        "seller_contact_name": listing.seller_contact_name,
+        "seller_phone": listing.seller_phone,
+        "seller_email": listing.seller_email,
+        "off_platform_notice": "The sale closes off-platform.",
+    }
+    reveal_request.save(update_fields=["status", "unlocked_at", "contact_snapshot", "updated_at"])
+
+    contact_response = api_client.get(f"/api/v1/listing/property-sales/{listing.id}/contact/?tx_ref={tx_ref}")
+    assert contact_response.status_code == 200
+    assert contact_response.json()["seller_phone"] == listing.seller_phone
+
+
+def test_property_sales_company_create_uses_admin_managed_reveal_fee(company_client):
+    PaymentPlatformConfig.objects.create(
+        name="property-reveal-defaults",
+        default_car_sale_reveal_fee=Decimal("100.00"),
+        default_property_sale_reveal_fee=Decimal("350.00"),
+    )
+
+    response = company_client.post(
+        "/api/v1/listing/property-sales/",
+        _property_sale_payload(reveal_fee="15.00"),
+        format="json",
+    )
+
+    assert response.status_code == 201, response.json()
+    assert response.json()["reveal_fee"] == "350.00"
 
 
 def test_property_sales_reveal_blocked_before_payment_success(auth_client, company, settings, monkeypatch):
@@ -671,6 +1013,44 @@ def test_property_rental_booking_happy_path_all_four_endpoints(auth_client, prop
     assert cancel_response.json()["status"] == PropertyRentalBooking.RentStatus.CANCELLED
     for availability in PropertyRentalAvailability.objects.filter(property_listing=property_listing, date__gte=start_date, date__lt=end_date):
         assert availability.available_units == 1
+
+
+def test_guest_can_book_property_rental_with_verified_phone_only(api_client, monkeypatch, property_listing):
+    _prepare_guest_booking_otp(monkeypatch)
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    guest_phone = "0911555699"
+    _create_terms(property_listing)
+    _create_property_rental_availability(property_listing, start_date, end_date, price=Decimal("3000.00"))
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/property-rentals/bookings/guest-otp/request/",
+        guest_phone,
+    )
+    payload = _property_rental_booking_payload(
+        property_listing,
+        start_date,
+        end_date,
+        guest_phone=guest_phone,
+        otp_challenge_id=challenge_id,
+        otp_code="123456",
+    )
+    payload.pop("guest_email", None)
+
+    response = api_client.post(
+        "/api/v1/listing/property-rentals/bookings/",
+        payload,
+        format="json",
+    )
+
+    assert response.status_code == 201, response.json()
+    data = response.json()
+    assert data["booking_reference"].startswith("P")
+    assert data["guest_phone"] == guest_phone
+    assert data["guest_email"] == ""
+    booking = PropertyRentalBooking.objects.get(id=data["id"])
+    assert booking.renter is None
+    assert booking.guest_phone == guest_phone
 
 
 def test_property_rental_booking_unauthenticated_detail_and_cancel(api_client, property_listing):
@@ -828,7 +1208,7 @@ def test_property_rental_booking_terms_snapshot_preserved(auth_client, property_
         format="json",
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 201, response.json()
     booking = PropertyRentalBooking.objects.get(id=response.json()["id"])
     terms.content = "Updated rental terms"
     terms.save(update_fields=["content"])
@@ -836,7 +1216,7 @@ def test_property_rental_booking_terms_snapshot_preserved(auth_client, property_
     assert booking.terms_content_snapshot == "Original rental terms"
 
 
-def test_property_rental_booking_requires_signed_owner_agreement(api_client, individual_owner):
+def test_property_rental_booking_requires_signed_owner_agreement(api_client, individual_owner, monkeypatch):
     property_listing = PropertyListing.objects.create(
         company=None,
         individual_owner=individual_owner,
@@ -855,18 +1235,33 @@ def test_property_rental_booking_requires_signed_owner_agreement(api_client, ind
     end_date = start_date + timedelta(days=2)
     _create_terms(property_listing)
     _create_property_rental_availability(property_listing, start_date, end_date)
+    _prepare_guest_booking_otp(monkeypatch)
+    guest_phone = "0911555771"
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/property-rentals/bookings/guest-otp/request/",
+        guest_phone,
+    )
 
     response = api_client.post(
         "/api/v1/listing/property-rentals/bookings/",
-        _property_rental_booking_payload(property_listing, start_date, end_date, guest_email="owner-agreement-missing@example.com"),
+        _property_rental_booking_payload(
+            property_listing,
+            start_date,
+            end_date,
+            guest_email="owner-agreement-missing@example.com",
+            guest_phone=guest_phone,
+            otp_challenge_id=challenge_id,
+            otp_code="123456",
+        ),
         format="json",
     )
 
     assert response.status_code == 400
-    assert "Owner has not completed compliance agreement." in response.json()[0]
+    assert "Owner has not completed compliance agreement." in json.dumps(response.json())
 
 
-def test_property_rental_booking_allows_signed_owner_agreement(api_client, admin_user, individual_owner):
+def test_property_rental_booking_allows_signed_owner_agreement(api_client, admin_user, individual_owner, monkeypatch):
     property_listing = PropertyListing.objects.create(
         company=None,
         individual_owner=individual_owner,
@@ -892,29 +1287,59 @@ def test_property_rental_booking_allows_signed_owner_agreement(api_client, admin
     end_date = start_date + timedelta(days=2)
     _create_terms(property_listing)
     _create_property_rental_availability(property_listing, start_date, end_date)
+    _prepare_guest_booking_otp(monkeypatch)
+    guest_phone = "0911555772"
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/property-rentals/bookings/guest-otp/request/",
+        guest_phone,
+    )
 
     response = api_client.post(
         "/api/v1/listing/property-rentals/bookings/",
-        _property_rental_booking_payload(property_listing, start_date, end_date, guest_email="owner-agreement-present@example.com"),
+        _property_rental_booking_payload(
+            property_listing,
+            start_date,
+            end_date,
+            guest_email="owner-agreement-present@example.com",
+            guest_phone=guest_phone,
+            otp_challenge_id=challenge_id,
+            otp_code="123456",
+        ),
         format="json",
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 201, response.json()
 
 
-def test_property_rental_booking_company_owner_unaffected_by_agreement_gate(api_client, property_listing):
+def test_property_rental_booking_company_owner_unaffected_by_agreement_gate(api_client, property_listing, monkeypatch):
     start_date = date.today() + timedelta(days=5)
     end_date = start_date + timedelta(days=2)
     _create_terms(property_listing)
     _create_property_rental_availability(property_listing, start_date, end_date)
+    _prepare_guest_booking_otp(monkeypatch)
+    guest_phone = "0911555773"
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/property-rentals/bookings/guest-otp/request/",
+        guest_phone,
+    )
 
     response = api_client.post(
         "/api/v1/listing/property-rentals/bookings/",
-        _property_rental_booking_payload(property_listing, start_date, end_date, guest_email="company-owner-unaffected@example.com"),
+        _property_rental_booking_payload(
+            property_listing,
+            start_date,
+            end_date,
+            guest_email="company-owner-unaffected@example.com",
+            guest_phone=guest_phone,
+            otp_challenge_id=challenge_id,
+            otp_code="123456",
+        ),
         format="json",
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 201, response.json()
 
 
 def test_post_amenity_admin_create_success(admin_client):
@@ -970,6 +1395,7 @@ def test_amenity_non_admin_forbidden(auth_client):
         ("/api/v1/listing/guesthouse-bookings/guest-otp/request/", "guesthouse"),
         ("/api/v1/listing/bookings-eventspaces/guest-otp/request/", "eventspace"),
         ("/api/v1/listing/car-rentals/guest-otp/request/", "car_rental"),
+        ("/api/v1/listing/property-rentals/bookings/guest-otp/request/", "property_rental"),
     ],
 )
 def test_post_guest_booking_otp_request_success(api_client, monkeypatch, path, booking_type):
@@ -1530,6 +1956,138 @@ def test_get_car_lookup_public_contract(api_client, car_rental):
     assert data["booking_reference"] == car_rental.booking_reference
 
 
+def test_get_car_lookup_supports_verified_guest_phone(api_client, monkeypatch, car_listing):
+    _prepare_guest_booking_otp(monkeypatch)
+    guest_phone = "0911005222"
+    rental = _create_car_rental_record(
+        car_listing=car_listing,
+        guest_phone=guest_phone,
+        guest_email="guest-lookup@example.com",
+        booking_reference="C-GUEST-LOOKUP-1",
+    )
+
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/car-rentals/guest-otp/request/",
+        guest_phone,
+    )
+    response = api_client.get(
+        "/api/v1/listing/car-rentals/lookup/",
+        {
+            "reference": rental.booking_reference,
+            "guest_phone": guest_phone,
+            "otp_challenge_id": challenge_id,
+            "otp_code": "123456",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    assert data["booking_reference"] == rental.booking_reference
+    assert data["guest_phone"] == guest_phone
+
+
+def test_get_car_lookup_rejects_wrong_verified_phone(api_client, monkeypatch, car_listing):
+    _prepare_guest_booking_otp(monkeypatch)
+    rental = _create_car_rental_record(
+        car_listing=car_listing,
+        guest_phone="0911005333",
+        guest_email="guest-wrong-phone@example.com",
+        booking_reference="C-GUEST-LOOKUP-2",
+    )
+    other_phone = "0911005444"
+
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/car-rentals/guest-otp/request/",
+        other_phone,
+    )
+    response = api_client.get(
+        "/api/v1/listing/car-rentals/lookup/",
+        {
+            "reference": rental.booking_reference,
+            "guest_phone": other_phone,
+            "otp_challenge_id": challenge_id,
+            "otp_code": "123456",
+        },
+    )
+
+    assert response.status_code == 403
+    assert "phone" in response.json()["detail"].lower()
+
+
+def test_post_car_rental_price_preview_success(api_client, car_listing):
+    start_date = date.today() + timedelta(days=4)
+    end_date = start_date + timedelta(days=2)
+    _create_car_availability(car_listing, start_date, end_date, available_units=2)
+
+    response = api_client.post(
+        "/api/v1/listing/car-rentals/price-preview/",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "items": [{"car_listing": str(car_listing.id), "units_rent": 1}],
+            "guest_phone": "0911777002",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    assert data["nights"] == 2
+    assert len(data["items"]) == 1
+    assert data["items"][0]["id"] == str(car_listing.id)
+    assert data["items"][0]["units"] == 1
+    assert data["totals"]["currency"] == car_listing.currency
+    assert Decimal(data["totals"]["items_subtotal"]) == Decimal("3000.00")
+    assert Decimal(data["totals"]["platform_fee"]) == Decimal("0.00")
+    assert Decimal(data["totals"]["grand_total"]) == Decimal("3000.00")
+
+
+def test_post_car_rental_price_preview_rejects_availability_conflict(api_client, car_listing):
+    start_date = date.today() + timedelta(days=4)
+    end_date = start_date + timedelta(days=2)
+    _create_car_availability(car_listing, start_date, end_date, available_units=0)
+
+    response = api_client.post(
+        "/api/v1/listing/car-rentals/price-preview/",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "items": [{"car_listing": str(car_listing.id), "units_rent": 1}],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 409
+    assert "not available" in response.json()["detail"].lower()
+
+
+def test_post_car_rental_price_preview_supports_display_currency(api_client, car_listing):
+    start_date = date.today() + timedelta(days=4)
+    end_date = start_date + timedelta(days=1)
+    _create_car_availability(car_listing, start_date, end_date, available_units=1)
+    CurrencyRate.objects.create(base="USD", target="ETB", rate=Decimal("100.00"), date=date.today())
+
+    response = api_client.post(
+        "/api/v1/listing/car-rentals/price-preview/?display_currency=USD",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "items": [{"car_listing": str(car_listing.id), "units_rent": 1}],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    assert data["totals"]["currency"] == "ETB"
+    assert data["conversion"]["to"] == "USD"
+    assert data["conversion"]["items_subtotal"] == "15.00"
+    assert data["conversion"]["platform_fee"] == "0.75"
+    assert data["conversion"]["grand_total"] == "15.75"
+
+
 def test_post_car_rental_with_driver_success(auth_client, car_listing):
     car_listing.rental_mode = CarListing.RentalModeChoices.WITH_DRIVER
     car_listing.save(update_fields=["rental_mode"])
@@ -1550,6 +2108,7 @@ def test_post_car_rental_with_driver_success(auth_client, car_listing):
                     "price_per_unit": "1500.00",
                 }
             ],
+            "guest_phone": "0911002005",
             "terms_accepted": True,
             "terms_version": "1",
         },
@@ -1559,6 +2118,123 @@ def test_post_car_rental_with_driver_success(auth_client, car_listing):
     assert response.status_code == 201
     data = response.json()
     assert data["renter_driver_license_number"] == ""
+
+
+def test_post_hotel_booking_requires_phone_for_authenticated_user(auth_client, room):
+    check_in = date.today() + timedelta(days=5)
+    check_out = check_in + timedelta(days=2)
+    _create_terms(room.hotel)
+    _create_stay_availability(room, check_in, check_out, available_rooms=2)
+
+    response = auth_client.post(
+        "/api/v1/listing/bookings/",
+        {
+            "check_in_date": check_in.isoformat(),
+            "check_out_date": check_out.isoformat(),
+            "guest_first_name": "No",
+            "guest_last_name": "Phone",
+            "terms_accepted": True,
+            "terms_version": "1",
+            "items": [{"room": str(room.id), "units_booked": 1}],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "guest_phone" in response.json()
+
+
+def test_post_guesthouse_booking_requires_phone_for_authenticated_user(auth_client, guest_house_room):
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    _create_terms(guest_house_room.guest_house)
+    _create_guesthouse_inventory(guest_house_room, start_date, end_date, available_rooms=2)
+
+    response = auth_client.post(
+        "/api/v1/listing/guesthouse-bookings/",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "guest_first_name": "No",
+            "guest_last_name": "Phone",
+            "terms_accepted": True,
+            "terms_version": "1",
+            "items": [{"room": str(guest_house_room.id), "units_booked": 1}],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "guest_phone" in response.json()
+
+
+def test_post_eventspace_booking_requires_phone_for_authenticated_user(auth_client, event_space):
+    check_in = date.today() + timedelta(days=5)
+    check_out = check_in + timedelta(days=1)
+    _create_terms(event_space.hotel)
+    _create_eventspace_availability(event_space, check_in, check_out, available_units=1)
+
+    response = auth_client.post(
+        "/api/v1/listing/bookings-eventspaces/",
+        {
+            "check_in_date": check_in.isoformat(),
+            "check_out_date": check_out.isoformat(),
+            "event_type": "conference",
+            "guest_first_name": "No",
+            "guest_last_name": "Phone",
+            "terms_accepted": True,
+            "terms_version": "1",
+            "items": [{"event_space": str(event_space.id), "units_booked": 1}],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "guest_phone" in response.json()
+
+
+def test_post_car_rental_requires_phone_for_authenticated_user(auth_client, car_listing):
+    car_listing.rental_mode = CarListing.RentalModeChoices.WITH_DRIVER
+    car_listing.save(update_fields=["rental_mode"])
+    _create_terms(car_listing.company)
+    start_date = date.today() + timedelta(days=4)
+    end_date = start_date + timedelta(days=2)
+    _create_car_availability(car_listing, start_date, end_date)
+
+    response = auth_client.post(
+        "/api/v1/listing/car-rentals/",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "rental_items": [
+                {"car_listing": str(car_listing.id), "units_rent": 1, "price_per_unit": "1500.00"}
+            ],
+            "terms_accepted": True,
+            "terms_version": "1",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "guest_phone" in response.json()
+
+
+def test_post_property_rental_booking_requires_phone_for_authenticated_user(auth_client, property_listing):
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    _create_terms(property_listing)
+    _create_property_rental_availability(property_listing, start_date, end_date)
+    payload = _property_rental_booking_payload(property_listing, start_date, end_date)
+    payload.pop("guest_phone")
+
+    response = auth_client.post(
+        "/api/v1/listing/property-rentals/bookings/",
+        payload,
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "guest_phone" in response.json()
 
 
 def test_post_car_rental_without_driver_missing_document_failure(auth_client, car_listing):
@@ -1581,6 +2257,7 @@ def test_post_car_rental_without_driver_missing_document_failure(auth_client, ca
                     "price_per_unit": "1500.00",
                 }
             ],
+            "guest_phone": "0911002006",
             "terms_accepted": True,
             "terms_version": "1",
         },
@@ -1862,7 +2539,6 @@ def test_post_guesthouse_booking_with_verified_otp_success(api_client, monkeypat
             "end_date": end_date.isoformat(),
             "guest_first_name": "Guest",
             "guest_last_name": "House",
-            "guest_email": "otp-guesthouse@example.com",
             "guest_phone": guest_phone,
             "terms_accepted": True,
             "terms_version": "1",
@@ -1873,8 +2549,193 @@ def test_post_guesthouse_booking_with_verified_otp_success(api_client, monkeypat
         format="json",
     )
 
+    assert response.status_code == 201, response.json()
+    data = response.json()
+    assert data["booking_reference"]
+    assert data["guest_phone"] == guest_phone
+    assert data["guest_email"] == ""
+
+
+def test_registered_user_can_book_guesthouse_without_guest_email(auth_client, user, guest_house_room):
+    user.phone = "0911999888"
+    user.save(update_fields=["phone", "updated_at"])
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    _create_terms(guest_house_room.guest_house)
+    _create_guesthouse_inventory(guest_house_room, start_date, end_date, available_rooms=2)
+
+    response = auth_client.post(
+        "/api/v1/listing/guesthouse-bookings/",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "guest_first_name": "Registered",
+            "guest_last_name": "Guest",
+            "guest_phone": user.phone,
+            "terms_accepted": True,
+            "terms_version": "1",
+            "items": [{"room": str(guest_house_room.id), "units_booked": 1}],
+        },
+        format="json",
+    )
+
     assert response.status_code == 201
-    assert response.json()["booking_reference"]
+    data = response.json()
+    assert data["booking_reference"]
+    assert data["status"] == GuestHouseBooking.RentStatus.PENDING
+    booking = GuestHouseBooking.objects.get(id=data["id"])
+    assert booking.renter == user
+    assert booking.guest_email == ""
+
+
+def test_guesthouse_guest_payment_confirmation_sends_sms_not_email(
+    api_client,
+    monkeypatch,
+    guest_house_room,
+):
+    _prepare_guest_booking_otp(monkeypatch)
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    guest_phone = "0911002333"
+    _create_terms(guest_house_room.guest_house)
+    _create_guesthouse_inventory(guest_house_room, start_date, end_date, available_rooms=2)
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/guesthouse-bookings/guest-otp/request/",
+        guest_phone,
+    )
+    response = api_client.post(
+        "/api/v1/listing/guesthouse-bookings/",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "guest_first_name": "Guest",
+            "guest_last_name": "Paid",
+            "guest_phone": guest_phone,
+            "terms_accepted": True,
+            "terms_version": "1",
+            "otp_challenge_id": challenge_id,
+            "otp_code": "123456",
+            "items": [{"room": str(guest_house_room.id), "units_booked": 1}],
+        },
+        format="json",
+    )
+    assert response.status_code == 201, response.json()
+    booking = GuestHouseBooking.objects.get(id=response.json()["id"])
+    payment = PaymentTransaction.objects.create(
+        content_type=ContentType.objects.get_for_model(GuestHouseBooking),
+        object_id=booking.id,
+        booking_type="guesthouse",
+        tx_ref="guesthouse-guest-pay-1",
+        amount=booking.total_price,
+        currency=booking.currency,
+        status=PaymentTransaction.PaymentStatus.PENDING,
+        metadata={},
+    )
+    sms_calls = []
+    email_calls = []
+    monkeypatch.setattr("apps.listing.services.send_sms", lambda phone, message: sms_calls.append((phone, message)))
+    monkeypatch.setattr(
+        "apps.listing.services.BookingEmailService.send_booking_confirmation",
+        lambda booking: email_calls.append(booking.id),
+    )
+    monkeypatch.setattr(
+        "apps.payment.services.ChapaPaymentService.verify_payment",
+        lambda tx_ref: {
+            "status": "success",
+            "data": {
+                "amount": str(payment.amount),
+                "currency": payment.currency,
+                "id": "chapa-guesthouse-guest-1",
+                "method": "test",
+            },
+        },
+    )
+
+    result = ChapaPaymentService.handle_callback({"tx_ref": payment.tx_ref})
+
+    booking.refresh_from_db()
+    payment.refresh_from_db()
+    assert result["success"] is True
+    assert payment.status == PaymentTransaction.PaymentStatus.SUCCESS
+    assert booking.status == GuestHouseBooking.RentStatus.CONFIRMED
+    assert sms_calls and sms_calls[0][0] == guest_phone
+    assert booking.booking_reference in sms_calls[0][1]
+    assert email_calls == []
+
+
+def test_guesthouse_registered_payment_confirmation_sends_sms_and_notification(
+    auth_client,
+    user,
+    monkeypatch,
+    guest_house_room,
+):
+    user.phone = "0911777666"
+    user.save(update_fields=["phone", "updated_at"])
+    start_date = date.today() + timedelta(days=5)
+    end_date = start_date + timedelta(days=2)
+    _create_terms(guest_house_room.guest_house)
+    _create_guesthouse_inventory(guest_house_room, start_date, end_date, available_rooms=2)
+    response = auth_client.post(
+        "/api/v1/listing/guesthouse-bookings/",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "guest_first_name": "Registered",
+            "guest_last_name": "Paid",
+            "guest_phone": user.phone,
+            "terms_accepted": True,
+            "terms_version": "1",
+            "items": [{"room": str(guest_house_room.id), "units_booked": 1}],
+        },
+        format="json",
+    )
+    assert response.status_code == 201
+    booking = GuestHouseBooking.objects.get(id=response.json()["id"])
+    payment = PaymentTransaction.objects.create(
+        content_type=ContentType.objects.get_for_model(GuestHouseBooking),
+        object_id=booking.id,
+        booking_type="guesthouse",
+        tx_ref="guesthouse-registered-pay-1",
+        amount=booking.total_price,
+        currency=booking.currency,
+        status=PaymentTransaction.PaymentStatus.PENDING,
+        metadata={},
+    )
+    sms_calls = []
+    email_calls = []
+    monkeypatch.setattr("apps.listing.services.send_sms", lambda phone, message: sms_calls.append((phone, message)))
+    monkeypatch.setattr(
+        "apps.listing.services.BookingEmailService.send_booking_confirmation",
+        lambda booking: email_calls.append(booking.id),
+    )
+    monkeypatch.setattr(
+        "apps.payment.services.ChapaPaymentService.verify_payment",
+        lambda tx_ref: {
+            "status": "success",
+            "data": {
+                "amount": str(payment.amount),
+                "currency": payment.currency,
+                "id": "chapa-guesthouse-registered-1",
+                "method": "test",
+            },
+        },
+    )
+
+    result = ChapaPaymentService.handle_callback({"tx_ref": payment.tx_ref})
+
+    booking.refresh_from_db()
+    payment.refresh_from_db()
+    assert result["success"] is True
+    assert payment.status == PaymentTransaction.PaymentStatus.SUCCESS
+    assert booking.status == GuestHouseBooking.RentStatus.CONFIRMED
+    assert sms_calls and sms_calls[0][0] == user.phone
+    assert email_calls == []
+    assert Notification.objects.filter(
+        user=user,
+        notification_type=Notification.NotificationType.BOOKING_CONFIRMED,
+        metadata__booking_reference=booking.booking_reference,
+    ).exists()
 
 
 def test_post_eventspace_booking_requires_otp(api_client, event_space):
@@ -2633,6 +3494,143 @@ def test_car_rentals_my_rentals_success(api_client, user, car_listing):
     assert data["results"][0]["booking_reference"] == rental.booking_reference
 
 
+def test_car_rentals_guest_rentals_returns_only_verified_guest_history(api_client, monkeypatch, car_listing):
+    _prepare_guest_booking_otp(monkeypatch)
+    guest_phone = "0911004555"
+    other_phone = "0911004666"
+
+    own_one = _create_car_rental_record(
+        car_listing=car_listing,
+        guest_phone=guest_phone,
+        guest_email="guest-one@example.com",
+        booking_reference="C-GUEST-001",
+    )
+    own_two = _create_car_rental_record(
+        car_listing=car_listing,
+        guest_phone=guest_phone,
+        guest_email="guest-two@example.com",
+        booking_reference="C-GUEST-002",
+    )
+    _create_car_rental_record(
+        car_listing=car_listing,
+        guest_phone=other_phone,
+        guest_email="guest-other@example.com",
+        booking_reference="C-GUEST-003",
+    )
+
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/car-rentals/guest-otp/request/",
+        guest_phone,
+    )
+
+    response = api_client.get(
+        "/api/v1/listing/car-rentals/guest-rentals/",
+        {
+            "guest_phone": guest_phone,
+            "otp_challenge_id": challenge_id,
+            "otp_code": "123456",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    assert data["count"] == 2
+    assert data["guest_verification_token"]
+    returned_refs = {item["booking_reference"] for item in data["results"]}
+    assert returned_refs == {own_one.booking_reference, own_two.booking_reference}
+
+    token_response = api_client.get(
+        "/api/v1/listing/car-rentals/guest-rentals/",
+        {
+            "guest_phone": guest_phone,
+            "guest_verification_token": data["guest_verification_token"],
+        },
+    )
+
+    assert token_response.status_code == 200, token_response.json()
+    token_data = token_response.json()
+    assert token_data["count"] == 2
+    assert {item["booking_reference"] for item in token_data["results"]} == returned_refs
+
+
+def test_car_rentals_guest_rentals_do_not_expose_registered_user_rentals(api_client, monkeypatch, car_listing, user):
+    _prepare_guest_booking_otp(monkeypatch)
+    guest_phone = "0911004777"
+
+    guest_rental = _create_car_rental_record(
+        car_listing=car_listing,
+        guest_phone=guest_phone,
+        guest_email="guest-visible@example.com",
+        booking_reference="C-GUEST-010",
+    )
+    _create_car_rental_record(
+        car_listing=car_listing,
+        renter=user,
+        guest_phone=guest_phone,
+        guest_email=user.email,
+        booking_reference="C-USER-010",
+    )
+
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/car-rentals/guest-otp/request/",
+        guest_phone,
+    )
+    response = api_client.get(
+        "/api/v1/listing/car-rentals/guest-rentals/",
+        {
+            "guest_phone": guest_phone,
+            "otp_challenge_id": challenge_id,
+            "otp_code": "123456",
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    assert data["count"] == 1
+    assert [item["booking_reference"] for item in data["results"]] == [guest_rental.booking_reference]
+
+
+def test_car_rentals_guest_rentals_reject_other_guest_token(api_client, monkeypatch, car_listing):
+    _prepare_guest_booking_otp(monkeypatch)
+    guest_phone = "0911004888"
+    other_phone = "0911004999"
+
+    _create_car_rental_record(
+        car_listing=car_listing,
+        guest_phone=other_phone,
+        guest_email="guest-other@example.com",
+        booking_reference="C-GUEST-020",
+    )
+
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/car-rentals/guest-otp/request/",
+        other_phone,
+    )
+    verified_response = api_client.get(
+        "/api/v1/listing/car-rentals/guest-rentals/",
+        {
+            "guest_phone": other_phone,
+            "otp_challenge_id": challenge_id,
+            "otp_code": "123456",
+        },
+    )
+    token = verified_response.json()["guest_verification_token"]
+
+    response = api_client.get(
+        "/api/v1/listing/car-rentals/guest-rentals/",
+        {
+            "guest_phone": guest_phone,
+            "guest_verification_token": token,
+        },
+    )
+
+    assert response.status_code == 400
+    assert "guest_verification_token" in response.json()
+
+
 def test_car_rental_confirm_and_cancel_success(api_client, user, car_listing):
     rental = CarRental.objects.create(
         renter=user,
@@ -2675,6 +3673,184 @@ def test_car_rental_confirm_and_cancel_success(api_client, user, car_listing):
 
     rental.refresh_from_db()
     assert rental.status == CarRental.RentStatus.CANCELLED
+
+
+def test_post_car_rental_guest_cancel_success(api_client, monkeypatch, car_listing):
+    _prepare_guest_booking_otp(monkeypatch)
+    guest_phone = "0911005555"
+    rental = _create_car_rental_record(
+        car_listing=car_listing,
+        guest_phone=guest_phone,
+        guest_email="guest-cancel@example.com",
+        booking_reference="C-GUEST-CANCEL-1",
+        status=CarRental.RentStatus.CONFIRMED,
+    )
+
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/car-rentals/guest-otp/request/",
+        guest_phone,
+    )
+    response = api_client.post(
+        f"/api/v1/listing/car-rentals/{rental.id}/cancel/",
+        {
+            "guest_phone": guest_phone,
+            "otp_challenge_id": challenge_id,
+            "otp_code": "123456",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200, response.json()
+    rental.refresh_from_db()
+    assert rental.status == CarRental.RentStatus.CANCELLED
+
+
+def test_post_car_rental_guest_cancel_rejects_wrong_phone(api_client, monkeypatch, car_listing):
+    _prepare_guest_booking_otp(monkeypatch)
+    rental = _create_car_rental_record(
+        car_listing=car_listing,
+        guest_phone="0911005666",
+        guest_email="guest-cancel-wrong@example.com",
+        booking_reference="C-GUEST-CANCEL-2",
+        status=CarRental.RentStatus.CONFIRMED,
+    )
+    other_phone = "0911005777"
+
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/car-rentals/guest-otp/request/",
+        other_phone,
+    )
+    response = api_client.post(
+        f"/api/v1/listing/car-rentals/{rental.id}/cancel/",
+        {
+            "guest_phone": other_phone,
+            "otp_challenge_id": challenge_id,
+            "otp_code": "123456",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 403
+    assert "phone" in response.json()["detail"].lower()
+
+
+def test_post_car_rental_guest_cancel_rejects_registered_user_rental(api_client, monkeypatch, car_listing, user):
+    _prepare_guest_booking_otp(monkeypatch)
+    rental = _create_car_rental_record(
+        car_listing=car_listing,
+        renter=user,
+        guest_phone="0911005888",
+        guest_email=user.email,
+        booking_reference="C-USER-CANCEL-1",
+        status=CarRental.RentStatus.CONFIRMED,
+    )
+    guest_phone = "0911005888"
+
+    challenge_id = _issue_guest_booking_otp(
+        api_client,
+        "/api/v1/listing/car-rentals/guest-otp/request/",
+        guest_phone,
+    )
+    response = api_client.post(
+        f"/api/v1/listing/car-rentals/{rental.id}/cancel/",
+        {
+            "guest_phone": guest_phone,
+            "otp_challenge_id": challenge_id,
+            "otp_code": "123456",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 403
+    assert "registered user" in response.json()["detail"].lower()
+
+
+def test_post_car_rental_extension_price_preview_success(auth_client, user, car_listing):
+    rental = _create_car_rental_record(
+        car_listing=car_listing,
+        renter=user,
+        guest_phone=user.phone,
+        guest_email=user.email,
+        booking_reference="C-EXT-001",
+        status=CarRental.RentStatus.CONFIRMED,
+    )
+    new_end_date = rental.end_date + timedelta(days=2)
+    _create_car_availability(car_listing, rental.end_date, new_end_date, available_units=1)
+
+    response = auth_client.post(
+        f"/api/v1/listing/car-rentals/{rental.id}/extension-price-preview/",
+        {"new_end_date": new_end_date.isoformat(), "payment_currency": "ETB"},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    assert data["booking_reference"] == rental.booking_reference
+    assert data["extra_days"] == 2
+    assert data["currency"] == "ETB"
+    assert Decimal(data["extension_subtotal"]) == Decimal("3000.00")
+    assert Decimal(data["platform_fee"]) >= Decimal("0.00")
+    assert Decimal(data["amount"]) == Decimal(data["extension_subtotal"]) + Decimal(data["platform_fee"])
+
+
+def test_post_car_rental_request_extension_holds_inventory_and_returns_checkout(auth_client, user, car_listing, settings, monkeypatch):
+    _mock_extension_chapa_initialize(settings, monkeypatch)
+    rental = _create_car_rental_record(
+        car_listing=car_listing,
+        renter=user,
+        guest_phone=user.phone,
+        guest_email=user.email,
+        booking_reference="C-EXT-002",
+        status=CarRental.RentStatus.CONFIRMED,
+    )
+    new_end_date = rental.end_date + timedelta(days=2)
+    _create_car_availability(car_listing, rental.end_date, new_end_date, available_units=1)
+
+    response = auth_client.post(
+        f"/api/v1/listing/car-rentals/{rental.id}/request-extension/",
+        {"new_end_date": new_end_date.isoformat(), "payment_currency": "ETB"},
+        format="json",
+    )
+
+    assert response.status_code == 200, response.json()
+    data = response.json()
+    assert data["tx_ref"]
+    assert data["checkout_url"] == "https://checkout.example.com/extension"
+    extension_request = CarRentalExtensionRequest.objects.get(id=data["extension_request_id"])
+    assert extension_request.status == CarRentalExtensionRequest.ExtensionStatus.PAYMENT_INITIATED
+    assert extension_request.availability_held is True
+    assert extension_request.requested_end_date == new_end_date
+
+    held_dates = CarAvailability.objects.filter(
+        car_listing=car_listing,
+        date__gte=rental.end_date,
+        date__lt=new_end_date,
+    ).order_by("date")
+    assert held_dates.count() == 2
+    assert all(item.available_units == 0 for item in held_dates)
+
+
+def test_post_car_rental_request_extension_rejects_availability_conflict(auth_client, user, car_listing):
+    rental = _create_car_rental_record(
+        car_listing=car_listing,
+        renter=user,
+        guest_phone=user.phone,
+        guest_email=user.email,
+        booking_reference="C-EXT-003",
+        status=CarRental.RentStatus.CONFIRMED,
+    )
+    new_end_date = rental.end_date + timedelta(days=2)
+
+    response = auth_client.post(
+        f"/api/v1/listing/car-rentals/{rental.id}/request-extension/",
+        {"new_end_date": new_end_date.isoformat()},
+        format="json",
+    )
+
+    assert response.status_code == 409
+    assert "not available" in response.json()["detail"].lower()
 
 
 def test_post_car_rental_reschedule_success(auth_client, user, car_listing):
