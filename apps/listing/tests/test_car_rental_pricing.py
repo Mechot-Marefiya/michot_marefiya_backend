@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
+from django.utils import timezone
 from apps.listing.models import CarListing, CarRental, CarRentalItem, TermsAndConditions
 from apps.account.enums import RoleCode
 from apps.account.models import CompanyProfile, Role
@@ -131,6 +132,30 @@ class CarRentalPricingTests(TestCase):
         url = reverse('carrental-list')
         start_date = date.today() + timedelta(days=1)
         end_date = start_date + timedelta(days=2)
+
+        prior_rental = CarRental.objects.create(
+            renter=self.user,
+            start_date=date.today() - timedelta(days=5),
+            end_date=date.today() - timedelta(days=3),
+            total_price=Decimal("1500.00"),
+            currency="ETB",
+            status=CarRental.RentStatus.CONFIRMED,
+            guest_first_name="John",
+            guest_last_name="Doe",
+            guest_email="customer@example.com",
+            guest_phone="0911555001",
+            booking_reference=f"C-{uuid.uuid4().hex[:6].upper()}",
+            terms_accepted=True,
+            terms_version="1.0",
+            terms_content_snapshot="Standard terms",
+            terms_accepted_at=timezone.now(),
+        )
+        CarRentalItem.objects.create(
+            car_rental=prior_rental,
+            car_listing=self.car_etb,
+            units_rent=1,
+            price_per_unit=Decimal("1500.00"),
+        )
         
         # We need to accept T&C, but for this test we'll skip the actual T&C obj creation 
         # and just provide valid-looking data if the service allows or mocks it.
@@ -140,6 +165,7 @@ class CarRentalPricingTests(TestCase):
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
             "currency": "ETB",
+            "guest_phone": "0911555001",
             "rental_items": [
                 {
                     "car_listing": self.car_etb.id,
@@ -187,6 +213,7 @@ class CarRentalPricingTests(TestCase):
         data = {
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
+            "guest_phone": "0911555002",
             "rental_items": [
                 {"car_listing": self.car_etb.id, "units_rent": 1, "price_per_unit": 1500},
                 {"car_listing": self.car_usd.id, "units_rent": 1, "price_per_unit": 100}
@@ -223,6 +250,7 @@ class CarRentalPricingTests(TestCase):
         base_payload = {
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
+            "guest_phone": "0911555003",
             "rental_items": [
                 {
                     "car_listing": self.car_etb.id,

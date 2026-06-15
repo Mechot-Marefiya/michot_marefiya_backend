@@ -2,6 +2,7 @@
 FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPYCACHEPREFIX=/tmp/pycache
 ENV MAIN_DIR=/usr/src/app
 
 # Build args we expect from the compose. 1000 is just default vals

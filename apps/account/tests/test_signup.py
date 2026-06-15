@@ -32,6 +32,7 @@ def test_serializer_raises_validation_error_on_password_mismatch(
 ):
     data = {
         "email": "test@example.com",
+        "phone": "0911000456",
         "password": "12345678",
         "confirm_password": "1234567",
     }

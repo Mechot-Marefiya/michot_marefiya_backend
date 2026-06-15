@@ -512,10 +512,19 @@ class UserResponseSerializer(serializers.ModelSerializer):
 
 class UserUpdateSerializer(serializers.ModelSerializer):
     current_password = serializers.CharField(write_only=True, required=False)
+    phone_verified = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = User
-        fields = ["email", "first_name", "last_name", "phone", "current_password"]
+        fields = [
+            "email",
+            "first_name",
+            "last_name",
+            "phone",
+            "phone_verified",
+            "phone_verified_at",
+            "current_password",
+        ]
         extra_kwargs = {
             "email": {"required": False},
             "first_name": {"required": False},

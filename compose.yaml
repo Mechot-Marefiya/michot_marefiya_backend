@@ -44,6 +44,8 @@ services:
       - 8000:8000
     volumes:
       - ./:/usr/src/app
+      - marefiya_pytest_cache:/tmp/pytest_cache
+      - marefiya_pycache:/tmp/pycache
     user: "${UID}:${GID}"
     command: python manage.py runserver 0.0.0.0:8000
     restart: unless-stopped
@@ -100,3 +102,5 @@ volumes:
   marefiya_pgdata_dev:
   marefiya_pgadmin_data:
   marefiya_redis_data:
+  marefiya_pytest_cache:
+  marefiya_pycache:

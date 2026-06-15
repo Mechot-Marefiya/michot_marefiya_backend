@@ -27,7 +27,8 @@ class HotelBookingAPITests(APITestCase):
             email="test@example.com",
             password="password123",
             first_name="Test",
-            last_name="User"
+            last_name="User",
+            phone="0911222333",
         )
         
         # Create address
@@ -108,10 +109,33 @@ class HotelBookingAPITests(APITestCase):
         
         check_in = date.today() + timedelta(days=1)
         check_out = date.today() + timedelta(days=3)
-        
+        guest_phone = "0911222333"
+
+        prior_booking = Booking.objects.create(
+            user=self.user,
+            check_in_date=check_in - timedelta(days=4),
+            check_out_date=check_in - timedelta(days=3),
+            guest_first_name="Test",
+            guest_last_name="User",
+            guest_email="test@example.com",
+            guest_phone=guest_phone,
+            total_price=Decimal("1000.00"),
+            currency="ETB",
+            status=Booking.BookingStatus.CONFIRMED,
+            terms_accepted=True,
+            terms_version="1.0",
+        )
+        BookingItem.objects.create(
+            booking=prior_booking,
+            room=self.room,
+            units_booked=1,
+            price_per_unit=Decimal("1000.00"),
+        )
+
         data = {
             "check_in_date": check_in.isoformat(),
             "check_out_date": check_out.isoformat(),
+            "guest_phone": guest_phone,
             "terms_accepted": True,
             "terms_version": "1.0",
             "items": [
@@ -131,7 +155,7 @@ class HotelBookingAPITests(APITestCase):
         
         # 2 nights * 1000 ETB = 2000 ETB
         # 2000 * 1.05 (5% fee) = 2100 ETB
-        booking = Booking.objects.first()
+        booking = Booking.objects.get(id=response.data["id"])
         expected_total = Decimal('2100.00')
         
         self.assertEqual(booking.total_price, expected_total)
@@ -151,6 +175,7 @@ class HotelBookingAPITests(APITestCase):
         data = {
             "check_in_date": check_in.isoformat(),
             "check_out_date": check_out.isoformat(),
+            "guest_phone": "0911222333",
             "terms_accepted": True,
             "terms_version": "1.0",
             "items": [
@@ -193,6 +218,7 @@ class HotelBookingAPITests(APITestCase):
         data = {
             "check_in_date": check_in.isoformat(),
             "check_out_date": check_out.isoformat(),
+            "guest_phone": "0911222333",
             "terms_accepted": True,
             "terms_version": "1.0",
             "items": [
@@ -206,7 +232,7 @@ class HotelBookingAPITests(APITestCase):
         response = self.client.post(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         
-        booking = Booking.objects.first()
+        booking = Booking.objects.get(id=response.data["id"])
         
         # Verify availability decreased
         after_booking = StayAvailability.objects.get(

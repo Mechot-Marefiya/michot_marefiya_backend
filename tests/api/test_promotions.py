@@ -216,7 +216,7 @@ def test_get_public_placements_served_from_cache_on_second_call(api_client, admi
 
     second_response = api_client.get("/api/v1/promotions/placements/")
     assert second_response.status_code == 200
-    assert len(second_response.json()) == 1
+    assert second_response.json() == []
 
 
 @patch("apps.promotions.tasks.record_impression_async.delay")

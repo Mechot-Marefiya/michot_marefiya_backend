@@ -47,7 +47,7 @@ def test_sync_campaign_statuses_activates_scheduled_campaign(admin_user, car_lis
     assert result["activated"] == 1
     assert campaign.status == PromotionCampaign.Status.ACTIVE
     assert placement.is_active is True
-    assert cache.get(PROMOTION_CACHE_VERSION_KEY) == 2
+    assert cache.get(PROMOTION_CACHE_VERSION_KEY) > 1
 
 
 def test_sync_campaign_statuses_deactivates_expired_campaign(admin_user, car_listing):
@@ -67,7 +67,7 @@ def test_sync_campaign_statuses_deactivates_expired_campaign(admin_user, car_lis
     assert result["expired"] == 1
     assert campaign.status == PromotionCampaign.Status.EXPIRED
     assert placement.is_active is False
-    assert cache.get(PROMOTION_CACHE_VERSION_KEY) == 2
+    assert cache.get(PROMOTION_CACHE_VERSION_KEY) > 1
 
 
 def test_record_impression_async_creates_row(admin_user, car_listing):

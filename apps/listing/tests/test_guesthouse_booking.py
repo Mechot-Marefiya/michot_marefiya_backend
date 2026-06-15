@@ -94,6 +94,7 @@ class GuestHouseBookingTests(APITestCase):
         data = {
             "start_date": (datetime.date.today() + datetime.timedelta(days=1)).isoformat(),
             "end_date": (datetime.date.today() + datetime.timedelta(days=3)).isoformat(),
+            "guest_phone": "0911666001",
             "terms_accepted": True,
             "terms_version": "1.0",
             "items": [
@@ -212,6 +213,7 @@ class GuestHouseBookingTests(APITestCase):
         data = {
             "start_date": (datetime.date.today() + datetime.timedelta(days=1)).isoformat(),
             "end_date": (datetime.date.today() + datetime.timedelta(days=3)).isoformat(),
+            "guest_phone": "0911666002",
             "terms_accepted": True,
             "terms_version": "1.0",
             "items": [

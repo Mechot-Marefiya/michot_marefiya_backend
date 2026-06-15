@@ -17722,6 +17722,10 @@ components:
           nullable: true
           title: Phone Number
           maxLength: 20
+        phone_verified_at:
+          type: string
+          format: date-time
+          nullable: true
         current_password:
           type: string
           writeOnly: true
@@ -20696,6 +20700,15 @@ components:
           nullable: true
           title: Phone Number
           maxLength: 20
+        phone_verified:
+          type: boolean
+          readOnly: true
+        phone_verified_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - phone_verified
     VerifyActionRequest:
       type: object
       properties:

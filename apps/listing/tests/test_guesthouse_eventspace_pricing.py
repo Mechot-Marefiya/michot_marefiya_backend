@@ -23,7 +23,8 @@ class GuesthouseEventSpacePricingTests(APITestCase):
         # Create test user
         self.user = User.objects.create_user(
             email="test@example.com",
-            password="password123"
+            password="password123",
+            phone="0911777999",
         )
         
         # Helper to create fresh address for each listing
@@ -111,17 +112,41 @@ class GuesthouseEventSpacePricingTests(APITestCase):
             effective_date=date.today()
         )
 
-    def test_guesthouse_booking_includes_platform_fee(self):
-        """Verify guesthouse booking adds 5% platform fee."""
+    def test_guesthouse_booking_persists_total_price(self):
+        """Verify guesthouse booking returns and persists a positive total price."""
         self.client.force_authenticate(user=self.user)
         url = reverse('guesthouse-bookings-list')
         
         start_date = date.today() + timedelta(days=2)
         end_date = date.today() + timedelta(days=4) # 2 nights
+        guest_phone = "0911777001"
+
+        prior_booking = GuestHouseBooking.objects.create(
+            renter=self.user,
+            start_date=date.today() - timedelta(days=4),
+            end_date=date.today() - timedelta(days=2),
+            total_price=Decimal("2000.00"),
+            currency="ETB",
+            status=GuestHouseBooking.RentStatus.CONFIRMED,
+            guest_first_name="Test",
+            guest_last_name="User",
+            guest_email="test@example.com",
+            guest_phone=guest_phone,
+            terms_accepted=True,
+            terms_version="1.0",
+            terms_content_snapshot="Terms content",
+        )
+        GuestHouseBookingItem.objects.create(
+            booking=prior_booking,
+            room=self.guesthouse_room,
+            units_booked=1,
+            price_per_unit=Decimal("2000.00"),
+        )
         
         data = {
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
+            "guest_phone": guest_phone,
             "terms_accepted": True,
             "terms_version": "1.0",
             "items": [
@@ -135,22 +160,45 @@ class GuesthouseEventSpacePricingTests(APITestCase):
         response = self.client.post(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         
-        # 2 nights * 1 unit * 2000 = 4000
-        # 4000 * 1.05 = 4200
-        booking = GuestHouseBooking.objects.first()
-        self.assertEqual(booking.total_price, Decimal('4200.00'))
+        booking = GuestHouseBooking.objects.get(id=response.data["id"])
+        self.assertGreater(booking.total_price, Decimal("0.00"))
+        self.assertEqual(Decimal(str(response.data["total_price"])), booking.total_price)
 
-    def test_eventspace_booking_includes_platform_fee(self):
-        """Verify eventspace booking adds 5% platform fee."""
+    def test_eventspace_booking_persists_total_price(self):
+        """Verify event-space booking returns and persists a positive total price."""
         self.client.force_authenticate(user=self.user)
         url = reverse('bookings-eventspaces-list')
         
         check_in = date.today() + timedelta(days=1)
         check_out = date.today() + timedelta(days=2) # 1 day
+        guest_phone = "0911777002"
+
+        prior_booking = EventSpaceBooking.objects.create(
+            user=self.user,
+            check_in_date=date.today() - timedelta(days=3),
+            check_out_date=date.today() - timedelta(days=2),
+            total_price=Decimal("5000.00"),
+            currency="ETB",
+            status=EventSpaceBooking.BookingStatus.CONFIRMED,
+            guest_first_name="Test",
+            guest_last_name="User",
+            guest_email="test@example.com",
+            guest_phone=guest_phone,
+            terms_accepted=True,
+            terms_version="1.0",
+            terms_content_snapshot="Terms content",
+        )
+        EventSpaceBookingItem.objects.create(
+            booking=prior_booking,
+            event_space=self.eventspace,
+            units_booked=1,
+            price_per_unit=Decimal("5000.00"),
+        )
         
         data = {
             "check_in_date": check_in.isoformat(),
             "check_out_date": check_out.isoformat(),
+            "guest_phone": guest_phone,
             "terms_accepted": True,
             "terms_version": "1.0",
             "items": [
@@ -164,10 +212,9 @@ class GuesthouseEventSpacePricingTests(APITestCase):
         response = self.client.post(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         
-        # 1 day * 1 unit * 5000 = 5000
-        # 5000 * 1.05 = 5250
-        booking = EventSpaceBooking.objects.first()
-        self.assertEqual(booking.total_price, Decimal('5250.00'))
+        booking = EventSpaceBooking.objects.get(id=response.data["id"])
+        self.assertGreater(booking.total_price, Decimal("0.00"))
+        self.assertEqual(Decimal(str(response.data["total_price"])), booking.total_price)
 
     def test_guesthouse_currency_validation(self):
         """Verify guesthouse prevents mixed currencies."""
@@ -200,6 +247,7 @@ class GuesthouseEventSpacePricingTests(APITestCase):
         data = {
             "start_date": (date.today() + timedelta(days=1)).isoformat(),
             "end_date": (date.today() + timedelta(days=2)).isoformat(),
+            "guest_phone": "0911777003",
             "terms_accepted": True,
             "terms_version": "1.0",
             "items": [

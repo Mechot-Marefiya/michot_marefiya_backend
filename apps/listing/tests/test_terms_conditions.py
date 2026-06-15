@@ -153,6 +153,7 @@ class TestTermsAPIIntegration:
             "check_in_date": date.today(),
             "check_out_date": str(date.today() + timedelta(days=1)),
             "items": [{"room": room.id, "units_booked": 1}],
+            "guest_phone": "0911000000",
             "terms_version": "1.0",
             # "terms_accepted" missing
         }
@@ -188,6 +189,7 @@ class TestTermsAPIIntegration:
             "check_in_date": date.today(),
             "check_out_date": str(date.today() + timedelta(days=1)),
             "items": [{"room": room.id, "units_booked": 1}],
+            "guest_phone": "0911000000",
             "terms_version": "1.1",
             "terms_accepted": True
         }
@@ -213,6 +215,7 @@ class TestTermsAPIIntegration:
             "check_in_date": date.today(),
             "check_out_date": str(date.today() + timedelta(days=1)),
             "items": [{"event_space": space.id, "units_booked": 1}],
+            "guest_phone": "0911000000",
             "terms_version": "1.0",
             "terms_accepted": False # Unaccepted
         }
