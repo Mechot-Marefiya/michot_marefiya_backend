@@ -643,3 +643,12 @@ Run
 ```
 docker compose exec api sh -lc "python manage.py migrate && python manage.py seed_data --clear --seed 20260616 --days 45"
 ```
+
+You will find the credential
+
+```
+admin@demo.michot / DemoPass123!
+guest1@demo.michot / DemoPass123!
+company1@demo.michot / DemoPass123!
+frontdesk1@demo.michot / DemoPass123!
+```
