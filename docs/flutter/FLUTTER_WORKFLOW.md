@@ -24,13 +24,10 @@ User types in Flutter:
 - Guest: can browse, save, search, and complete many flows without creating an account, but must use phone verification for sensitive guest actions
 - Registered user: has account-based access, profile, notifications, booking history, and payment-linked identity
 
-When API integration is needed, see `FLUTTER_API_GUIDE.md`:
-- `Authentication`
-- `Discovery And Search`
-- `Bookings`
-- `Payments`
-- `Favorites`
-- `Notifications`
+API note:
+- this file explains product behavior and business rules
+- use `schema.yaml` as the live endpoint contract
+- use `CODEBASE_MAP.md` for backend structure and auth expectations
 
 ## 2. Authentication Flows
 
@@ -40,7 +37,7 @@ Guests can:
 - browse public listings across all supported categories
 - open listing detail pages
 - use home feed, nearby discovery, search, suggestions, map pins, and viewport search
-- use address autocomplete and map-based discovery
+- use map-based discovery from public listing endpoints
 - save listings as guest favorites by phone identity
 - start guest booking flows
 - start guest contact-reveal flows for car sales and property sales
@@ -91,9 +88,9 @@ Business rules:
 - after each phone change there is a 7-day cooldown before another change
 - if guest history already exists for that phone, successful signup verification can link that history to the new account
 
-See `FLUTTER_API_GUIDE.md`:
-- `Authentication > Signup`
-- `Authentication > OTP Verification`
+Implementation reference:
+- `schema.yaml` auth endpoints
+- `CODEBASE_MAP.md > Authentication and Permissions`
 
 ### 2c. Login
 
@@ -125,9 +122,8 @@ What happens after successful login:
 - load user profile
 - load favorites, notifications, and booking-related state
 
-See `FLUTTER_API_GUIDE.md`:
-- `Authentication > Phone Password Login`
-- `Authentication > OTP Login`
+Implementation reference:
+- `schema.yaml` auth endpoints
 
 ### 2d. Token refresh
 
@@ -142,8 +138,8 @@ If refresh fails:
 
 Do not silently keep the user in a half-authenticated state.
 
-See `FLUTTER_API_GUIDE.md`:
-- `Authentication > Token Refresh`
+Implementation reference:
+- `schema.yaml` token endpoints
 
 ### 2e. Logout
 
@@ -153,8 +149,8 @@ Logout flow:
 - clear user-scoped cached state
 - call the server-side logout flow when available so refresh token blacklisting is preserved
 
-See `FLUTTER_API_GUIDE.md`:
-- `Authentication > Logout`
+Implementation reference:
+- `schema.yaml` logout endpoint
 
 ## 3. Listing Discovery
 
@@ -184,9 +180,8 @@ Business rules:
 - booking start dates are restricted by the forward-booking window
 - default forward window is 5 days unless the listing allows a different value
 
-See `FLUTTER_API_GUIDE.md`:
-- `Discovery And Search > Home Feed`
-- `Discovery And Search > Nearby Feed`
+Implementation reference:
+- `schema.yaml` listing feed and nearby endpoints
 
 ### 3b. Search
 
@@ -218,10 +213,8 @@ Important UX note:
 - the backend map/search layer is already provider-backed
 - Flutter should consume backend search responses, not talk directly to the maps provider
 
-See `FLUTTER_API_GUIDE.md`:
-- `Discovery And Search > Search`
-- `Discovery And Search > Suggestions`
-- `Discovery And Search > Radius Filters`
+Implementation reference:
+- `schema.yaml` search, suggestions, and nearby endpoints
 
 ### 3c. Map view
 
@@ -231,7 +224,7 @@ Backend responsibilities:
 - provide listing coordinates
 - provide light map-pin payloads
 - provide viewport-based listing results
-- provide place autocomplete and place-detail resolution through backend APIs
+- provide place autocomplete and place-detail resolution through backend APIs for authenticated users
 
 Map behavior:
 - listings with coordinates appear on the map
@@ -242,12 +235,11 @@ Map behavior:
 Important product rule:
 - the backend is the source of truth for map discovery
 - Flutter should not compute listing proximity on its own
+- public discovery endpoints can power guest map browsing
+- backend place-helper endpoints are currently authenticated, so guest address search should rely on public listing search until that contract changes
 
-See `FLUTTER_API_GUIDE.md`:
-- `Maps > Map Pins`
-- `Maps > Within Bounds`
-- `Maps > Autocomplete`
-- `Maps > Place Detail`
+Implementation reference:
+- `schema.yaml` map and listing discovery endpoints
 
 ### 3d. Listing detail
 
@@ -276,10 +268,8 @@ Property rental tax:
 - tax appears only where applicable
 - non-applicable flows should treat tax as not applicable, not as waived
 
-See `FLUTTER_API_GUIDE.md`:
-- `Listings > Detail`
-- `Bookings > Price Preview`
-- `Payments > Tax Breakdown`
+Implementation reference:
+- `schema.yaml` listing detail, price preview, and payment endpoints
 
 ## 4. Booking Flows
 
@@ -300,9 +290,8 @@ Important business rules across booking types:
 - no refunds are supported
 - cancellation releases availability when allowed
 
-See `FLUTTER_API_GUIDE.md`:
-- `Bookings > Shared Rules`
-- `Payments > Booking Payment`
+Implementation reference:
+- `schema.yaml` booking and payment endpoints
 
 ### 4a. Hotel booking
 
@@ -356,12 +345,12 @@ Tax rule:
 ### 4d. Booking management
 
 Registered-user expectation:
-- users should have a clear “My Bookings” area by booking type or unified booking history
+- users should have a clear "My Bookings" area by booking type or unified booking history
 
 Guest expectation:
 - guest flows are supported, but access is verified by phone
 - do not assume every guest history screen is the same across all listing families
-- where guest self-service exists, Flutter should follow the verified-phone flow from the API guide
+- where guest self-service exists, Flutter should follow the verified-phone flow exposed by the backend contract
 
 Cancellation:
 - allowed only when the backend permits it
@@ -378,17 +367,14 @@ Car-rental note:
 - car rentals also support extension and reschedule-related flows
 - added days only take effect after extension payment is confirmed
 
-See `FLUTTER_API_GUIDE.md`:
-- `Bookings > My Bookings`
-- `Bookings > Guest Access`
-- `Bookings > Cancellation`
-- `Car Rentals > Extensions`
+Implementation reference:
+- `schema.yaml` booking history, guest lookup, cancellation, and car-rental extension endpoints
 
 ## 5. Car Sales Contact Reveal Flow
 
 This is not a booking.
 
-The platform only sells access to the seller’s contact details.
+The platform only sells access to the seller's contact details.
 
 User journey:
 1. User opens a car-sale listing
@@ -412,9 +398,8 @@ Reveal states users may encounter:
 - paid and revealed
 - expired
 
-See `FLUTTER_API_GUIDE.md`:
-- `Sales Reveal > Car Sales`
-- `Payments > Contact Reveal`
+Implementation reference:
+- `schema.yaml` car-sales reveal and payment endpoints
 
 ## 6. Property Sales Contact Reveal Flow
 
@@ -434,9 +419,8 @@ Business rules:
 - contact never appears before payment verification
 - expired reveal requests must be restarted
 
-See `FLUTTER_API_GUIDE.md`:
-- `Sales Reveal > Property Sales`
-- `Payments > Contact Reveal`
+Implementation reference:
+- `schema.yaml` property-sales reveal and payment endpoints
 
 ## 7. Payment Flow (Chapa)
 
@@ -481,11 +465,8 @@ Chapa test mode guidance:
 - test mode still sends webhooks and other provider-side events
 - never assume live behavior without final live-key verification
 
-See `FLUTTER_API_GUIDE.md`:
-- `Payments > Initiate`
-- `Payments > Verify`
-- `Payments > Public Verify`
-- `Payments > Receipt`
+Implementation reference:
+- `schema.yaml` payment initiate, verify, webhook, and receipt fields
 
 ## 8. OTP Flow (Detailed)
 
@@ -522,10 +503,8 @@ UX rule:
 - never reveal whether the code was wrong, expired, or otherwise invalid in too much detail
 - keep the error generic and actionable
 
-See `FLUTTER_API_GUIDE.md`:
-- `Authentication > OTP`
-- `Guest Booking OTP`
-- `Guest Reveal OTP`
+Implementation reference:
+- `schema.yaml` OTP request and verify endpoints
 
 ## 9. User Profile
 
@@ -549,10 +528,8 @@ Location permission:
 Guest-to-user conversion:
 - once a guest registers and verifies the same phone, their guest booking history and guest favorites can be linked to the new account
 
-See `FLUTTER_API_GUIDE.md`:
-- `Profile`
-- `Location`
-- `Guest Conversion`
+Implementation reference:
+- `schema.yaml` profile, location, and guest-conversion endpoints
 
 ## 10. Promotions and Ads
 
@@ -574,9 +551,8 @@ Rendering rule:
 Tracking:
 - impressions and clicks are tracked through backend-supported promotion events
 
-See `FLUTTER_API_GUIDE.md`:
-- `Promotions > Placements`
-- `Promotions > Tracking`
+Implementation reference:
+- `schema.yaml` promotions endpoints
 
 ## 11. Error Handling Rules
 
@@ -598,10 +574,8 @@ OTP-specific handling:
 - always show generic OTP failure messaging
 - allow retry or resend when cooldown/expiry rules permit
 
-See `FLUTTER_API_GUIDE.md`:
-- `Errors`
-- `Payments > Error States`
-- `OTP > Error Handling`
+Implementation reference:
+- `schema.yaml` response schemas and error statuses
 
 ## 12. Offline Behavior
 
@@ -649,8 +623,8 @@ Flutter should treat notifications as:
 - a transport for transactional state changes
 - a deep-link opportunity back into bookings, payments, and listing detail
 
-See `FLUTTER_API_GUIDE.md`:
-- `Notifications`
+Implementation reference:
+- `schema.yaml` notifications endpoints
 
 ## 14. Notes For Flutter
 

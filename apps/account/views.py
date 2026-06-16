@@ -15,7 +15,7 @@ from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from django_filters.rest_framework import DjangoFilterBackend
-from drf_spectacular.utils import extend_schema, OpenApiTypes, OpenApiExample
+from drf_spectacular.utils import extend_schema, OpenApiTypes, OpenApiExample, OpenApiResponse
 from apps.listing.models import Booking, RoomListing, AddonOffering
 from apps.listing.services import StayAvailabilityService, verify_listing, unverify_listing
 from apps.account.docs.schemas import HotelProfileDocSerializer
@@ -63,7 +63,11 @@ from apps.account.serializers import (
     IndividualOwnerRegistrationSerializer,
     OtpRequestSerializer,
     OtpResponseSerializer,
+    OtpVerifyResponseSerializer,
     OtpVerifySerializer,
+    LogoutRequestSerializer,
+    PhoneTokenObtainPairRequestSerializer,
+    PhoneTokenObtainPairResponseSerializer,
     UserLocationSerializer,
     OwnerComplianceAgreementCreateSerializer,
     OwnerComplianceAgreementPatchSerializer,
@@ -107,8 +111,9 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     @extend_schema(
         summary="Obtain JWT Token",
         description="Obtain JWT tokens with phone and password.",
+        request=PhoneTokenObtainPairRequestSerializer,
         responses={
-            200: CustomTokenObtainPairSerializer,
+            200: PhoneTokenObtainPairResponseSerializer,
             401: OpenApiTypes.OBJECT
         }
     )
@@ -175,7 +180,7 @@ class OtpVerifyView(APIView):
         summary="Verify phone OTP",
         description="Verify a phone OTP. Login challenges return JWT access and refresh tokens.",
         request=OtpVerifySerializer,
-        responses={200: OpenApiTypes.OBJECT, 400: OpenApiTypes.OBJECT},
+        responses={200: OtpVerifyResponseSerializer, 400: OpenApiTypes.OBJECT},
     )
     def post(self, request):
         serializer = OtpVerifySerializer(data=request.data)
@@ -254,8 +259,8 @@ class LogoutView(APIView):
     @extend_schema(
         summary="Logout (Blacklist token)",
         description="Blacklist a refresh token to end the session.",
-        request=None,
-        responses={200: OpenApiTypes.OBJECT}
+        request=LogoutRequestSerializer,
+        responses={200: OpenApiResponse(description="Refresh token blacklisted."), 400: OpenApiTypes.OBJECT},
     )
     def post(self, request):
         try:
@@ -264,7 +269,7 @@ class LogoutView(APIView):
             token.blacklist()
             return Response(status=status.HTTP_200_OK)
         except Exception:
-            return Response(status=status.HTTP_400_BAD_REQUEST)
+            return Response({"detail": "Invalid refresh token."}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @extend_schema(tags=["Account Management"])

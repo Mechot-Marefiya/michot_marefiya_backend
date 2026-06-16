@@ -176,6 +176,28 @@ class PaymentTransactionSerializer(serializers.ModelSerializer):
         return get_chapa_receipt_url(obj)
 
 
+class PaymentVerificationResponseSerializer(serializers.Serializer):
+    id = serializers.UUIDField(required=False)
+    tx_ref = serializers.CharField(required=False)
+    booking = serializers.UUIDField(required=False, allow_null=True)
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    currency = serializers.CharField(required=False)
+    status = serializers.CharField(required=False)
+    payment_method = serializers.CharField(required=False, allow_null=True)
+    chapa_transaction_id = serializers.CharField(required=False, allow_null=True)
+    receipt_url = serializers.URLField(required=False, allow_null=True)
+    owner_price = serializers.CharField(required=False, allow_null=True)
+    service_fee = serializers.CharField(required=False, allow_null=True)
+    tax_amount = serializers.DecimalField(max_digits=10, decimal_places=2, required=False, allow_null=True)
+    tax_rate = serializers.DecimalField(max_digits=5, decimal_places=4, required=False, allow_null=True)
+    grand_total = serializers.CharField(required=False, allow_null=True)
+    tax_liability_status = serializers.CharField(required=False, allow_null=True)
+    metadata = serializers.DictField(required=False)
+    created_at = serializers.DateTimeField(required=False)
+    updated_at = serializers.DateTimeField(required=False)
+    chapa_verification = serializers.DictField()
+
+
 class ChapaCallbackSerializer(serializers.Serializer):
     tx_ref = serializers.CharField(required=False)
     trx_ref = serializers.CharField(required=False)

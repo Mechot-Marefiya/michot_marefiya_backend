@@ -1843,11 +1843,25 @@ paths:
       summary: Logout (Blacklist token)
       tags:
       - Identity & Auth
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LogoutRequestRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/LogoutRequestRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/LogoutRequestRequest'
+        required: true
       security:
       - jwtAuth: []
       - {}
       responses:
         '200':
+          description: Refresh token blacklisted.
+        '400':
           content:
             application/json:
               schema:
@@ -1934,8 +1948,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/OtpVerifyResponse'
           description: ''
         '400':
           content:
@@ -1955,19 +1968,23 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CustomTokenObtainPairRequest'
+              $ref: '#/components/schemas/PhoneTokenObtainPairRequestRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/CustomTokenObtainPairRequest'
+              $ref: '#/components/schemas/PhoneTokenObtainPairRequestRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/CustomTokenObtainPairRequest'
+              $ref: '#/components/schemas/PhoneTokenObtainPairRequestRequest'
         required: true
       security:
       - {}
       responses:
         '200':
-          description: No response body
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhoneTokenObtainPairResponse'
+          description: ''
         '401':
           content:
             application/json:
@@ -9275,8 +9292,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PaymentVerificationResponse'
           description: ''
         '400':
           content:
@@ -9307,8 +9323,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/PaymentVerificationResponse'
           description: ''
         '400':
           content:
@@ -12686,21 +12701,6 @@ components:
       required:
       - code
       - name
-    CustomTokenObtainPairRequest:
-      type: object
-      properties:
-        email:
-          type: string
-          writeOnly: true
-        phone:
-          type: string
-          writeOnly: true
-        password:
-          type: string
-          writeOnly: true
-          minLength: 1
-      required:
-      - password
     DiscoveryListing:
       type: object
       properties:
@@ -14893,6 +14893,25 @@ components:
       description: |-
         * `sale` - For Sale
         * `rent` - For Rent
+    LoginProfileSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+      required:
+      - id
+      - name
+    LogoutRequestRequest:
+      type: object
+      properties:
+        refresh:
+          type: string
+          minLength: 1
+      required:
+      - refresh
     MapAddressComponents:
       type: object
       properties:
@@ -15342,6 +15361,32 @@ components:
           default: login
       required:
       - code
+    OtpVerifyResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        purpose:
+          type: string
+        user:
+          type: object
+          additionalProperties: {}
+          nullable: true
+        access:
+          type: string
+        refresh:
+          type: string
+        role:
+          type: string
+          nullable: true
+        guest_verification_token:
+          type: string
+        guest_history_transfer:
+          type: object
+          additionalProperties: {}
+      required:
+      - purpose
+      - success
     Overview:
       type: object
       properties:
@@ -17920,6 +17965,72 @@ components:
         * `success` - Success
         * `failed` - Failed
         * `cancelled` - Cancelled
+    PaymentVerificationResponse:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tx_ref:
+          type: string
+        booking:
+          type: string
+          format: uuid
+          nullable: true
+        amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+        currency:
+          type: string
+        status:
+          type: string
+        payment_method:
+          type: string
+          nullable: true
+        chapa_transaction_id:
+          type: string
+          nullable: true
+        receipt_url:
+          type: string
+          format: uri
+          nullable: true
+        owner_price:
+          type: string
+          nullable: true
+        service_fee:
+          type: string
+          nullable: true
+        tax_amount:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        tax_rate:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,1}(?:\.\d{0,4})?$
+          nullable: true
+        grand_total:
+          type: string
+          nullable: true
+        tax_liability_status:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties: {}
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        chapa_verification:
+          type: object
+          additionalProperties: {}
+      required:
+      - chapa_verification
     PayoutFailureMetrics:
       type: object
       properties:
@@ -17952,6 +18063,44 @@ components:
         * `paid` - Paid (Split Success)
         * `failed` - Failed (Split Error)
         * `na` - Not Applicable
+    PhoneTokenObtainPairRequestRequest:
+      type: object
+      properties:
+        phone:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          writeOnly: true
+          minLength: 1
+      required:
+      - password
+      - phone
+    PhoneTokenObtainPairResponse:
+      type: object
+      properties:
+        refresh:
+          type: string
+        access:
+          type: string
+        role:
+          type: string
+          nullable: true
+        company:
+          allOf:
+          - $ref: '#/components/schemas/LoginProfileSummary'
+          nullable: true
+        individual_owner:
+          allOf:
+          - $ref: '#/components/schemas/LoginProfileSummary'
+          nullable: true
+        workspace:
+          allOf:
+          - $ref: '#/components/schemas/WorkspaceInfo'
+          nullable: true
+      required:
+      - access
+      - refresh
     PlaceDetail:
       type: object
       properties:
@@ -20085,6 +20234,7 @@ components:
         workspace:
           allOf:
           - $ref: '#/components/schemas/WorkspaceInfo'
+          nullable: true
           readOnly: true
         created_at:
           type: string
@@ -20624,9 +20774,11 @@ components:
           allOf:
           - $ref: '#/components/schemas/Role'
           readOnly: true
+          nullable: true
         workspace:
           allOf:
           - $ref: '#/components/schemas/WorkspaceInfo'
+          nullable: true
           readOnly: true
       required:
       - email

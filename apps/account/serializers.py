@@ -94,14 +94,18 @@ class PlaceResolutionMixin(metaclass=serializers.SerializerMetaclass):
     def _pop_skip_async_geocoding(self, validated_data) -> bool:
         return bool(validated_data.pop("_skip_async_geocoding", False))
 
-WORKSPACE_INFO_SCHEMA = inline_serializer(
-    name="WorkspaceInfo",
-    fields={
-        "id": serializers.CharField(),
-        "name": serializers.CharField(),
-        "workspace_type": serializers.CharField(allow_null=True),
-    },
-)
+class WorkspaceInfoSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    name = serializers.CharField()
+    workspace_type = serializers.CharField(allow_null=True)
+
+
+class LoginProfileSummarySerializer(serializers.Serializer):
+    id = serializers.UUIDField()
+    name = serializers.CharField()
+
+
+WORKSPACE_INFO_SCHEMA = WorkspaceInfoSerializer(allow_null=True)
 
 
 class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
@@ -194,6 +198,24 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             data["role"] = None
 
         return data
+
+
+class PhoneTokenObtainPairRequestSerializer(serializers.Serializer):
+    phone = serializers.CharField()
+    password = serializers.CharField(write_only=True)
+
+
+class PhoneTokenObtainPairResponseSerializer(serializers.Serializer):
+    refresh = serializers.CharField()
+    access = serializers.CharField()
+    role = serializers.CharField(required=False, allow_null=True)
+    company = LoginProfileSummarySerializer(required=False, allow_null=True)
+    individual_owner = LoginProfileSummarySerializer(required=False, allow_null=True)
+    workspace = WorkspaceInfoSerializer(required=False, allow_null=True)
+
+
+class LogoutRequestSerializer(serializers.Serializer):
+    refresh = serializers.CharField()
 
 
 class StaffResponseSerializer(serializers.ModelSerializer):
@@ -451,7 +473,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserResponseSerializer(serializers.ModelSerializer):
-    role = RoleSerializer(read_only=True)
+    role = RoleSerializer(read_only=True, allow_null=True)
     workspace = serializers.SerializerMethodField()
     phone_verified = serializers.BooleanField(read_only=True)
 
@@ -1574,6 +1596,17 @@ class OtpResponseSerializer(serializers.Serializer):
     expires_at = serializers.DateTimeField()
     cooldown_seconds = serializers.IntegerField()
     phone = serializers.CharField()
+
+
+class OtpVerifyResponseSerializer(serializers.Serializer):
+    success = serializers.BooleanField()
+    purpose = serializers.CharField()
+    user = serializers.DictField(required=False, allow_null=True)
+    access = serializers.CharField(required=False)
+    refresh = serializers.CharField(required=False)
+    role = serializers.CharField(required=False, allow_null=True)
+    guest_verification_token = serializers.CharField(required=False)
+    guest_history_transfer = serializers.DictField(required=False)
 
 
 class OtpVerifySerializer(serializers.Serializer):

@@ -22,6 +22,7 @@ from .serializers import (
     PaymentInitializeSerializer, 
     PaymentTransactionSerializer, 
     PaymentInitializeResponseSerializer,
+    PaymentVerificationResponseSerializer,
     ChapaCallbackSerializer,
     ChapaWebhookSerializer,
     ChapaSubaccountCreateSerializer,
@@ -579,7 +580,7 @@ def chapa_webhook(request):
     otherwise returns only the Chapa verification result.
     """,
     responses={
-        200: OpenApiTypes.OBJECT,
+        200: PaymentVerificationResponseSerializer,
         400: OpenApiTypes.OBJECT,
         403: OpenApiTypes.OBJECT
     }
@@ -622,7 +623,7 @@ def verify_payment(request, tx_ref):
     summary="Publicly verify payment status",
     description="Verify the status of a payment transaction without authentication.",
     responses={
-        200: OpenApiTypes.OBJECT,
+        200: PaymentVerificationResponseSerializer,
         400: OpenApiTypes.OBJECT
     }
 )

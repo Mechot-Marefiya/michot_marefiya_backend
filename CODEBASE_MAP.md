@@ -1,586 +1,799 @@
-# CODEBASE_MAP
+﻿# CODEBASE_MAP
+
+Last updated: 2026-06-15
+
+This map was rebuilt from the live codebase and cross-checked against `schema.yaml`, `AGENT_TASKS.md`, `API_CONTRACT_CHANGELOG.md`, and `APP_POTENTIAL_CHANGE.md`.
+
+Phase labels in this document are normalized as:
+- `original`: baseline code before the later task waves
+- `Phase 2`: auth, booking, compliance, sales connector, and admin/payment hardening tasks
+- `Phase 3`: promotions, maps/discovery, Geoapify migration, and later Chapa expansion work
 
 ## 1. Django Apps
 
-### Framework And Third-Party Apps In `INSTALLED_APPS`
-- `jazzmin`: admin UI theme/customization only; no local models, serializers, views, urls, signals, tasks, or permissions.
-- `django.contrib.admin`: Django admin app; no local project code.
-- `django.contrib.auth`: Django auth framework; no local project code.
-- `django.contrib.contenttypes`: content type framework used for generic relations throughout the app.
-- `django.contrib.sessions`: Django sessions framework; no explicit custom session configuration found in repo.
-- `django.contrib.messages`: Django messages framework; no local project code.
-- `django.contrib.staticfiles`: static file handling; no local project code.
-- `rest_framework`: DRF runtime and API primitives.
-- `rest_framework_simplejwt`: JWT auth package.
-- `rest_framework_simplejwt.token_blacklist`: refresh token blacklisting support.
-- `drf_spectacular`: OpenAPI schema generation and Swagger/ReDoc UI.
-- `corsheaders`: CORS middleware support.
+### Framework and third-party apps
+- `jazzmin`: Django admin theming only.
+- `django.contrib.admin`: admin site.
+- `django.contrib.auth`: auth framework.
+- `django.contrib.contenttypes`: generic relations used across favorites, payments, images, terms, promotions.
+- `django.contrib.sessions`, `messages`, `staticfiles`: standard Django infrastructure.
+- `rest_framework`: DRF runtime.
+- `rest_framework_simplejwt` and `token_blacklist`: JWT auth and refresh-token rotation/blacklisting.
+- `drf_spectacular`: OpenAPI schema generation.
+- `corsheaders`: CORS middleware.
 
 ### `apps.account`
-- Purpose: identity, JWT auth, user profiles, company onboarding/approval, individual owner onboarding, hotel profile management, staff workspace assignment, password reset, and email verification.
+- Purpose: user identity, phone-first OTP auth, company and owner profiles, hotel profiles, staff, agreements, and location/profile utilities.
 - Models:
-  - `Role`: fields `name`, `code`, `parent` FK to self; constraint `roles_code_idx`; no custom manager.
-  - `User`: custom auth user with `email` as `USERNAME_FIELD`; fields `email`, `phone`, `role` FK to `Role`, `company` FK to `CompanyProfile`, `individual_owner` FK to `IndividualOwnerProfile`, generic workspace via `workspace_content_type`/`workspace_object_id` and `GenericForeignKey workspace`, inherited `first_name`, `last_name`, `is_active`, `is_staff`, etc.; custom manager `CustomUserManager`; constraint `user_has_at_most_one_employer` is intended to limit employment links; ordering `-created_at`.
-  - `ListingImage`: generic image model with `content_type`, `object_id`, `content_object` GFK, `image`, `alt_text`, `is_primary`; used by listing and account-facing upload flows; no custom manager.
-  - `CompanyProfile`: `user` OneToOne to `AUTH_USER_MODEL`, `name`, `phone`, `logo`, `license`, `category`, `tin`, `business_license_number`, `description`, `address` OneToOne to `Address`, `status`, `approved_at`, `approved_by` FK to user, `rejection_reason`, `chapa_subaccount_id`; property `is_approved`.
-  - `IndividualOwnerProfile`: `first_name`, `last_name`, `address` OneToOne to `Address`, `phone` unique, `national_id_number`, `chapa_subaccount_id`.
-  - `HotelProfile`: `company` FK to `CompanyProfile`, `name`, `description`, `phone`, `website`, `logo`, `license`, `address` OneToOne to `Address` nullable, `images` `GenericRelation` to `ListingImage`, `stars`, `facilities` M2M to `Facility`, `featured`.
+  - `Role`: `name CharField`, `code CharField(unique constraint)`, `parent FK self`.
+  - `User`: custom auth user with `email EmailField(unique)`, `phone CharField`, `phone_verified_at DateTimeField`, `phone_change_count PositiveSmallIntegerField`, `phone_last_changed_at DateTimeField`, `last_known_lat DecimalField`, `last_known_lng DecimalField`, `location_updated_at DateTimeField`, `location_permission_granted BooleanField`, `role FK Role`, `company FK CompanyProfile`, `individual_owner FK IndividualOwnerProfile`, generic `workspace_content_type/workspace_object_id/workspace`. Uses `CustomUserManager`. Enforces at-most-one employer.
+  - `OtpChallenge`: `user FK User nullable`, `phone`, `purpose`, `code_hash`, `expires_at`, `consumed_at`, `attempts`, `max_attempts`, `sent_at`. Indexed by phone/purpose and user/purpose.
+  - `ListingImage`: generic image with `content_type/object_id/content_object`, `image ImageField`, `alt_text`, `is_primary`.
+  - `CompanyProfile`: `user OneToOne`, `name`, `phone`, `logo`, `license`, `category`, `tin`, `business_license_number`, `description`, `address OneToOne Address`, `status`, `approved_at`, `approved_by FK User`, `rejection_reason`, `chapa_subaccount_id`, `split_type`, `split_value`, `split_config_active`.
+  - `IndividualOwnerProfile`: `first_name`, `last_name`, `address OneToOne Address`, `phone unique`, `national_id_number`, `chapa_subaccount_id`, `split_type`, `split_value`, `split_config_active`.
+  - `OwnerComplianceAgreement`: `owner FK IndividualOwnerProfile`, `status`, `signed_at`, `signed_by_admin FK User`, `agreement_version`, `note`.
+  - `HotelProfile`: inherits `GeoLocatedModel`; `company FK CompanyProfile`, `name`, `description`, `phone`, `website`, `logo`, `license`, `address OneToOne Address`, generic `images`, `is_active`, `is_verified`, `verified_at`, `verified_by FK User`, `verification_note`, `stars`, `facilities M2M Facility`, `featured`.
 - Serializers:
-  - `CustomTokenObtainPairSerializer`: extends JWT login payload with `role`, `company`, `workspace`, and `individual_owner` blocks when applicable.
-  - `StaffResponseSerializer`: exposes `id`, `email`, `first_name`, `last_name`, `role`, `workspace`, `created_at`; nested workspace is a computed object with `id`, `name`, `workspace_type`.
-  - `StaffCreateSerializer`: accepts `email`, `first_name`, `last_name`, `workspace_id`, `workspace_type`; validates workspace ownership and creates a front-desk user with generated password.
-  - `ListingImageSerializer`: exposes `image`, `alt_text`.
-  - `RoleSerializer`: exposes `id`, `name`, `code`, `created_at`, `updated_at`.
-  - `UserSerializer`: signup serializer exposing `email`, `password`, `confirm_password`, `first_name`, `last_name`, `phone`; returns `UserResponseSerializer` on representation.
-  - `UserResponseSerializer`: exposes `id`, `email`, `first_name`, `last_name`, `phone`, `is_active`, nested `role`, computed `workspace`.
-  - `UserUpdateSerializer`: exposes `email`, `first_name`, `last_name`, `phone`, `current_password`; returns `UserResponseSerializer`.
-  - `ChangePasswordSerializer`: accepts `current_password`, `new_password`, `confirm_password`.
-  - `PasswordResetSerializer`: accepts `email`.
-  - `PasswordResetConfirmSerializer`: accepts `uid`, `token`, `new_password`, `confirm_password`.
-  - `VerifyEmailSerializer`: accepts `uid`, `token`.
-  - `VerifyEmailChangeSerializer`: accepts `uid`, `email`.
-  - `CompanyProfileResponseSerializer`: nested `AddressSerializer`, `UserResponseSerializer`, `approved_by`; exposes `id`, `user`, `status`, `approved_at`, `approved_by`, `name`, `phone`, `category`, `description`, `address`, `tin`, `business_license_number`.
-  - `CompanyProfileSerializer`: writable multipart serializer with `email`, `license`, `name`, `address`, `phone`, `logo`, `category`, `tin`, `description`, `business_license_number`.
-  - `CompanyApplicationSerializer`: writable multipart serializer with `name`, `license`, `address`, `phone`, `logo`, `category`, `description`.
-  - `CompanyRegistrationSerializer`: signup flow with `email`, `first_name`, `last_name`, `password`, `confirm_password`, `name`, `license`, `logo`, `category`, `description`, `phone`, `tin`, `business_license_number`, `address`.
-  - `IndividualOwnerProfileResponseSerializer`: exposes `id`, `national_id_number`, `first_name`, `last_name`, `address`, `phone`.
-  - `IndividualOwnerProfileSerializer`: writable profile serializer for `first_name`, `last_name`, `address`, `phone`, `national_id_number`.
-  - `IndividualOwnerRegistrationSerializer`: signup flow with `email`, `password`, `confirm_password`, `first_name`, `last_name`, `phone`, `national_id_number`, `address`.
-  - `HotelProfileResponseSerializer`: nested `CompanyProfileResponseSerializer`, `ListingImageSerializer(many=True)`, `FacilityResponseSerializer(many=True)`; exposes `id`, company-derived fields, `logo`, `stars`, `featured`, `facilities`, `is_favorite`.
-  - `HotelProfileSerializer`: writable multipart serializer with `name`, `description`, `phone`, `website`, `address`, `license`, `logo`, `stars`, `featured`, `facilities`, `images`.
-  - `HotelRoomAvailabilityResponseSerializer`: exposes `room_id`, `room_name`, `available_units`.
-  - `HotelRoomAvailabilitySerializer`: accepts `check_in_date`, `check_out_date`.
+  - Auth and OTP: `CustomTokenObtainPairSerializer`, `OtpRequestSerializer`, `OtpResponseSerializer`, `OtpVerifySerializer`.
+  - User: `UserSerializer` writes `email/password/confirm_password/first_name/last_name/phone`; `UserResponseSerializer` exposes identity, role, workspace, phone verification data; `UserUpdateSerializer`; `ChangePasswordSerializer`; `GuestBookingConversionSerializer`.
+  - Role and staff: `RoleSerializer`, `StaffResponseSerializer`, `StaffCreateSerializer`.
+  - Profiles: `CompanyProfileSerializer`, `CompanyProfileResponseSerializer`, `CompanyApplicationSerializer`, `CompanyRegistrationSerializer`, `IndividualOwnerProfileSerializer`, `IndividualOwnerProfileResponseSerializer`, `IndividualOwnerRegistrationSerializer`, `HotelProfileSerializer`, `HotelProfileResponseSerializer`, `AgreementStatusSerializer`, `OwnerComplianceAgreement*` serializers.
+  - Utility: `ListingImageSerializer`, `UserLocationSerializer`, password-reset and email-verification serializers.
+  - Writable vs read-only: response serializers are read-heavy; creation/update serializers preserve existing API shapes while resolving place/address data and phone-first defaults.
 - Views:
-  - `CustomTokenObtainPairView`: `POST`; `AllowAny`; throttled by `auth_login`; serializer `CustomTokenObtainPairSerializer`.
-  - `CustomTokenRefreshView`: `POST`; `AllowAny`; throttled by `token_refresh`.
-  - `LogoutView`: `POST`; `AllowAny`; blacklists refresh token payload.
-  - `StaffViewSet`: `GET` list/retrieve, `POST` create, `DELETE` destroy; custom action `available_workspaces`; permission `IsCompanyOwner`.
-  - `MeView`: `GET`; `IsAuthenticated`; legacy current-user endpoint.
-  - `UserViewSet`: list/retrieve/create/update/partial_update/destroy plus actions `me`, `me/change-password`, `{pk}/change-password`; permissions vary by action.
-  - `CompanyProfileViewSet`: list/retrieve/create/update/partial_update/destroy plus actions `apply`, `{pk}/approve`, `{pk}/reject`; creation public, management actions `IsCompanyOwner`/`IsAdmin`.
-  - `IndividualOwnerProfileViewSet`: list/retrieve/create/update/partial_update/destroy; create public, read public, management actions `IsAdmin`.
-  - `HotelProfileViewSet`: list/retrieve/create/update/partial_update/destroy plus actions `{pk}/check_availability`, `featured`, `{pk}/addons`; public read, owner-only write for non-read actions, and owner-only addons access.
-  - `PasswordResetView`: `POST`; `AllowAny`.
-  - `PasswordResetConfirmView`: `POST`; `AllowAny`.
-  - `VerifyEmailView`: `POST`; `AllowAny`.
-  - `VerifyEmailChangeView`: `POST`; `AllowAny`.
+  - Auth views: `CustomTokenObtainPairView`, `CustomTokenRefreshView`, `LogoutView`, `OtpRequestView`, `OtpVerifyView`, `MeView`.
+  - API views: `UserLocationView`, `PasswordResetView`, `PasswordResetConfirmView`, `VerifyEmailView`, `VerifyEmailChangeView`, `OwnerProfileAgreementView`.
+  - ViewSets: `UserViewSet`, `CompanyProfileViewSet`, `IndividualOwnerProfileViewSet`, `HotelProfileViewSet`, `StaffViewSet`, `RoleViewSet`.
+  - Custom actions include `users/me`, `users/me/change-password`, `users/me/convert-guest-bookings`, `companies/apply`, `companies/{pk}/approve`, `companies/{pk}/reject`, `individual-owners/{pk}/agreement`, `agreement/sign`, `agreement/revoke`, `hotels/{pk}/check_availability`, `featured`, `verify`, `unverify`, `activate`, `deactivate`, `addons`, and `staff/available-workspaces`.
 - URLs:
-  - `POST /api/v1/auth/token/` -> `CustomTokenObtainPairView.post` -> `CustomTokenObtainPairSerializer`.
-  - `POST /api/v1/auth/token/refresh/` -> `CustomTokenRefreshView.post` -> SimpleJWT refresh serializer.
-  - `POST /api/v1/auth/logout/` -> `LogoutView.post` -> raw refresh-token blacklist logic.
-  - `GET /api/v1/auth/me/` -> `MeView.get` -> `UserResponseSerializer`.
-  - `GET/POST /api/v1/account/users/` and `GET/PATCH/DELETE /api/v1/account/users/{pk}/` -> `UserViewSet`.
-  - `GET /api/v1/account/users/me/`, `PATCH /api/v1/account/users/me/`, `PUT /api/v1/account/users/me/`, `DELETE /api/v1/account/users/me/`, `POST /api/v1/account/users/me/change-password/`, `POST /api/v1/account/users/{pk}/change-password/` -> `UserViewSet` actions.
-  - `GET/POST /api/v1/account/companies/` and `GET/PATCH/DELETE /api/v1/account/companies/{pk}/` -> `CompanyProfileViewSet`.
-  - `POST /api/v1/account/companies/apply/`, `POST /api/v1/account/companies/{pk}/approve/`, `POST /api/v1/account/companies/{pk}/reject/`.
-  - `GET/POST /api/v1/account/hotels/` and `GET/PATCH/DELETE /api/v1/account/hotels/{pk}/`.
-  - `GET /api/v1/account/hotels/{pk}/check_availability/`, `GET /api/v1/account/hotels/featured/`, `GET /api/v1/account/hotels/{pk}/addons/`.
-  - `GET/POST /api/v1/account/individual-owners/` and `GET/PATCH/DELETE /api/v1/account/individual-owners/{pk}/`.
-  - `GET/POST /api/v1/account/staff/` and `GET/DELETE /api/v1/account/staff/{pk}/`.
-  - `GET /api/v1/account/staff/available-workspaces/`.
-  - `POST /api/v1/account/password-reset/`, `POST /api/v1/account/password-reset/confirm/`, `POST /api/v1/account/verify-email/`, `POST /api/v1/account/verify-email-change/`.
-- Signals: no `signals.py` file found for this app.
-- Services / Utils:
-  - `ImageCreationService.create_images(content_object, images_payload)`: bulk-creates `ListingImage` rows and assigns `is_primary` when the payload object carries that attribute.
+  - Mounted under `/api/v1/account/`.
+  - Auth endpoints mounted in `config/urls.py` under `/api/v1/auth/`.
 
 ### `apps.core`
-- Purpose: shared abstract model, address/facility/currency models, currency conversion helpers, email helpers, core utilities, and utility API endpoints.
+- Purpose: shared base models, addresses, geo fields, facilities, currency rates, conversion, and shared utilities.
 - Models:
-  - `AbstractBaseModel`: abstract UUID primary key plus `created_at` and `updated_at`.
-  - `Address`: `street_line1`, `country`, `city`, `sub_city`, `state`, `postal_code`, `latitude`, `longitude`, `google_place_id`; used by company, hotel, guesthouse, room, property, and owner records.
-  - `Facility`: `name` unique, `icon`.
-  - `CurrencyRate`: `base`, `target`, `rate`, `date`; unique constraint on `base`/`target`/`date`; index on same triplet.
+  - `AbstractBaseModel`: UUID PK, `created_at`, `updated_at`.
+  - `GeoLocatedModel`: `latitude`, `longitude`, `formatted_address`, `place_id`, `address_components`; index on lat/lng.
+  - `Address`: `street_line1`, `country`, `city`, `sub_city`, `state`, `postal_code`, `latitude`, `longitude`, `google_place_id`.
+  - `Facility`: `name unique`, `icon`.
+  - `CurrencyRate`: `base`, `target`, `rate`, `date`; unique base/target/date constraint.
 - Serializers:
-  - `StringArrayField`: list field that accepts JSON strings and converts them to lists.
-  - `AddressSerializer`: exposes `city`, `country`, `sub_city`, `street_line1`, `latitude`, `longitude`, `state`, `postal_code`.
-  - `FacilitySerializer`: exposes `icon`, `name`.
-  - `FlexibleAddressField`: accepts either dict or JSON string and validates with `AddressSerializer`.
-  - `JsonSerializerField`: accepts dict or JSON string and returns a dict.
-  - `FacilityResponseSerializer`: exposes `id`, `name`, `icon`.
-  - `ConversionInputSerializer`: accepts `date`, `base`, `target`, `amount`.
-  - `CurrencyRateSerializer`: exposes `target`, `rate`.
+  - `AddressSerializer`, `FacilitySerializer`, `FacilityResponseSerializer`.
+  - `FlexibleAddressField`, `JsonSerializerField`, `StringArrayField`.
+  - `ConversionInputSerializer`, `CurrencyRateSerializer`, `CurrencyListItemSerializer`, `CurrencyConversionResponseSerializer`.
 - Views:
-  - `AbstractModelViewSet`: base `ModelViewSet` with `GET`, `POST`, `PATCH`, `DELETE` only.
-  - `FacilityViewSet`: read-only (`GET` only), `AllowAny`, serializer `FacilityResponseSerializer`.
-  - `CurrencyViewSet`: `list` returns enum codes/names; action `rates` returns latest USD-based rates.
-  - `CurrencyConvertAPIView`: `POST`; `AllowAny`; validates input and returns converted amount plus effective rate.
+  - `AbstractModelViewSet` limits methods to `get/post/patch/delete`.
+  - `FacilityViewSet`: public read, admin write.
+  - `CurrencyViewSet`: `list`, `rates`.
+  - `CurrencyConvertAPIView`: conversion POST.
 - URLs:
-  - `GET /api/v1/core/facilities/` and `GET /api/v1/core/facilities/{pk}/` -> `FacilityViewSet`.
-  - `GET /api/v1/core/currencies/` -> `CurrencyViewSet.list`.
-  - `GET /api/v1/core/currencies/rates/` -> `CurrencyViewSet.rates`.
-  - `POST /api/v1/core/currency/convert/` -> `CurrencyConvertAPIView.post`.
-- Signals: no `signals.py` file found for this app.
-- Services / Utils:
-  - `CurrencyService`: fetches Open Exchange Rates data, stores `CurrencyRate` rows with `bulk_create(update_conflicts=True)`, and can seed from `apps/core/rate_data.json`.
-  - `EmailService`: sends booking confirmation, account credentials, password reset, activation email, email-change verification/notice, notification email, and contains placeholder `pass` methods for payment receipt and check-in reminders.
-  - `get_rate_to_reference`, `convert_currency`, `get_display_currency`: core currency conversion helpers; triangulate through USD and read `display_currency` from request query params or headers.
-  - `fetch_daily_exchange_rates` Celery task lives here.
+  - Mounted under `/api/v1/core/`.
 
 ### `apps.listing`
-- Purpose: the main domain for hotel rooms, guesthouses, event spaces, cars, properties, bookings, add-ons, season pricing, availability, terms and conditions, pricing previews, and inventory management.
+- Purpose: all public listings, booking domains, pricing, inventory, search/discovery, Geoapify-backed map views, and contact reveal flows.
 - Models:
-  - `BaseListing`: abstract base with `images` `GenericRelation(ListingImage)`, `title`, `description`, `base_price`, `currency`, `is_active`.
-  - `Amenity`: shared room/listing amenity with `name` unique and `icon`.
-  - `CarListing`: `company` FK to `CompanyProfile`, `individual_owner` FK to `IndividualOwnerProfile`, `brand`, `model`, `year`, `mileage`, `fuel_type`, `transmission`, `listing_type`, `car_class`, `condition`, `images` generic relation, `quantity`, `seats`; check constraint forces exactly one owner path.
-  - `CarRental`: renter FK to user nullable for guest checkout, `start_date`, `end_date`, `total_price`, `currency`, `status`, guest fields (`guest_first_name`, `guest_last_name`, `guest_email`, `guest_phone`, `special_requests`), `booking_reference`, `snapshot`, T&C snapshot fields; properties `is_legacy`, `guest_full_name`, `contact_email`; save auto-generates booking reference prefix `C`; date and owner/guest check constraints.
-  - `CarRentalItem`: FK `car_rental`, FK `car_listing`, `units_rent`, `price_per_unit`; subtotal helper.
-  - `CarAvailability`: FK `car_listing`, `date`, `available_units`; unique constraint on `car_listing`/`date`.
-  - `PropertyListing`: `company` FK, `individual_owner` FK, `address` OneToOne, `property_type`, `bedrooms`, `bathrooms`, `square_meters`, `is_furnished`; owner check constraint.
-  - `GuestHouseProfile`: `company` FK, `individual_owner` FK, `address` OneToOne, `phone`, `website`, `logo`, `license`, `amenities` M2M to `Amenity`, `facility` M2M to `Facility`, `rating`.
-  - `GuestHouseRoom`: FK `guest_house`, `amenities` M2M to `Amenity`, `number_of_guests`, `total_units`, `bed_type`, `room_size_sqm`.
-  - `GuestHouseInventory`: FK `guest_house_room`, `date`, `available_rooms`, `price`; unique together on room/date.
-  - `GuestHouseBooking`: renter FK nullable, `start_date`, `end_date`, `total_price`, `currency`, `status`, guest fields, `booking_reference`, `snapshot`, T&C snapshot fields; properties `is_legacy`, `guest_full_name`, `contact_email`; save auto-generates prefix `G`; date and owner/guest check constraints.
-  - `GuestHouseBookingItem`: FK `booking`, FK `room`, `units_booked`, `price_per_unit`; subtotal helper.
-  - `RoomListing`: FK `hotel`, FK `address`, `amenities` M2M, `number_of_guests`, `total_units`, `bed_type`, `room_size_sqm`, `smoking_allowed`, `children_allowed`, `refundable`.
-  - `RoomInventory`: FK `room_listing`, `date`, `price`; unique together on room/date; ordering by date.
-  - `Booking`: user FK nullable, `check_in_date`, `check_out_date`, `total_price`, `currency`, `status`, guest fields, `booking_reference`, `snapshot`, T&C snapshot fields; properties `is_legacy`, `guest_full_name`, `contact_email`; save auto-generates prefix `H`; date and owner/guest check constraints.
-  - `BookingItem`: FK `booking`, FK `room`, `units_booked`, `price_per_unit`, `snapshot`; subtotal helper.
-  - `AddonOffering`: FK `hotel`, `name`, `description`, `category`, `price_per_unit`, `currency`, `pricing_type`, `is_active`, `max_quantity_per_booking`, `requires_inventory`, `daily_capacity`, `icon`, `display_order`; `clean()` enforces price > 0 and inventory capacity when required; unique together on hotel/name.
-  - `BookingAddon`: FK `booking_item`, optional FK `offering`, `name`, `description`, `category`, `quantity`, `price_per_unit`, `currency`; subtotal helper.
-  - `BookingRating`: OneToOne FK `booking`, `rating`, `comment`, `created_at`.
-  - `Transaction`: legacy OneToOne FK `booking`, `provider`, `provider_payment_id`, `amount`, `currency`, `status`.
-  - `StayAvailability`: FK `hotel`, FK `room`, `date`, `available_rooms`; unique constraint on date/hotel/room; non-negative constraint.
-  - `Season`: `name`, `start_date`, `end_date`, `recurring`, `active`, `notes`, optional `company` FK, optional `individual_owner` FK.
-  - `SeasonalRate`: FK `season`, optional FK `hotel`, optional FK `company`, optional FK `room`, optional FK `individual_owner`, `price_override`, `multiplier`, `priority`, `active`, `days_of_week` JSON with validator, `min_stay`.
-  - `BookingItemPrice`: FK `booking_item`, `date`, `price_per_unit`, `units`; subtotal helper.
-  - `EventSpaceListing`: FK `hotel`, OneToOne `address`, M2M `amenities`, `number_of_guests`, `total_units`, `space_type`, `floor_area_sqm`.
-  - `EventSpaceAvailability`: FK `space_listing`, `date`, `price`, `available_eventspace`; unique together on space/date.
-  - `BookingBase`: abstract base for event-space bookings; user FK, date range, total_price, currency, status, guest fields, booking_reference, snapshot, guest/contact properties, date-range constraint.
-  - `EventSpaceBooking`: extends `BookingBase`, adds `event_type`, T&C snapshot fields, `is_legacy`, save auto-generates prefix `E`.
-  - `EventSpaceBookingItem`: FK `booking`, FK `event_space`, `units_booked`, `price_per_unit`; subtotal helper.
-  - `TermsAndConditions`: generic relation via `content_type`/`object_id`/`content_object`, `version`, `title`, `content`, `effective_date`, `is_active`; unique version per object; save deactivates older active versions for same object.
-  - `validate_days_of_week`: validator for `SeasonalRate.days_of_week`.
+  - Shared listing and verification:
+    - `BaseListing`: inherits `GeoLocatedModel`; generic `images`, `is_verified`, `verified_at`, `verified_by`, `verification_note`, `title`, `description`, `base_price`, `currency`, `is_active`, `booking_forward_window_days`.
+    - `Amenity`: `name unique`, `icon`.
+  - Cars:
+    - `CarListing`: owner FK to `CompanyProfile` or `IndividualOwnerProfile`, `brand`, `model`, `year`, `mileage`, `fuel_type`, `transmission`, `listing_type`, `rental_mode`, `car_class`, `condition`, `requires_code_3`, `requires_business_license`, `pre_rental_requirements`, `quantity`, `seats`.
+    - `CarAvailability`: `car_listing FK`, `date`, `available_units`.
+    - `CarRental`: `renter FK nullable`, `start_date`, `end_date`, `total_price`, `currency`, `status`, guest fields, self-drive compliance fields, `booking_reference`, `snapshot`, terms snapshot fields.
+    - `CarRentalItem`: `car_rental FK`, `car_listing FK`, `units_rent`, `price_per_unit`.
+    - `CarRentalExtensionRequest`: `rental FK`, `requested_by FK User`, `original_end_date`, `requested_end_date`, `extra_days`, `amount`, `currency`, `status`, `tx_ref`, `availability_held`, `expires_at`, `applied_at`, `snapshot`.
+    - `CarSaleListing`: car-sale listing with owner FK, car descriptors, `seller_contact_name`, `seller_phone`, `seller_email`, `reveal_fee`.
+    - `ContactRevealRequest`: `listing FK CarSaleListing`, `buyer FK User nullable`, `status`, `amount`, `currency`, `buyer_note`, `buyer_phone`, `tx_ref`, `expires_at`, `unlocked_at`, `contact_snapshot`, generic relation to `payment.PaymentTransaction`.
+  - Properties:
+    - `PropertyListing`: owner FK, `address OneToOne`, `property_type`, `bedrooms`, `bathrooms`, `square_meters`, `is_furnished`.
+    - `PropertyRentalAvailability`: `property_listing FK`, `date`, `available_units`, `price`.
+    - `PropertyRentalBooking`: `property_listing FK`, `renter FK nullable`, stay dates, totals, status, guest fields, `booking_reference`, snapshot, terms snapshot fields.
+    - `PropertySaleListing`: owner FK, `address`, `property_type`, `bedrooms`, `bathrooms`, `square_meters`, `land_size_square_meters`, `is_furnished`, seller contact fields, `reveal_fee`.
+    - `PropertyContactRevealRequest`: same state machine pattern as car-sale reveal.
+  - Guest houses:
+    - `GuestHouseProfile`: owner FK, `address`, `phone`, `website`, `logo`, `license`, `amenities M2M`, `facility M2M`, `rating`.
+    - `GuestHouseRoom`: `guest_house FK`, `amenities M2M`, `number_of_guests`, `total_units`, `bed_type`, `room_size_sqm`.
+    - `GuestHouseInventory`: `guest_house_room FK`, `date`, `available_rooms`, `price`.
+    - `GuestHouseBooking`: guesthouse stay booking with renter/guest fields, terms snapshot, `booking_reference`, status.
+    - `GuestHouseBookingItem`: `booking FK`, `room FK`, `units_booked`, `price_per_unit`.
+  - Hotels:
+    - `RoomListing`: `hotel FK`, `address FK`, `amenities M2M`, `number_of_guests`, `total_units`, `bed_type`, `room_size_sqm`, `smoking_allowed`, `children_allowed`, `refundable`.
+    - `RoomInventory`: `room_listing FK`, `date`, `price`.
+    - `Booking`: hotel stay booking with booker/guest fields, terms snapshot, `booking_reference`, status.
+    - `BookingItem`: `booking FK`, `room FK`, `units_booked`, `price_per_unit`, `snapshot`.
+    - `AddonOffering`: `hotel FK`, `name`, `description`, `category`, `price_per_unit`, `currency`, `pricing_type`, `is_active`, `max_quantity_per_booking`, `requires_inventory`, `daily_capacity`, `icon`, `display_order`.
+    - `BookingAddon`: `booking_item FK`, optional `offering FK`, snapshot pricing/name/category fields, `quantity`.
+    - `BookingRating`: `booking OneToOne`, `rating`, `comment`, `created_at`.
+    - `Transaction`: legacy hotel-only transaction model; superseded by `apps.payment.PaymentTransaction`.
+    - `StayAvailability`: `hotel FK`, `room FK`, `date`, `available_rooms`.
+  - Pricing and terms:
+    - `Season`, `SeasonalRate`, `BookingItemPrice`, `TermsAndConditions`.
+  - Event spaces:
+    - `EventSpaceListing`: `hotel FK`, `address OneToOne`, `amenities M2M`, `number_of_guests`, `total_units`, `space_type`, `floor_area_sqm`.
+    - `EventSpaceAvailability`: `space_listing FK`, `date`, `price`, `available_eventspace`.
+    - `BookingBase`: abstract event-style booking base.
+    - `EventSpaceBooking`: booking base + `event_type` + terms snapshot fields.
+    - `EventSpaceBookingItem`: `booking FK`, `event_space FK`, `units_booked`, `price_per_unit`.
 - Serializers:
-  - `CurrencyConversionMixin`: adds computed `conversion` block when `display_currency` is passed in serializer context.
-  - `PriceQuoteMixin`: adds computed `price_quote` block based on `check_in`/`check_out` query params and pricing service output.
-  - `SanitizeGuestDetailsMixin`: strips HTML from guest name, phone, and special-request fields.
-  - `TermsAndConditionsSerializer`: exposes `id`, `version`, `title`, `content`, `effective_date`, `is_active`, `created_at`, `updated_at`.
-  - `AmenityResponseSSerializer`: exposes `id`, `name`, `icon`.
-  - `RoomListingResponseSerializer`: nested `ListingImageSerializer(many=True)`, nested `AmenityResponseSSerializer(many=True)`; exposes `id`, `images`, `title`, `description`, `base_price`, `currency`, `amenities`, `number_of_guests`, `total_units`, `bed_type`, `room_size_sqm`, `smoking_allowed`, `children_allowed`, `refundable`, `available_units`, `conversion`, `price_quote`.
-  - `RoomListingSerializer`: writable multipart serializer with `images`, `title`, `hotel_id`, `description`, `base_price`, `currency`, `address`, `amenities`, `number_of_guests`, `total_units`, `bed_type`, `room_size_sqm`, `smoking_allowed`, `children_allowed`, `refundable`.
-  - `GuestHouseRoomResponseSerializer`: nested images, amenities, `available_units`, `conversion`, `price_quote`.
-  - `GuestHouseProfileResponseSerializer`: nested images, address, amenities, facility list, `is_favorite`, nested rooms; exposes guesthouse detail view model fields.
-  - `GuestHouseRoomSerializer`: writable serializer for guest-house room creation/update.
-  - `GuestHouseProfileSerializer`: writable serializer for guest-house profile creation/update.
-  - `GuestHouseBookingItemSerializer`: exposes `id`, `room`, `units_booked`, `nightly_rate`, `stay_total`, `subtotal`.
-  - `GuestHouseBookingSerializer`: write serializer for booking creation and read serializer for booking detail; fields `id`, `renter`, `booking_reference`, `start_date`, `end_date`, `total_price`, `total_item_cost`, `currency`, `status`, `items`, `conversion`, `terms_accepted`, `terms_version`, `terms_accepted_at`, `terms_content_snapshot`, `terms_url`, `is_legacy`, `stay_total`, guest fields, `payment_currency`, `is_walk_in`.
-  - `GuestHouseInventorySerializer`: exposes `id`, `date`, `available_rooms`, `price`.
-  - `CarAvailabilitySerializer`: exposes `id`, `date`, `available_units`.
-  - `CarListingResponseSerializer`: nested `ListingImageSerializer(many=True, read_only=True)`, nested `CarAvailabilitySerializer(many=True, read_only=True)`; exposes `id`, `title`, `description`, `images`, `base_price`, `is_active`, `brand`, `model`, `year`, `mileage`, `fuel_type`, `transmission`, `condition`, `listing_type`, `car_class`, `quantity`, `company`, `seats`, `individual_owner`, `availabilities`, `current_availability`, `created_at`, `updated_at`, `conversion`, `price_quote`.
-  - `CarListingSerializer`: writable serializer for car creation/update with `images`, `title`, `description`, `base_price`, `currency`, `individual_owner`, `company`, `brand`, `model`, `year`, `mileage`, `fuel_type`, `transmission`, `condition`, `seats`, `listing_type`, `car_class`, `quantity`.
-  - `CarRentalItemSerializer`: exposes `id`, `car_listing`, `car_listing_details`, `units_rent`, `nightly_rate`, `stay_total`, `subtotal`, `created_at`.
-  - `CarRentalSerializer`: fields `id`, `renter`, `renter_name`, `booking_reference`, `start_date`, `end_date`, `total_price`, `total_rental_cost`, `currency`, `status`, `rental_items`, `items_details`, `created_at`, `updated_at`, `conversion`, `terms_accepted`, `terms_version`, `terms_accepted_at`, `terms_content_snapshot`, `terms_url`, `is_legacy`, `stay_total`, guest fields, `payment_currency`.
-  - `AvailabilityCheckSerializer`: accepts `start_date`, `end_date`, `quantity`.
-  - `CarSearchSerializer`: accepts `start_date`, `end_date`, `brand`, `car_class`, `max_daily_price`.
-  - `CarAvailabilityUpdateSerializer`: accepts `is_available`, `available_from`, `available_to`, `quantity_available`, `base_price`.
-  - `PropertyListingResponseSerializer`: nested `ListingImageSerializer`, nested `AddressSerializer`; exposes `id`, `title`, `description`, `images`, `base_price`, `currency`, `address`, `property_type`, `bedrooms`, `bathrooms`, `square_meters`, `is_furnished`, `conversion`.
-  - `PropertyListingSerializer`: writable serializer for property creation/update.
-  - `AddonOfferingSerializer`: exposes `id`, `hotel`, `name`, `description`, `category`, `price_per_unit`, `currency`, `pricing_type`, `is_active`, `max_quantity_per_booking`, `requires_inventory`, `daily_capacity`, `icon`, `display_order`, `created_at`, `updated_at`, `conversion`.
-  - `AddonOfferingListSerializer`: list serializer exposing `hotel_name` plus public addon fields.
-  - `BookingAddonInputSerializer`: accepts `offering_id`, `quantity` and resolves `_offering` in validation.
-  - `BookingAddonSerializer`: exposes `id`, `booking_item`, `offering_id`, `offering_name`, `name`, `description`, `category`, `quantity`, `price_per_unit`, `currency`, `subtotal`.
-  - `BookingItemResponseSerializer`: nested room info, `units_booked`, `nights`, `nightly_rate`, `stay_total`, `snapshot`, `addons`.
-  - `BookingResponseSerializer`: nested `BookingItemResponseSerializer(many=True)`; exposes `id`, `user`, `booking_reference`, `check_in_date`, `check_out_date`, `total_price`, `total_room_cost`, `total_addon_cost`, `currency`, `status`, `items`, `snapshot`, `conversion`, `is_resumable`, `terms_accepted`, `terms_version`, `terms_accepted_at`, `terms_content_snapshot`, `terms_url`, `is_legacy`, `stay_total`, guest fields.
-  - `BookingRatingSerializer`: exposes `rating`, `comment`.
-  - `BookingLookupSerializer`: accepts `reference`, `email`.
-  - `BookingItemSerializer`: accepts `room`, `units_booked`, `price_per_unit`, `addons`.
-  - `BookingSerializer`: writable booking serializer with `items`, `check_in_date`, `check_out_date`, `currency`, `status`, `terms_accepted`, `terms_version`, guest fields, `special_requests`, `payment_currency`.
-  - `PartialCancelSerializer`: accepts `item_id`, `units_to_cancel`.
-  - `GuestCancellationSerializer`: accepts `guest_email`, `reason`.
-  - `SearchRoomSerializer`: exposes `id`, `title`, `description`, `base_price`, `currency`, `number_of_guests`, `bed_type`, `room_size_sqm`, `available_units`, `display_price`, `preview_min_price`, `preview_total`, `preview_has_discount`, `nights`, `conversion`.
-  - `SearchResultSerializer`: exposes hotel search result blocks with `hotel_id`, `hotel_name`, `city`, `stars`, `images`, `facilities`, `featured`, `is_favorite`, `rooms`, `conversion`.
-  - `StayAvailabilityUpdateSerializer`: exposes `available_rooms`.
-  - `EventSpaceListingResponseSerializer`: nested images and amenities; exposes `id`, `images`, `title`, `description`, `number_of_guests`, `base_price`, `currency`, `amenities`, `total_units`, `space_type`, `floor_area_sqm`, `conversion`, `price_quote`.
-  - `EventSpaceListingSerializer`: writable serializer with `images`, `title`, `company_id`, `description`, `base_price`, `currency`, `address`, `amenities`, `number_of_guests`, `total_units`, `space_type`, `floor_area_sqm`.
-  - `EventSpaceBookingItemResponseSerializer`: exposes `id`, `event_space_id`, `event_space_title`, `event_space_description`, `units_booked`, `nightly_rate`, `stay_total`, `subtotal`.
-  - `EventSpaceBookingResponseSerializer`: exposes `id`, `user`, `booking_reference`, `check_in_date`, `check_out_date`, `total_price`, `total_item_cost`, `status`, `items`, `event_type`, `conversion`, `terms_accepted`, `terms_version`, `terms_accepted_at`, `terms_content_snapshot`, `terms_url`, `is_legacy`, `stay_total`, guest fields.
-  - `EventSpaceBookingItemSerializer`: accepts `event_space`, `units_booked`, `price_per_unit`.
-  - `EventSpaceBookingSerializer`: writable booking serializer with `items`, `check_in_date`, `check_out_date`, `currency`, `event_type`, `terms_accepted`, `terms_version`, guest fields, `special_requests`, `payment_currency`.
-  - `PriceBreakdownItemSerializer`: `date`, `price_per_unit`, `source`, `note`.
-  - `PricePreviewItemSerializer`: `id`, `title`, `units`, `price_per_unit`, `subtotal`, `breakdown`.
-  - `PricePreviewTotalsSerializer`: `items_subtotal`, `platform_fee`, `platform_fee_percentage`, `grand_total`, `currency`.
-  - `PricePreviewResponseSerializer`: `nights`, `items`, `totals`, `conversion`.
-  - `BookingPreviewSerializer`: `check_in_date`, `check_out_date`, `items`.
-  - `GuestHouseBookingPreviewSerializer`: `start_date`, `end_date`, `items`.
-  - `EventSpaceBookingPreviewSerializer`: `check_in_date`, `check_out_date`, `items`.
-  - `SeasonSerializer`: `id`, `name`, `start_date`, `end_date`, `recurring`, `active`, `notes`, `company`, `individual_owner`.
-  - `SeasonalRateSerializer`: `id`, `season`, `season_name`, `hotel`, `company`, `room`, `individual_owner`, `price_override`, `multiplier`, `priority`, `active`, `days_of_week`, `min_stay`, `target_name`.
+  - Map/location: `AutocompleteResultSerializer`, `PlaceDetailSerializer`, `ReverseGeocodeSerializer`, query serializers for maps.
+  - Booking/security helpers: `ForwardBookingWindowMixin`, `SanitizeGuestDetailsMixin`, `GuestBookingOtpRequestSerializer`, `GuestContactRevealOtpRequestSerializer`.
+  - Listing response serializers expose additive geo fields, verification fields, favorite state, conversion blocks, and price preview blocks.
+  - Booking serializers expose totals, status, item breakdowns, guest data, terms snapshot fields, optional currency conversion, and OTP-linked guest access fields.
+  - Contact reveal serializers expose reveal state and never return seller contact before payment verification.
+  - Discovery/search serializers: `DiscoveryListingSerializer`, `ProximityListingSerializer`, `ListingSearchResultSerializer`, `SearchSuggestionSerializer`, `MapPinSerializer`.
+  - Write serializers preserve existing request shapes and add place resolution, phone verification, and forward booking window validation.
 - Views:
-  - `RoomListingViewSet`: `GET` list/retrieve/price_preview/availability_matrix; `POST` create; `PATCH` update; `DELETE` destroy; public read, owner-only write.
-  - `GuestHouseRoomViewSet`: `GET` list/retrieve/availability_matrix; `POST` create; `PATCH` update; `DELETE` destroy.
-  - `GuestHouseProfileViewSet`: `GET` list/retrieve/check_availability; `POST` create; `PATCH` update; `DELETE` destroy.
-  - `GuestHouseBookingViewSet`: `GET` list/retrieve/my_bookings/workspace_bookings/lookup/price_preview; `POST` create/walk-in/cancel; `PATCH` update; `DELETE` destroy.
-  - `CarListingViewSet`: `GET` list/retrieve/available_for_rent/check_availability/my_listings; `POST` create; `PATCH` update; `DELETE` destroy.
-  - `CarRentalViewSet`: `GET` list/retrieve/my_rentals/rental_stats/lookup; `POST` create/confirm/cancel; `PATCH` update; `DELETE` destroy.
-  - `CarAvailabilitySearchView`: `GET`; public availability check for a single car.
-  - `CarAvailabilityByDateRangeView`: `GET`; public search for all cars in a date range.
-  - `CarAvailabilityByCarAndDateView`: `GET`; public availability check for one car.
-  - `PropertyListingViewSet`: `GET` list/retrieve; `POST` create; `PATCH` update; `DELETE` destroy.
-  - `AmenityViewSet`: read-only `GET` list/retrieve.
-  - `BookingViewSet`: `GET` list/retrieve/workspace_bookings/lookup/price_preview; `POST` create/walk-in/cancel/partial-cancel; `PATCH` update; `DELETE` destroy.
-  - `StaySearchView`: `GET`; public hotel search across availability and favorite state.
-  - `StayAvailabilityUpdateView`: `PUT`; authenticated owner/admin availability edit for a `StayAvailability` row.
-  - `CarAvailabilityUpdateAPIView`: `PATCH`; authenticated partial edit for a `CarAvailability` row.
-  - `EventSpaceListingViewSet`: `GET` list/retrieve/search; `POST` create; `PATCH` update; `DELETE` destroy.
-  - `EventSpaceBookingViewSet`: `GET` list/retrieve; `POST` create/walk-in/lookup/price-preview; `PATCH` update; `DELETE` destroy.
-  - `TermsAndConditionsViewSet`: read-only `GET` list/retrieve plus `GET` actions `hotel`, `guesthouse`, `company`.
-  - `AddonOfferingViewSet`: `GET` list/retrieve; `POST` create; `PATCH` update; `DELETE` destroy.
-  - `SeasonViewSet`: full `ModelViewSet` CRUD for season management.
-  - `SeasonalRateViewSet`: full `ModelViewSet` CRUD for seasonal rate management.
-  - `InventoryGridView`: `GET`; owner-only 30-day grid for hotel/guesthouse/event-space inventory.
+  - CRUD/listing families: `RoomListingViewSet`, `GuestHouseProfileViewSet`, `GuestHouseRoomViewSet`, `CarListingViewSet`, `CarSaleListingViewSet`, `PropertySaleListingViewSet`, `PropertyListingViewSet`, `EventSpaceListingViewSet`, `AmenityViewSet`, `AddonOfferingViewSet`, `SeasonViewSet`, `SeasonalRateViewSet`, `TermsAndConditionsViewSet`.
+  - Booking families: `BookingViewSet`, `GuestHouseBookingViewSet`, `CarRentalViewSet`, `EventSpaceBookingViewSet`, `PropertyRentalBookingViewSet`.
+  - Discovery/maps: `NearbyListingsView`, `WithinBoundsListingsView`, `MapPinsView`, `FeedListingsView`, `ListingSearchView`, `ListingSearchSuggestionsView`, `MapsAutocompleteView`, `MapsPlaceDetailView`, `MapsReverseGeocodeView`.
+  - Utility/update views: `StaySearchView`, `InventoryGridView`, `StayAvailabilityUpdateView`, `CarAvailabilitySearchView`, `CarAvailabilityByDateRangeView`, `CarAvailabilityByCarAndDateView`, `CarAvailabilityUpdateAPIView`.
+  - Custom actions cover verify/unverify, price previews, walk-in booking, guest OTP request, cancel/partial-cancel, contact request/contact read, lookup, guest-rental access, reschedule, extension preview/initiation, and workspace views.
 - URLs:
-  - `GET /api/v1/listing/rooms/`, `POST /api/v1/listing/rooms/`, `GET/PATCH/DELETE /api/v1/listing/rooms/{pk}/`, `GET /api/v1/listing/rooms/{pk}/price-preview/`, `GET /api/v1/listing/rooms/availability-matrix/`.
-  - `GET /api/v1/listing/guest-houses/`, `POST /api/v1/listing/guest-houses/`, `GET/PATCH/DELETE /api/v1/listing/guest-houses/{pk}/`, `GET /api/v1/listing/guest-houses/check-availability/`.
-  - `GET /api/v1/listing/guest-house-rooms/`, `POST /api/v1/listing/guest-house-rooms/`, `GET/PATCH/DELETE /api/v1/listing/guest-house-rooms/{pk}/`, `GET /api/v1/listing/guest-house-rooms/availability-matrix/`.
-  - `GET /api/v1/listing/cars/`, `POST /api/v1/listing/cars/`, `GET/PATCH/DELETE /api/v1/listing/cars/{pk}/`, `POST /api/v1/listing/cars/{pk}/check_availability/`, `GET /api/v1/listing/cars/available_for_rent/`, `GET /api/v1/listing/cars/my_listings/`.
-  - `GET /api/v1/listing/properties/`, `POST /api/v1/listing/properties/`, `GET/PATCH/DELETE /api/v1/listing/properties/{pk}/`.
-  - `GET /api/v1/listing/amenities/`, `GET /api/v1/listing/amenities/{pk}/`.
-  - `GET /api/v1/listing/bookings/`, `POST /api/v1/listing/bookings/`, `GET/PATCH/DELETE /api/v1/listing/bookings/{pk}/`, `GET /api/v1/listing/bookings/lookup/`, `GET /api/v1/listing/bookings/workspace-bookings/`, `POST /api/v1/listing/bookings/walk-in/`, `POST /api/v1/listing/bookings/{pk}/cancel/`, `POST /api/v1/listing/bookings/{pk}/partial-cancel/`, `POST /api/v1/listing/bookings/price-preview/`.
-  - `GET /api/v1/listing/car-rentals/`, `POST /api/v1/listing/car-rentals/`, `GET/PATCH/DELETE /api/v1/listing/car-rentals/{pk}/`, `GET /api/v1/listing/car-rentals/lookup/`, `GET /api/v1/listing/car-rentals/my_rentals/`, `GET /api/v1/listing/car-rentals/rental_stats/`, `POST /api/v1/listing/car-rentals/{pk}/confirm/`, `POST /api/v1/listing/car-rentals/{pk}/cancel/`.
-- `GET /api/v1/listing/stays/search/`, `PUT /api/v1/listing/stays/availability/{pk}/update/`, `GET /api/v1/listing/car-availabilities/by-car-and-date/`, `GET /api/v1/listing/car-availabilities/by-dates/`, `PATCH /api/v1/listing/car-availabilities/{pk}/update/`.
-  - `GET /api/v1/listing/event-spaces/`, `POST /api/v1/listing/event-spaces/`, `GET/PATCH/DELETE /api/v1/listing/event-spaces/{pk}/`, `GET /api/v1/listing/event-spaces/search/`.
-  - `GET /api/v1/listing/bookings-eventspaces/`, `POST /api/v1/listing/bookings-eventspaces/`, `GET/PATCH/DELETE /api/v1/listing/bookings-eventspaces/{pk}/`, `GET /api/v1/listing/bookings-eventspaces/lookup/`, `POST /api/v1/listing/bookings-eventspaces/walk-in/`, `POST /api/v1/listing/bookings-eventspaces/price-preview/`.
-  - `GET /api/v1/listing/guesthouse-bookings/`, `POST /api/v1/listing/guesthouse-bookings/`, `GET/PATCH/DELETE /api/v1/listing/guesthouse-bookings/{pk}/`, `GET /api/v1/listing/guesthouse-bookings/lookup/`, `GET /api/v1/listing/guesthouse-bookings/workspace-bookings/`, `POST /api/v1/listing/guesthouse-bookings/walk-in/`, `POST /api/v1/listing/guesthouse-bookings/{pk}/cancel/`, `GET /api/v1/listing/guesthouse-bookings/my_bookings/`, `POST /api/v1/listing/guesthouse-bookings/price-preview/`.
-  - `GET /api/v1/listing/terms/`, `GET /api/v1/listing/terms/{pk}/`, `GET /api/v1/listing/terms/hotel/{hotel_id}/`, `GET /api/v1/listing/terms/guesthouse/{gh_id}/`, `GET /api/v1/listing/terms/company/{company_id}/`.
-  - `GET /api/v1/listing/addon-offerings/`, `POST /api/v1/listing/addon-offerings/`, `GET/PATCH/DELETE /api/v1/listing/addon-offerings/{pk}/`.
-  - `GET /api/v1/listing/seasons/`, `POST /api/v1/listing/seasons/`, `GET/PATCH/DELETE /api/v1/listing/seasons/{pk}/`.
-  - `GET /api/v1/listing/seasonal-rates/`, `POST /api/v1/listing/seasonal-rates/`, `GET/PATCH/DELETE /api/v1/listing/seasonal-rates/{pk}/`.
-  - `GET /api/v1/listing/inventory/grid/`.
-- Signals:
-  - `apps.listing.signals.schedule_auto_cancel` listens to `post_save` on `Booking`; schedules `auto_cancel_pending_booking.apply_async(countdown=BOOKING_PENDING_TIMEOUT_MINUTES)`.
-  - `apps.listing.signals.schedule_guesthouse_auto_cancel` listens to `post_save` on `GuestHouseBooking`; schedules `auto_cancel_pending_guesthouse_booking`.
-  - `apps.listing.signals.auto_create_guesthouse_inventory` listens to `post_save` on `listing.GuestHouseRoom`; creates availability after commit.
-  - `apps.listing.signals.sync_guesthouse_profile_price` listens to `post_save` on `listing.GuestHouseRoom`; keeps profile base price aligned to the minimum room price.
-- Services / Utils:
-  - `ListingService`: listing CRUD and address helpers, plus room/property/event-space/hotel profile update helpers.
-  - `TermsService`: active-term lookup, validation, and snapshotting support.
-  - `StayAvailabilityService`: hotel-room availability search, matrix generation, future availability creation, and validation/lock handling.
-  - `GuestHouseAvailabilityService`: guesthouse availability search, matrix generation, future availability creation, and validation/lock handling. This class is defined twice in the file; the later definition overwrites the earlier import target.
-  - `PriceService`: daily price resolution, seasonal-rate application, and price-detail batching.
-  - `PriceCalculationService`: preview totals and platform-fee math.
-  - `BookingService`, `GuestHouseBookingService`, `EventSpaceBookingService`, `CarRentalService`: booking creation, confirmation, cancellation, snapshotting, and inventory release.
-  - `CarAvailabilityService`, `EventSpaceAvailabilityService`, `InventoryGridService`, `WorkspaceStatusService`, `PaymentService`: availability management, dashboard grid generation, and payment-side helpers.
-  - `ParseDatesAndQuantity`, `generate_booking_reference`, `is_user_staff_of_listing` live in `apps.listing.utils`.
+  - Mounted under `/api/v1/listing/`.
+  - Map helper endpoints mounted separately under `/api/v1/maps/`.
 
 ### `apps.payment`
-- Purpose: Chapa initialization, callback/webhook verification, payment transaction ledger, vendor split accounting, and payout state tracking across booking types.
+- Purpose: Chapa payment initialization/verification/callback/webhook, transaction ledger, split payout metadata, tax calculation, dispute triage, and Chapa subaccount registration.
 - Models:
-  - `PaymentTransaction`: generic booking payment ledger with `content_type`, `object_id`, `booking_object` GFK, `booking_type`, legacy `booking` FK, `tx_ref`, `amount`, `currency`, `status`, `chapa_transaction_id`, `payment_method`, `metadata`, `commission_rate`, `commission_amount`, `vendor_payout_amount`, `payout_status`, `vendor_company` FK, `vendor_individual` FK; property `resolved_booking`; ordering `-created_at`.
+  - `PaymentPlatformConfig`: `name`, `is_active`, `default_split_type`, `default_split_value`, `default_car_sale_reveal_fee`, `default_property_sale_reveal_fee`.
+  - `PaymentTransaction`: generic relation fields `content_type/object_id/booking_object`, legacy `booking FK`, `booking_type`, `tx_ref`, `amount`, `currency`, `status`, `chapa_transaction_id`, `payment_method`, `metadata`, `commission_rate`, `commission_amount`, `vendor_payout_amount`, `tax_amount`, `tax_rate`, `tax_liability_status`, dispute triage fields, `payout_status`, `vendor_company FK`, `vendor_individual FK`. `booking` is legacy; `booking_object` is canonical.
 - Serializers:
-  - `PaymentInitializeSerializer`: accepts `booking_id`, `booking_type`, `email`, `first_name`, `last_name`, `amount`, `currency`; validates supported currency values `ETB` and `USD`.
-  - `PaymentInitializeResponseSerializer`: exposes `success`, `message`, `checkout_url`, `tx_ref`, `calculated_amount`, `payment_currency`, `exchange_rate`, `original_amount`, `original_currency`.
-  - `PaymentTransactionSerializer`: exposes `id`, `tx_ref`, `booking`, `amount`, `currency`, `status`, `payment_method`, `chapa_transaction_id`, `metadata`, `created_at`, `updated_at`.
-  - `ChapaCallbackSerializer`: accepts `tx_ref`, `trx_ref`, `reference`, `ref_id`; normalizes callback reference.
-  - `ChapaWebhookSerializer`: accepts `tx_ref`, `trx_ref`, `reference`, `ref_id`, `status`, `signature`; normalizes webhook reference.
-  - `OwnerPaymentTransactionSerializer`: exposes `id`, `tx_ref`, `amount`, `currency`, `status`, `payment_method`, `created_at`, `booking_type`, `booking_reference`, `listing_title`, `customer_name`, `booking_dates`, `commission_rate`, `commission_amount`, `vendor_payout_amount`, `payout_status`.
+  - `PaymentInitializeSerializer` and `PaymentInitializeResponseSerializer`.
+  - `ChapaSubaccountCreateSerializer`, `ChapaSubaccountResponseSerializer`.
+  - `PaymentTransactionSerializer`: transaction detail for app-facing verification flows; additive fields now include tax and receipt support.
+  - `OwnerPaymentTransactionSerializer`: owner ledger shape.
+  - `TransactionMonitorListSerializer`, `TransactionMonitorDetailSerializer`, `DisputeActionSerializer`, `DisputeStatusSerializer`.
+  - `ChapaCallbackSerializer`, `ChapaWebhookSerializer`.
 - Views:
-  - `InitiatePaymentView`: `POST`; `AllowAny`; throttled by `payment_init`; validates booking ownership and invokes `ChapaPaymentService.initialize_payment`.
-  - `chapa_callback`: `GET`; `AllowAny`; CSRF exempt; throttled by `payment_callback`.
-  - `chapa_webhook`: `POST`; `AllowAny`; CSRF exempt; throttled by `payment_webhook`.
-  - `verify_payment`: `GET`; `IsAuthenticated`; only owner/admin can verify their own payment.
-  - `verify_payment_public`: `GET`; `AllowAny`; throttled by `payment_verify`.
-  - `cancel_payment`: `PUT`; `IsAuthenticated`; only owner/admin can cancel their own pending payment.
-  - `OwnerPaymentViewSet`: read-only ledger viewset for owners/admins; `list` adds summary aggregates; uses search and filter backends.
+  - API views: `InitiatePaymentView`, `ChapaSubaccountView`, `ChapaSubaccountMeView`.
+  - Function views: `chapa_callback`, `chapa_webhook`, `verify_payment`, `verify_payment_public`, `cancel_payment`.
+  - ViewSets: `OwnerPaymentViewSet`, `AdminTransactionMonitorViewSet`.
+  - Custom admin dispute actions: `dispute/open`, `dispute`, `dispute/resolve`.
 - URLs:
-  - `POST /api/v1/payment/initiate/` -> `InitiatePaymentView.post` -> `PaymentInitializeSerializer`.
-  - `GET /api/v1/payment/callback/chapa/` -> `chapa_callback`.
-  - `POST /api/v1/payment/webhook/chapa/` -> `chapa_webhook`.
-  - `GET /api/v1/payment/verify/{tx_ref}/` -> `verify_payment`.
-  - `GET /api/v1/payment/verify-public/{tx_ref}/` -> `verify_payment_public`.
-  - `PUT /api/v1/payment/cancel/{tx_ref}/` -> `cancel_payment`.
-  - `GET /api/v1/payment/ledger/` and `GET /api/v1/payment/ledger/{pk}/` -> `OwnerPaymentViewSet`.
-- Signals: no `signals.py` file found for this app.
-- Services / Utils:
-  - `ChapaPaymentService`: generates transaction refs, initializes Chapa payment requests, configures split payouts using vendor subaccounts, persists `PaymentTransaction`, verifies transaction status with Chapa, handles callback and webhook signatures, and cancels pending transactions.
+  - Mounted under `/api/v1/payment/`.
 
 ### `apps.analytics`
-- Purpose: company and individual-owner KPI dashboards, revenue/activity timeseries, and front-desk occupancy/availability reporting.
+- Purpose: company, front-desk, and admin metrics; precomputed daily metrics; dirty-date tracking.
 - Models:
-  - `CompanyDailyMetrics`: `company_id`, `date`, `revenue`, `bookings_count`, `confirmed_count`, `cancelled_count`, `avg_booking_value`, `top_listings` JSON; unique together on `company_id`/`date`.
-  - `ListingDailyMetrics`: `listing_id`, `company_id`, `date`, `revenue`, `bookings_count`, `avg_price`; unique together on `listing_id`/`date`.
-  - `AnalyticsDirtyDate`: `company_id`, `date`, `processed`; unique together on `company_id`/`date`.
+  - `CompanyDailyMetrics`: `company_id`, `date`, `revenue`, `bookings_count`, `confirmed_count`, `cancelled_count`, `avg_booking_value`, `top_listings`.
+  - `ListingDailyMetrics`: `listing_id`, `company_id`, `date`, `revenue`, `bookings_count`, `avg_price`.
+  - `AnalyticsDirtyDate`: `company_id`, `date`, `processed`.
 - Serializers:
-  - `OverviewSerializer`: `total_revenue`, `total_bookings`, `confirmed_bookings`, `cancellations`, `avg_booking_value`, `top_listings`.
-  - `TimeseriesItemSerializer`: `period`, `revenue`.
-  - `FrontDeskStatsSerializer`: `arrivals_today`, `departures_today`, `in_house_count`, `availability_percent`, `total_rooms`, `occupied_rooms`.
+  - `OverviewSerializer`, `TimeseriesItemSerializer`, `FrontDeskStatsSerializer`, `FrontDeskAvailability*`, `DateRangeQuerySerializer`, admin metrics serializers.
 - Views:
-  - `CompanyOverviewView`: `GET`; `IsCompanyOrIndividualOwner`; supports company or individual owner analytics depending on query params and logged-in profile.
-  - `CompanyRevenueView`: `GET`; `IsCompanyOrIndividualOwner`; revenue timeseries.
-  - `CompanyActivityView`: `GET`; `IsCompanyOrIndividualOwner`; recent activity feed.
-  - `FrontDeskStatsView`: `GET`; `IsCompanyOrIndividualOwner`; workspace stats.
-  - `FrontDeskAvailabilityView`: `GET`; `IsCompanyOrIndividualOwner`; workspace availability matrix.
+  - `CompanyOverviewView`, `CompanyRevenueView`, `CompanyActivityView`, `FrontDeskStatsView`, `FrontDeskAvailabilityView`, `AdminOverviewMetricsView`, `AdminRevenueMetricsView`, `AdminPayoutFailureMetricsView`.
 - URLs:
-  - `GET /api/v1/analytics/company/overview/` -> `CompanyOverviewView.get`.
-  - `GET /api/v1/analytics/company/revenue/` -> `CompanyRevenueView.get`.
-  - `GET /api/v1/analytics/company/activity/` -> `CompanyActivityView.get`.
-  - `GET /api/v1/analytics/frontdesk/stats/` -> `FrontDeskStatsView.get`.
-  - `GET /api/v1/analytics/frontdesk/availability/` -> `FrontDeskAvailabilityView.get`.
-- Signals:
-  - `booking_changed` listens to `post_save` and `post_delete` on `Booking`; marks company/date pairs dirty in `AnalyticsDirtyDate`.
-  - `car_rental_changed` listens to `post_save` and `post_delete` on `CarRental`; marks company/date pairs dirty.
-- Services / Utils:
-  - `compute_company_overview`, `compute_individual_owner_overview`, `revenue_timeseries`, `revenue_timeseries_individual`, `get_recent_activity`, `get_recent_activity_individual`, `compute_front_desk_stats` in `services.py`.
-  - `compute_front_desk_stats` and `get_availability_matrix` in `services_frontdesk.py` provide an alternate/front-desk-specialized implementation.
-
-### `apps.notifications`
-- Purpose: first-class notification records, user notification preferences, notification templates, unread-count caching, and email dispatch for notification events.
-- Models:
-  - `Notification`: `user` FK, `notification_type`, `title`, `message`, `metadata` JSON, `action_url`, `is_read`, `read_at`, `delivered_in_app`, `delivered_email`, `email_sent_at`, `priority`, `expires_at`; indexes on `user/is_read`, `user/created_at`, and `notification_type`.
-  - `NotificationPreference`: `user` OneToOne, `email_preferences` JSON, `in_app_preferences` JSON, `email_enabled`.
-  - `NotificationTemplate`: `notification_type` unique, `title_template`, `message_template`, `email_subject_template`, `email_body_template`, `email_html_template`, `required_variables` JSON.
-- Serializers:
-  - `NotificationSerializer`: exposes notification fields plus read-only display fields `notification_type_display` and `priority_display`.
-  - `NotificationPreferenceSerializer`: exposes `email_preferences`, `in_app_preferences`, `email_enabled`; merges JSON preference updates in `update()`.
-  - `BulkDeleteSerializer`: `ids` list of UUIDs.
-  - `BatchMarkReadSerializer`: `ids` list of UUIDs.
-- Views:
-  - `NotificationViewSet`: list/retrieve/destroy plus actions `mark-read`, `mark-all-read`, `bulk-delete`, `unread-count`, `mark-read-batch`, `summary`; `IsAuthenticated`; custom pagination/filtering/ordering and a 300/hour throttle.
-  - `NotificationPreferenceView`: `GET` and `PUT`; `IsAuthenticated`.
-- URLs:
-  - `GET /api/v1/notifications/`, `GET /api/v1/notifications/{pk}/`, `DELETE /api/v1/notifications/{pk}/`.
-  - `PATCH /api/v1/notifications/{pk}/mark-read/`, `POST /api/v1/notifications/mark-all-read/`, `DELETE /api/v1/notifications/bulk-delete/`, `GET /api/v1/notifications/unread-count/`, `POST /api/v1/notifications/mark-read-batch/`, `GET /api/v1/notifications/summary/`.
-  - `GET /api/v1/notifications/preferences/`, `PUT /api/v1/notifications/preferences/`.
-- Signals: no `signals.py` file found for this app.
-- Services / Utils:
-  - `NotificationService`: creates notifications from templates, honors per-user preferences, invalidates unread-count cache, enqueues email tasks, marks notifications read/read-all/batch, bulk-deletes, and notifies admins.
-  - `get_unread_count_cache_key(user_id)`: returns `notifications:unread_count:{user_id}`.
-  - `send_notification_email_task` Celery task dispatches notification emails through `EmailService`.
+  - Mounted under `/api/v1/analytics/`.
 
 ### `apps.favorites`
-- Purpose: generic user favorites with snapshotting for listings and other content types.
+- Purpose: authenticated and guest favorites with listing snapshots and later guest-to-user transfer.
 - Models:
-  - `Favorite`: `user` FK, `content_type` FK, `object_id`, `content_object` GFK, `snapshot` JSON, `snapshot_at`; unique together on `user/content_type/object_id`.
+  - `Favorite`: `user FK`, generic relation target, `snapshot JSONField`, `snapshot_at`.
+  - `GuestFavorite`: `guest_phone`, `linked_user FK nullable`, generic relation target, `snapshot`, `snapshot_at`.
 - Serializers:
-  - `FavoriteSerializer`: write `content_type`, `object_id`; read `content_type_display`, `object`, `created_at`; resolves `content_type` by `app_label.model` or PK and persists an object snapshot.
+  - `FavoriteSerializer`: `id`, `content_type`, `object_id`, `content_type_display`, `snapshot`, `object`, `created_at`.
+  - `GuestFavoriteSerializer`: similar plus `guest_phone`.
 - Views:
-  - `FavoriteViewSet`: full `ModelViewSet`; `IsAuthenticated`; `get_queryset()` scopes to the current user; action `toggle` adds/removes favorite state.
+  - `FavoriteViewSet` with `toggle`.
+  - `GuestFavoriteCollectionView`, `GuestFavoriteToggleView`.
 - URLs:
-  - `GET/POST /api/v1/favorites/`, `GET/PATCH/DELETE /api/v1/favorites/{pk}/`, `POST /api/v1/favorites/toggle/`.
-- Signals: no `signals.py` file found for this app.
-- Services / Utils:
-  - `get_favorite_object_ids(user, content_type)`: returns a set of favorite object IDs for one user/content type in one query.
+  - Mounted under `/api/v1/favorites/`.
 
-## 2. API Surface (Flutter-facing)
+### `apps.notifications`
+- Purpose: stored notifications, delivery preferences, templates, email/SMS/push task orchestration.
+- Models:
+  - `Notification`: recipient FK, `notification_type`, `title`, `message`, `metadata`, `action_url`, `is_read`, `read_at`, delivery flags for in-app/email/SMS/push, sent timestamps, `priority`, `expires_at`.
+  - `NotificationPreference`: `user OneToOne`, `email_preferences`, `in_app_preferences`, `sms_preferences`, `push_preferences`, `email_enabled`, `sms_enabled`, `push_enabled`.
+  - `NotificationTemplate`: template fields for in-app, email, SMS, and push rendering.
+- Serializers:
+  - `NotificationSerializer`, `NotificationPreferenceSerializer`, `NotificationTemplateSerializer`, `BulkDeleteSerializer`, `BatchMarkReadSerializer`.
+- Views:
+  - `NotificationViewSet`: list/retrieve/delete plus `mark-read`, `mark-all-read`, `bulk-delete`, `unread-count`, `mark-read-batch`, `summary`.
+  - `NotificationPreferenceView`.
+  - `NotificationTemplateViewSet` admin CRUD.
+- URLs:
+  - Mounted under `/api/v1/notifications/`.
 
-- `POST /api/v1/auth/token/` -> `CustomTokenObtainPairView.post` -> `CustomTokenObtainPairSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: JWT access/refresh pair plus `role`, `company`, `workspace`, or `individual_owner` metadata. Tests: no direct endpoint test found.
-- `POST /api/v1/auth/token/refresh/` -> `CustomTokenRefreshView.post` -> SimpleJWT refresh serializer; Auth required: no; Permissions: `AllowAny`; Response shape: new access token (and rotated refresh token if used by client). Tests: no direct endpoint test found.
-- `POST /api/v1/auth/logout/` -> `LogoutView.post` -> raw refresh-token blacklist flow; Auth required: no; Permissions: `AllowAny`; Response shape: empty 200 on success or 400 on invalid payload. Tests: no direct endpoint test found.
-- `GET /api/v1/auth/me/` -> `MeView.get` -> `UserResponseSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: current authenticated user profile with nested role and workspace. Tests: no direct endpoint test found.
-- `GET /api/v1/account/users/` -> `UserViewSet.list` -> `UserResponseSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: paginated list of current user only unless admin. Tests: no direct endpoint test found.
-- `POST /api/v1/account/users/` -> `UserViewSet.create` -> `UserSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: created user rendered through `UserResponseSerializer`. Tests: covered by `apps/account/tests/test_signup.py`.
-- `GET /api/v1/account/users/{pk}/` -> `UserViewSet.retrieve` -> `UserResponseSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: single user profile. Tests: no direct endpoint test found.
-- `PATCH /api/v1/account/users/{pk}/` -> `UserViewSet.partial_update` -> `UserUpdateSerializer`; Auth required: yes; Permissions: `IsOwnerOrReadOnly`; Response shape: updated user profile. Tests: no direct endpoint test found.
-- `DELETE /api/v1/account/users/{pk}/` -> `UserViewSet.destroy` -> `UserResponseSerializer`; Auth required: yes; Permissions: `IsOwnerOrReadOnly` plus explicit owner/admin guard; Response shape: empty 204. Tests: no direct endpoint test found.
-- `GET /api/v1/account/users/me/` -> `UserViewSet.me`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: current user profile. Tests: no direct endpoint test found.
-- `PATCH /api/v1/account/users/me/` -> `UserViewSet.me`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: updated current user profile. Tests: no direct endpoint test found.
-- `PUT /api/v1/account/users/me/` -> `UserViewSet.me`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: updated current user profile. Tests: no direct endpoint test found.
-- `DELETE /api/v1/account/users/me/` -> `UserViewSet.me`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: empty 204 or 400 on delete error. Tests: no direct endpoint test found.
-- `POST /api/v1/account/users/me/change-password/` -> `UserViewSet.change_password` -> `ChangePasswordSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: success message. Tests: no direct endpoint test found.
-- `POST /api/v1/account/users/{pk}/change-password/` -> `UserViewSet.change_password_for_user` -> `ChangePasswordSerializer`; Auth required: yes; Permissions: owner/admin path; Response shape: success message. Tests: no direct endpoint test found.
-- `GET /api/v1/account/companies/` -> `CompanyProfileViewSet.list` -> `CompanyProfileSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: paginated company profile list, optionally filtered by `managed=true`. Tests: no direct endpoint test found.
-- `POST /api/v1/account/companies/` -> `CompanyProfileViewSet.create` -> `CompanyRegistrationSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: created company profile plus user credentials sent by email. Tests: covered by `apps/account/tests/test_signup.py`.
-- `GET /api/v1/account/companies/{pk}/` -> `CompanyProfileViewSet.retrieve` -> `CompanyProfileSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: company profile detail. Tests: no direct endpoint test found.
-- `PATCH /api/v1/account/companies/{pk}/` -> `CompanyProfileViewSet.partial_update` -> `CompanyProfileSerializer`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: updated company profile. Tests: no direct endpoint test found.
-- `DELETE /api/v1/account/companies/{pk}/` -> `CompanyProfileViewSet.destroy` -> `CompanyProfileSerializer`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `POST /api/v1/account/companies/apply/` -> `CompanyProfileViewSet.apply` -> `CompanyApplicationSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: pending company profile response. Tests: no direct endpoint test found.
-- `POST /api/v1/account/companies/{pk}/approve/` -> `CompanyProfileViewSet.approve` -> `CompanyProfileResponseSerializer`; Auth required: yes; Permissions: `IsAdmin`; Response shape: approved company profile. Tests: no direct endpoint test found.
-- `POST /api/v1/account/companies/{pk}/reject/` -> `CompanyProfileViewSet.reject` -> `CompanyProfileResponseSerializer`; Auth required: yes; Permissions: `IsAdmin`; Response shape: rejected company profile. Tests: no direct endpoint test found.
-- `GET /api/v1/account/hotels/` -> `HotelProfileViewSet.list` -> `HotelProfileSerializer`/`HotelProfileResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: paginated public hotel list with favorite flag and optionally available rooms. Tests: covered by listing favorites integration tests.
-- `POST /api/v1/account/hotels/` -> `HotelProfileViewSet.create` -> `HotelProfileSerializer`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: created hotel profile. Tests: no direct endpoint test found.
-- `GET /api/v1/account/hotels/{pk}/` -> `HotelProfileViewSet.retrieve` -> `HotelProfileResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: hotel detail with nested company/facility/images. Tests: covered by favorites integration tests.
-- `PATCH /api/v1/account/hotels/{pk}/` -> `HotelProfileViewSet.partial_update` -> `HotelProfileSerializer`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: updated hotel profile. Tests: no direct endpoint test found.
-- `DELETE /api/v1/account/hotels/{pk}/` -> `HotelProfileViewSet.destroy` -> `HotelProfileSerializer`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `GET /api/v1/account/hotels/{pk}/check_availability/` -> `HotelProfileViewSet.check_availability` -> `HotelRoomAvailabilitySerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: hotel id, check-in/out, room availability list. Tests: no direct endpoint test found.
-- `GET /api/v1/account/hotels/featured/` -> `HotelProfileViewSet.get_featured_hotels` -> `HotelProfileSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: list of featured hotels. Tests: no direct endpoint test found.
-- `GET /api/v1/account/hotels/{pk}/addons/` -> `HotelProfileViewSet.get_hotel_addons` -> `AddonOfferingListSerializer`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: public-style addon list for the hotel, but access is restricted to company owners in the viewset. Tests: no direct endpoint test found.
-- `GET /api/v1/account/individual-owners/` -> `IndividualOwnerProfileViewSet.list` -> `IndividualOwnerProfileSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: paginated individual-owner list. Tests: no direct endpoint test found.
-- `POST /api/v1/account/individual-owners/` -> `IndividualOwnerProfileViewSet.create` -> `IndividualOwnerRegistrationSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: created owner profile plus activation email. Tests: no direct endpoint test found.
-- `GET /api/v1/account/individual-owners/{pk}/` -> `IndividualOwnerProfileViewSet.retrieve` -> `IndividualOwnerProfileSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: owner profile detail. Tests: no direct endpoint test found.
-- `PATCH /api/v1/account/individual-owners/{pk}/` -> `IndividualOwnerProfileViewSet.partial_update`; Auth required: yes; Permissions: `IsAdmin`; Response shape: updated owner profile. Tests: no direct endpoint test found.
-- `DELETE /api/v1/account/individual-owners/{pk}/` -> `IndividualOwnerProfileViewSet.destroy`; Auth required: yes; Permissions: `IsAdmin`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `GET /api/v1/account/staff/` -> `StaffViewSet.list` -> `StaffResponseSerializer`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: staff list scoped to company or individual owner. Tests: no direct endpoint test found.
-- `POST /api/v1/account/staff/` -> `StaffViewSet.create` -> `StaffCreateSerializer`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: created front-desk user credentials sent by email. Tests: no direct endpoint test found.
-- `GET /api/v1/account/staff/{pk}/` -> `StaffViewSet.retrieve` -> `StaffResponseSerializer`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: staff detail. Tests: no direct endpoint test found.
-- `DELETE /api/v1/account/staff/{pk}/` -> `StaffViewSet.destroy` -> `StaffResponseSerializer`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `GET /api/v1/account/staff/available-workspaces/` -> `StaffViewSet.available_workspaces`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: list of workspace options with `id`, `type`, `name`, `category`. Tests: no direct endpoint test found.
-- `GET /api/v1/account/password-reset/` does not exist; `POST /api/v1/account/password-reset/` -> `PasswordResetView.post` -> `PasswordResetSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: generic success message. Tests: no direct endpoint test found.
-- `POST /api/v1/account/password-reset/confirm/` -> `PasswordResetConfirmView.post` -> `PasswordResetConfirmSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: password reset success message. Tests: no direct endpoint test found.
-- `POST /api/v1/account/verify-email/` -> `VerifyEmailView.post` -> `VerifyEmailSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: email verified success message. Tests: no direct endpoint test found.
-- `POST /api/v1/account/verify-email-change/` -> `VerifyEmailChangeView.post` -> `VerifyEmailChangeSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: email change success message. Tests: no direct endpoint test found.
-- `GET /api/v1/core/facilities/` -> `FacilityViewSet.list` -> `FacilityResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: list of facilities. Tests: no direct endpoint test found.
-- `GET /api/v1/core/facilities/{pk}/` -> `FacilityViewSet.retrieve` -> `FacilityResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: facility detail. Tests: no direct endpoint test found.
-- `GET /api/v1/core/currencies/` -> `CurrencyViewSet.list`; Auth required: no; Permissions: `AllowAny`; Response shape: list of currency code/name pairs. Tests: covered by core currency tests.
-- `GET /api/v1/core/currencies/rates/` -> `CurrencyViewSet.rates`; Auth required: no; Permissions: `AllowAny`; Response shape: latest USD-based rate map keyed by target currency. Tests: covered by core currency tests.
-- `POST /api/v1/core/currency/convert/` -> `CurrencyConvertAPIView.post` -> `ConversionInputSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: converted amount, rate used, source/target currencies, and rate date. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/rooms/` -> `RoomListingViewSet.list` -> `RoomListingResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: paginated room cards with optional `price_quote`, `conversion`, `available_units`, and legacy preview fields. Tests: covered by room-booking and price-preview tests.
-- `POST /api/v1/listing/rooms/` -> `RoomListingViewSet.create` -> `RoomListingSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: created room detail through response serializer. Tests: covered by `apps/listing/tests/test_listing.py`.
-- `GET /api/v1/listing/rooms/{pk}/` -> `RoomListingViewSet.retrieve` -> `RoomListingResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: single room detail with optional pricing quote. Tests: covered by `apps/listing/tests/test_hotel_booking.py`.
-- `PATCH /api/v1/listing/rooms/{pk}/` -> `RoomListingViewSet.partial_update` -> `RoomListingSerializer`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: updated room. Tests: covered by `apps/listing/tests/test_listing.py`.
-- `DELETE /api/v1/listing/rooms/{pk}/` -> `RoomListingViewSet.destroy`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/rooms/{pk}/price-preview/` -> `RoomListingViewSet.price_preview`; Auth required: no; Permissions: `AllowAny`; Response shape: deprecated line-by-line room pricing preview. Tests: covered indirectly by hotel pricing tests.
-- `GET /api/v1/listing/rooms/availability-matrix/` -> `RoomListingViewSet.availability_matrix`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: room-by-room availability matrix across dates. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/guest-houses/` -> `GuestHouseProfileViewSet.list` -> `GuestHouseProfileResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: paginated guesthouse cards with favorites and rooms. Tests: covered by favorites integration tests.
-- `POST /api/v1/listing/guest-houses/` -> `GuestHouseProfileViewSet.create` -> `GuestHouseProfileSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: created guesthouse profile. Tests: covered by `apps/listing/tests/test_listing.py`.
-- `GET /api/v1/listing/guest-houses/{pk}/` -> `GuestHouseProfileViewSet.retrieve` -> `GuestHouseProfileResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: guesthouse detail with rooms. Tests: covered by favorites integration tests.
-- `PATCH /api/v1/listing/guest-houses/{pk}/` -> `GuestHouseProfileViewSet.partial_update`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: updated guesthouse profile. Tests: no direct endpoint test found.
-- `DELETE /api/v1/listing/guest-houses/{pk}/` -> `GuestHouseProfileViewSet.destroy`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/guest-houses/check-availability/` -> `GuestHouseProfileViewSet.check_availability`; Auth required: no; Permissions: `AllowAny`; Response shape: guesthouse search results plus availability metadata. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/guest-house-rooms/` -> `GuestHouseRoomViewSet.list` -> `GuestHouseRoomSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: list of room types. Tests: no direct endpoint test found.
-- `POST /api/v1/listing/guest-house-rooms/` -> `GuestHouseRoomViewSet.create`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: created guesthouse room. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/guest-house-rooms/{pk}/` -> `GuestHouseRoomViewSet.retrieve` -> `GuestHouseRoomResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: single guesthouse room detail. Tests: no direct endpoint test found.
-- `PATCH /api/v1/listing/guest-house-rooms/{pk}/` -> `GuestHouseRoomViewSet.partial_update`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: updated room. Tests: no direct endpoint test found.
-- `DELETE /api/v1/listing/guest-house-rooms/{pk}/` -> `GuestHouseRoomViewSet.destroy`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/guest-house-rooms/availability-matrix/` -> `GuestHouseRoomViewSet.availability_matrix`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: room availability matrix. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/cars/` -> `CarListingViewSet.list` -> `CarListingResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: paginated car cards with `price_quote`, `conversion`, and current availability. Tests: covered by car pricing tests.
-- `POST /api/v1/listing/cars/` -> `CarListingViewSet.create` -> `CarListingSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: created car listing. Tests: covered by `apps/listing/tests/test_listing.py`.
-- `GET /api/v1/listing/cars/{pk}/` -> `CarListingViewSet.retrieve` -> `CarListingResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: single car detail. Tests: covered by car pricing tests.
-- `PATCH /api/v1/listing/cars/{pk}/` -> `CarListingViewSet.partial_update`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: updated car listing. Tests: no direct endpoint test found.
-- `DELETE /api/v1/listing/cars/{pk}/` -> `CarListingViewSet.destroy`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `POST /api/v1/listing/cars/{pk}/check_availability/` -> `CarListingViewSet.check_availability` -> `AvailabilityCheckSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: availability result for a specific car. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/cars/available_for_rent/` -> `CarListingViewSet.available_for_rent` -> `CarSearchSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: list of available cars plus count. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/cars/my_listings/` -> `CarListingViewSet.my_listings`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: owner’s car listings. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/car-rentals/` -> `CarRentalViewSet.list` -> `CarRentalSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: paginated rentals. Tests: no direct endpoint test found.
-- `POST /api/v1/listing/car-rentals/` -> `CarRentalViewSet.create` -> `CarRentalSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: created rental. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/car-rentals/{pk}/` -> `CarRentalViewSet.retrieve` -> `CarRentalSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: rental detail. Tests: no direct endpoint test found.
-- `PATCH /api/v1/listing/car-rentals/{pk}/` -> `CarRentalViewSet.partial_update`; Auth required: yes; Permissions: `IsCarRentalOwner`; Response shape: updated rental. Tests: no direct endpoint test found.
-- `DELETE /api/v1/listing/car-rentals/{pk}/` -> `CarRentalViewSet.destroy`; Auth required: yes; Permissions: `IsCarRentalOwner`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/car-rentals/lookup/` -> `CarRentalViewSet.lookup`; Auth required: no; Permissions: `AllowAny`; Response shape: rental detail validated by reference + guest email. Tests: no direct endpoint test found.
-- `POST /api/v1/listing/car-rentals/{pk}/confirm/` -> `CarRentalViewSet.confirm`; Auth required: yes; Permissions: `IsCarRentalOwner`; Response shape: confirmed rental. Tests: no direct endpoint test found.
-- `POST /api/v1/listing/car-rentals/{pk}/cancel/` -> `CarRentalViewSet.cancel`; Auth required: yes; Permissions: `IsCarRentalOwner`; Response shape: cancelled rental. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/car-rentals/my_rentals/` -> `CarRentalViewSet.my_rentals`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: current user’s rentals. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/car-rentals/rental_stats/` -> `CarRentalViewSet.rental_stats`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: counts and total spent summary. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/stays/search/` -> `StaySearchView.get`; Auth required: no; Permissions: `AllowAny`; Response shape: paginated hotel search results with rooms, availability, and favorite flags. Tests: covered by favorites integration tests.
-- `PUT /api/v1/listing/stays/availability/{pk}/update/` -> `StayAvailabilityUpdateView.put`; Auth required: yes; Permissions: authenticated plus owner/admin check; Response shape: updated availability row with success detail. Tests: no direct endpoint test found.
-- `PATCH /api/v1/listing/car-availabilities/{pk}/update/` -> `CarAvailabilityUpdateAPIView.patch`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: updated car availability row. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/car-availabilities/by-car-and-date/` -> `CarAvailabilityByCarAndDateView.get`; Auth required: no; Permissions: `AllowAny`; Response shape: single-car availability response. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/car-availabilities/by-dates/` -> `CarAvailabilityByDateRangeView.get`; Auth required: no; Permissions: `AllowAny`; Response shape: all available cars in a date range. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/event-spaces/` -> `EventSpaceListingViewSet.list` -> `EventSpaceListingResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: paginated event-space cards with price quote and legacy preview fields. Tests: covered by event-space pricing tests.
-- `POST /api/v1/listing/event-spaces/` -> `EventSpaceListingViewSet.create` -> `EventSpaceListingSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: created event-space listing. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/event-spaces/{pk}/` -> `EventSpaceListingViewSet.retrieve` -> `EventSpaceListingResponseSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: event-space detail. Tests: no direct endpoint test found.
-- `PATCH /api/v1/listing/event-spaces/{pk}/` -> `EventSpaceListingViewSet.partial_update`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: updated event-space listing. Tests: no direct endpoint test found.
-- `DELETE /api/v1/listing/event-spaces/{pk}/` -> `EventSpaceListingViewSet.destroy`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/event-spaces/search/` -> `EventSpaceListingViewSet.search`; Auth required: no; Permissions: `AllowAny`; Response shape: available event spaces filtered by date/quantity/address. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/bookings-eventspaces/` -> `EventSpaceBookingViewSet.list` -> `EventSpaceBookingResponseSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: paginated event-space bookings. Tests: no direct endpoint test found.
-- `POST /api/v1/listing/bookings-eventspaces/` -> `EventSpaceBookingViewSet.create` -> `EventSpaceBookingSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: created booking. Tests: covered by event-space terms/booking tests.
-- `GET /api/v1/listing/bookings-eventspaces/{pk}/` -> `EventSpaceBookingViewSet.retrieve` -> `EventSpaceBookingResponseSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: booking detail. Tests: no direct endpoint test found.
-- `PATCH /api/v1/listing/bookings-eventspaces/{pk}/` -> `EventSpaceBookingViewSet.partial_update`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: updated booking. Tests: no direct endpoint test found.
-- `DELETE /api/v1/listing/bookings-eventspaces/{pk}/` -> `EventSpaceBookingViewSet.destroy`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `POST /api/v1/listing/bookings-eventspaces/walk-in/` -> `EventSpaceBookingViewSet.walk_in`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: created walk-in booking. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/bookings-eventspaces/lookup/` -> `EventSpaceBookingViewSet.lookup`; Auth required: no; Permissions: `AllowAny`; Response shape: booking detail by reference + email. Tests: no direct endpoint test found.
-- `POST /api/v1/listing/bookings-eventspaces/price-preview/` -> `EventSpaceBookingViewSet.price_preview`; Auth required: no; Permissions: `AllowAny`; Response shape: price preview response with totals and breakdown. Tests: covered by event-space pricing tests.
-- `GET /api/v1/listing/guesthouse-bookings/` -> `GuestHouseBookingViewSet.list` -> `GuestHouseBookingSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: paginated booking list. Tests: covered by guesthouse booking tests.
-- `POST /api/v1/listing/guesthouse-bookings/` -> `GuestHouseBookingViewSet.create` -> `GuestHouseBookingSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: created booking. Tests: covered by guesthouse booking tests.
-- `GET /api/v1/listing/guesthouse-bookings/{pk}/` -> `GuestHouseBookingViewSet.retrieve` -> `GuestHouseBookingSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: booking detail. Tests: covered by guesthouse booking tests.
-- `PATCH /api/v1/listing/guesthouse-bookings/{pk}/` -> `GuestHouseBookingViewSet.partial_update`; Auth required: yes; Permissions: `IsGuestHouseBookingOwner`; Response shape: updated booking. Tests: no direct endpoint test found.
-- `DELETE /api/v1/listing/guesthouse-bookings/{pk}/` -> `GuestHouseBookingViewSet.destroy`; Auth required: yes; Permissions: `IsGuestHouseBookingOwner`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/guesthouse-bookings/lookup/` -> `GuestHouseBookingViewSet.lookup`; Auth required: no; Permissions: `AllowAny`; Response shape: booking detail by reference + email. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/guesthouse-bookings/workspace-bookings/` -> `GuestHouseBookingViewSet.workspace_bookings`; Auth required: yes; Permissions: `IsAuthenticated` default action fallback; Response shape: bookings for current workspace. Tests: no direct endpoint test found.
-- `POST /api/v1/listing/guesthouse-bookings/walk-in/` -> `GuestHouseBookingViewSet.walk_in`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: created walk-in booking. Tests: no direct endpoint test found.
-- `POST /api/v1/listing/guesthouse-bookings/{pk}/cancel/` -> `GuestHouseBookingViewSet.cancel`; Auth required: yes; Permissions: `IsGuestHouseBookingOwner`; Response shape: cancelled booking. Tests: covered by guesthouse booking tests.
-- `GET /api/v1/listing/guesthouse-bookings/my_bookings/` -> `GuestHouseBookingViewSet.my_bookings`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: current user’s guesthouse bookings. Tests: covered by guesthouse booking tests.
-- `POST /api/v1/listing/guesthouse-bookings/price-preview/` -> `GuestHouseBookingViewSet.price_preview`; Auth required: no; Permissions: `AllowAny`; Response shape: price preview response with totals and breakdown. Tests: covered by guesthouse/event-space pricing tests.
-- `GET /api/v1/listing/terms/` -> `TermsAndConditionsViewSet.list`; Auth required: no; Permissions: `AllowAny`; Response shape: active T&C list. Tests: covered by T&C tests.
-- `GET /api/v1/listing/terms/{pk}/` -> `TermsAndConditionsViewSet.retrieve`; Auth required: no; Permissions: `AllowAny`; Response shape: T&C detail. Tests: covered by T&C tests.
-- `GET /api/v1/listing/terms/hotel/{hotel_id}/` -> `TermsAndConditionsViewSet.hotel_terms`; Auth required: no; Permissions: `AllowAny`; Response shape: active hotel T&C or 404. Tests: covered by T&C tests.
-- `GET /api/v1/listing/terms/guesthouse/{gh_id}/` -> `TermsAndConditionsViewSet.guesthouse_terms`; Auth required: no; Permissions: `AllowAny`; Response shape: active guesthouse T&C or 404. Tests: covered by T&C tests.
-- `GET /api/v1/listing/terms/company/{company_id}/` -> `TermsAndConditionsViewSet.company_terms`; Auth required: no; Permissions: `AllowAny`; Response shape: active company T&C or 404. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/addon-offerings/` -> `AddonOfferingViewSet.list` -> `AddonOfferingListSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: public addon list. Tests: no direct endpoint test found.
-- `POST /api/v1/listing/addon-offerings/` -> `AddonOfferingViewSet.create` -> `AddonOfferingSerializer`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: created addon. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/addon-offerings/{pk}/` -> `AddonOfferingViewSet.retrieve` -> `AddonOfferingListSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: addon detail. Tests: no direct endpoint test found.
-- `PATCH /api/v1/listing/addon-offerings/{pk}/` -> `AddonOfferingViewSet.partial_update`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: updated addon. Tests: no direct endpoint test found.
-- `DELETE /api/v1/listing/addon-offerings/{pk}/` -> `AddonOfferingViewSet.destroy`; Auth required: yes; Permissions: `IsListingOwner`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/seasons/`, `POST /api/v1/listing/seasons/`, `GET/PATCH/DELETE /api/v1/listing/seasons/{pk}/` -> `SeasonViewSet`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: CRUD on seasonal definitions. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/seasonal-rates/`, `POST /api/v1/listing/seasonal-rates/`, `GET/PATCH/DELETE /api/v1/listing/seasonal-rates/{pk}/` -> `SeasonalRateViewSet`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: CRUD on seasonal rate overrides. Tests: no direct endpoint test found.
-- `GET /api/v1/listing/inventory/grid/` -> `InventoryGridView.get`; Auth required: yes; Permissions: `IsAuthenticated` and `IsListingOwner`; Response shape: 30-day grid by unit/date. Tests: no direct endpoint test found.
-- `POST /api/v1/payment/initiate/` -> `InitiatePaymentView.post` -> `PaymentInitializeSerializer`; Auth required: no; Permissions: `AllowAny`; Response shape: checkout URL, tx reference, and locked server-calculated amounts. Tests: covered by `apps/payment/tests/test_guesthouse_payment.py`.
-- `GET /api/v1/payment/callback/chapa/` -> `chapa_callback`; Auth required: no; Permissions: `AllowAny`; Response shape: callback success/error message. Tests: no direct endpoint test found.
-- `POST /api/v1/payment/webhook/chapa/` -> `chapa_webhook`; Auth required: no; Permissions: `AllowAny`; Response shape: webhook success/error message. Tests: no direct endpoint test found.
-- `GET /api/v1/payment/verify/{tx_ref}/` -> `verify_payment`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: payment transaction plus Chapa verification payload. Tests: no direct endpoint test found.
-- `GET /api/v1/payment/verify-public/{tx_ref}/` -> `verify_payment_public`; Auth required: no; Permissions: `AllowAny`; Response shape: payment transaction plus Chapa verification payload. Tests: no direct endpoint test found.
-- `PUT /api/v1/payment/cancel/{tx_ref}/` -> `cancel_payment`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: cancellation success/error message. Tests: no direct endpoint test found.
-- `GET /api/v1/payment/ledger/` -> `OwnerPaymentViewSet.list` -> `OwnerPaymentTransactionSerializer`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: paginated ledger results plus `summary` aggregates. Tests: no direct endpoint test found.
-- `GET /api/v1/payment/ledger/{pk}/` -> `OwnerPaymentViewSet.retrieve` -> `OwnerPaymentTransactionSerializer`; Auth required: yes; Permissions: `IsCompanyOwner`; Response shape: single ledger row. Tests: no direct endpoint test found.
-- `GET /api/v1/analytics/company/overview/` -> `CompanyOverviewView.get` -> `OverviewSerializer`; Auth required: yes; Permissions: `IsCompanyOrIndividualOwner`; Response shape: revenue/bookings/cancellation summary with top listings. Tests: only auth-requirement test found, not full output test.
-- `GET /api/v1/analytics/company/revenue/` -> `CompanyRevenueView.get` -> `TimeseriesItemSerializer`; Auth required: yes; Permissions: `IsCompanyOrIndividualOwner`; Response shape: period/revenue timeseries. Tests: only auth-requirement test found, not full output test.
-- `GET /api/v1/analytics/company/activity/` -> `CompanyActivityView.get`; Auth required: yes; Permissions: `IsCompanyOrIndividualOwner`; Response shape: recent activity feed objects. Tests: no direct endpoint test found.
-- `GET /api/v1/analytics/frontdesk/stats/` -> `FrontDeskStatsView.get` -> `FrontDeskStatsSerializer`; Auth required: yes; Permissions: `IsCompanyOrIndividualOwner`; Response shape: arrivals/departures/in-house/availability summary. Tests: no direct endpoint test found.
-- `GET /api/v1/analytics/frontdesk/availability/` -> `FrontDeskAvailabilityView.get`; Auth required: yes; Permissions: `IsCompanyOrIndividualOwner`; Response shape: availability matrix list. Tests: no direct endpoint test found.
-- `GET /api/v1/notifications/` -> `NotificationViewSet.list` -> `NotificationSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: paginated current-user notifications with filters and ordering. Tests: no direct endpoint test found.
-- `GET /api/v1/notifications/{pk}/` -> `NotificationViewSet.retrieve` -> `NotificationSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: notification detail. Tests: no direct endpoint test found.
-- `DELETE /api/v1/notifications/{pk}/` -> `NotificationViewSet.destroy`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `PATCH /api/v1/notifications/{pk}/mark-read/` -> `NotificationViewSet.mark_read`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: success message and updated notification. Tests: no direct endpoint test found.
-- `POST /api/v1/notifications/mark-all-read/` -> `NotificationViewSet.mark_all_read`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: count of updated notifications. Tests: no direct endpoint test found.
-- `DELETE /api/v1/notifications/bulk-delete/` -> `NotificationViewSet.bulk_delete` -> `BulkDeleteSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: deleted count. Tests: no direct endpoint test found.
-- `GET /api/v1/notifications/unread-count/` -> `NotificationViewSet.unread_count`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: unread count integer. Tests: no direct endpoint test found.
-- `POST /api/v1/notifications/mark-read-batch/` -> `NotificationViewSet.mark_read_batch` -> `BatchMarkReadSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: updated count. Tests: no direct endpoint test found.
-- `GET /api/v1/notifications/summary/` -> `NotificationViewSet.summary`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: unread totals by type and priority. Tests: no direct endpoint test found.
-- `GET /api/v1/notifications/preferences/` -> `NotificationPreferenceView.get` -> `NotificationPreferenceSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: current user notification preferences. Tests: no direct endpoint test found.
-- `PUT /api/v1/notifications/preferences/` -> `NotificationPreferenceView.put` -> `NotificationPreferenceSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: updated preferences. Tests: no direct endpoint test found.
-- `GET /api/v1/favorites/` -> `FavoriteViewSet.list` -> `FavoriteSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: current-user favorites list. Tests: covered by listing favorites integration tests.
-- `POST /api/v1/favorites/` -> `FavoriteViewSet.create` -> `FavoriteSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: created favorite with snapshot. Tests: covered by listing favorites integration tests.
-- `GET /api/v1/favorites/{pk}/` -> `FavoriteViewSet.retrieve` -> `FavoriteSerializer`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: favorite detail plus snapshot/object block. Tests: no direct endpoint test found.
-- `PATCH /api/v1/favorites/{pk}/` -> `FavoriteViewSet.partial_update`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: updated favorite. Tests: no direct endpoint test found.
-- `DELETE /api/v1/favorites/{pk}/` -> `FavoriteViewSet.destroy`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: empty 204. Tests: no direct endpoint test found.
-- `POST /api/v1/favorites/toggle/` -> `FavoriteViewSet.toggle`; Auth required: yes; Permissions: `IsAuthenticated`; Response shape: either `{detail: "removed"}` or created favorite payload. Tests: covered by listing favorites integration tests.
+### `apps.promotions`
+- Purpose: campaign management, placement inventory, click/impression tracking, and public promoted listing feed blocks.
+- Models:
+  - `PromotionCampaign`: `name`, `advertiser FK User`, `status`, `starts_at`, `ends_at`, `budget`.
+  - `PromotionPlacement`: `campaign FK`, `slot_type`, generic target `content_type/object_id/content_object`, `target_category`, `display_order`, `is_active`.
+  - `PromotionImpression`: `placement FK`, `user FK nullable`, `ip_address`, `recorded_at`.
+  - `PromotionClick`: same shape as impression.
+- Serializers:
+  - `PromotionCampaignSerializer`, `PromotionCampaignDetailSerializer`.
+  - `PromotionPlacementSerializer`.
+  - `PublicPlacementSerializer`: public snapshot of promoted listing/category.
+  - `TrackingEventSerializer`.
+- Views:
+  - `PromotionCampaignViewSet` admin CRUD plus nested `placements`.
+  - `PublicPromotionPlacementViewSet`.
+  - `PromotionTrackingViewSet`.
+- URLs:
+  - Mounted under `/api/v1/promotions/`.
 
-## 3. Celery Tasks
+## 2. Complete API Surface
 
-- `apps.core.tasks.fetch_daily_exchange_rates` -> periodic via beat; fetches daily exchange rates from the external provider and persists `CurrencyRate` rows via `CurrencyService.get_daily_exchange_rate`; beat schedule `fetch-daily-exchange-rates-every-1-day` at `00:05` daily.
-- `apps.listing.tasks.auto_cancel_pending_booking` -> async task triggered by booking-save signal and periodic safety sweep; locks and cancels stale pending `Booking` rows, releasing inventory via `BookingService.cancel_booking`.
-- `apps.listing.tasks.auto_cancel_pending_guesthouse_booking` -> async task triggered by guesthouse-booking-save signal and periodic safety sweep; locks and cancels stale pending `GuestHouseBooking` rows, releasing inventory via `GuestHouseBookingService.cancel_booking`.
-- `apps.listing.tasks.cancel_all_expired_bookings` -> periodic beat task; sweeps stale pending hotel and guesthouse bookings and dispatches the individual auto-cancel tasks; beat schedule `cleanup-expired-bookings-every-5-minutes` every 5 minutes.
-- `apps.notifications.tasks.send_notification_email_task` -> async task; loads a user by ID and sends notification email via `EmailService.send_notification_email`.
-- `config.celery.debug_task` -> async test helper; prints the request context and is not part of app business logic.
-- Non-task helper in a tasks module: `apps.listing.tasks.track_availability(days_ahead=180)` is a plain helper function, not a Celery task decorator.
+All routes below are current code routes cross-checked against `schema.yaml`. No obvious schema mismatch was found in the scanned surface.
 
-## 4. Authentication & Permissions
+### Account and Auth
+- `POST /api/v1/auth/token/` â†’ `CustomTokenObtainPairView.post`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: JWT pair plus enriched user/role/profile block | Added in: original, deprecated phone-first transition path
+- `POST /api/v1/auth/token/refresh/` â†’ `CustomTokenRefreshView.post`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: rotated access/refresh token data | Added in: original
+- `POST /api/v1/auth/otp/request/` â†’ `OtpRequestView.post`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: `challenge_id`, `challenge_token`, `cooldown_seconds`, `expires_at` | Added in: Phase 2
+- `POST /api/v1/auth/otp/verify/` â†’ `OtpVerifyView.post`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: verification result, optional tokens, guest phone verification token where applicable | Added in: Phase 2
+- `POST /api/v1/auth/logout/` â†’ `LogoutView.post`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: refresh blacklist result | Added in: original
+- `GET /api/v1/auth/me/` â†’ `MeView.get`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes | Response: current user profile | Added in: original
+- `GET/POST /api/v1/account/users/` â†’ `UserViewSet.list/create`
+  Auth: list yes, create no | Permission: action-based | Flutter-facing: yes | Response: user list or created user with phone-verification state | Added in: original, Phase 2 signup hardening
+- `GET/PATCH/DELETE /api/v1/account/users/{id}/` â†’ `UserViewSet.retrieve/partial_update/destroy`
+  Auth: yes | Permission: action-based | Flutter-facing: limited | Response: user profile | Added in: original
+- `GET/PATCH/PUT/DELETE /api/v1/account/users/me/` â†’ `UserViewSet.me`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes | Response: current user update/read | Added in: original
+- `POST /api/v1/account/users/me/change-password/` â†’ `UserViewSet.change_password_me`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes | Response: success message | Added in: original, behavior updated in Phase 2
+- `POST /api/v1/account/users/{id}/change-password/` â†’ `UserViewSet.change_password`
+  Auth: yes | Permission: action-based | Flutter-facing: no | Response: success message | Added in: original
+- `POST /api/v1/account/users/me/convert-guest-bookings/` â†’ `UserViewSet.convert_guest_bookings`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes | Response: linked guest booking/favorite counts | Added in: Phase 2
+- `GET/POST /api/v1/account/companies/` â†’ `CompanyProfileViewSet.list/create`
+  Auth: list yes, create no | Permission: action-based | Flutter-facing: mostly React/owner | Response: company profile list/create | Added in: original
+- `GET/PATCH/DELETE /api/v1/account/companies/{id}/` â†’ `CompanyProfileViewSet.retrieve/partial_update/destroy`
+  Auth: yes | Permission: action-based | Flutter-facing: no | Response: company profile detail | Added in: original
+- `POST /api/v1/account/companies/apply/` â†’ `CompanyProfileViewSet.apply`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: no | Response: submitted company application | Added in: original
+- `POST /api/v1/account/companies/{id}/approve/` â†’ `CompanyProfileViewSet.approve`
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Response: approved profile | Added in: original
+- `POST /api/v1/account/companies/{id}/reject/` â†’ `CompanyProfileViewSet.reject`
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Response: rejected profile | Added in: original
+- `GET/POST /api/v1/account/hotels/` â†’ `HotelProfileViewSet.list/create`
+  Auth: read no, create yes | Permission: action-based | Flutter-facing: detail/list yes, create no | Response: hotel payload with facilities, images, geo, verification | Added in: original, Phase 2/3 additive fields
+- `GET/PATCH/DELETE /api/v1/account/hotels/{id}/` â†’ `HotelProfileViewSet.retrieve/partial_update/destroy`
+  Auth: read no, write yes | Permission: action-based | Flutter-facing: detail yes | Response: hotel detail | Added in: original
+- `GET /api/v1/account/hotels/{id}/check_availability/` â†’ `HotelProfileViewSet.check_availability`
+  Auth: no | Permission: public | Flutter-facing: yes | Response: room availability summary | Added in: original
+- `GET /api/v1/account/hotels/featured/` â†’ `HotelProfileViewSet.featured`
+  Auth: no | Permission: public | Flutter-facing: yes | Response: featured hotels | Added in: original
+- `GET /api/v1/account/hotels/{id}/addons/` â†’ `HotelProfileViewSet.addons`
+  Auth: yes | Permission: owner/admin | Flutter-facing: no | Response: hotel add-ons | Added in: original
+- `POST /api/v1/account/hotels/{id}/verify/` â†’ `HotelProfileViewSet.verify`
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Response: verified hotel | Added in: Phase 2
+- `POST /api/v1/account/hotels/{id}/unverify/` â†’ `HotelProfileViewSet.unverify`
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Response: unverified hotel | Added in: Phase 2
+- `POST /api/v1/account/hotels/{id}/activate/` â†’ `HotelProfileViewSet.activate`
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Response: activated hotel | Added in: Phase 2
+- `POST /api/v1/account/hotels/{id}/deactivate/` â†’ `HotelProfileViewSet.deactivate`
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Response: deactivated hotel | Added in: Phase 2
+- `GET/POST /api/v1/account/individual-owners/` â†’ `IndividualOwnerProfileViewSet.list/create`
+  Auth: list no, create yes admin-managed | Permission: action-based | Flutter-facing: no | Response: owner profiles | Added in: original, create flow changed in Phase 2
+- `GET/PATCH/DELETE /api/v1/account/individual-owners/{id}/` â†’ `IndividualOwnerProfileViewSet.retrieve/partial_update/destroy`
+  Auth: read no, write yes | Permission: action-based | Flutter-facing: no | Response: owner detail with agreement status | Added in: original
+- `GET/POST/PATCH /api/v1/account/individual-owners/{id}/agreement/` â†’ `IndividualOwnerProfileViewSet.agreement`
+  Auth: yes | Permission: action-based | Flutter-facing: no | Response: agreement state | Added in: Phase 2
+- `POST /api/v1/account/individual-owners/{id}/agreement/sign/` â†’ `IndividualOwnerProfileViewSet.sign_agreement`
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Response: signed agreement | Added in: Phase 2
+- `POST /api/v1/account/individual-owners/{id}/agreement/revoke/` â†’ `IndividualOwnerProfileViewSet.revoke_agreement`
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Response: revoked agreement | Added in: Phase 2
+- `GET /api/v1/account/profile/agreement/` â†’ `OwnerProfileAgreementView.get`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes for owner portal, no for regular-user app | Response: current owner agreement status | Added in: Phase 2
+- `GET/POST /api/v1/account/staff/` â†’ `StaffViewSet.list/create`
+  Auth: yes | Permission: `IsCompanyOwner` | Flutter-facing: no | Response: staff list/create | Added in: original
+- `GET/DELETE /api/v1/account/staff/{id}/` â†’ `StaffViewSet.retrieve/destroy`
+  Auth: yes | Permission: `IsCompanyOwner` | Flutter-facing: no | Response: staff detail | Added in: original
+- `GET /api/v1/account/staff/available-workspaces/` â†’ `StaffViewSet.available_workspaces`
+  Auth: yes | Permission: `IsCompanyOwner` | Flutter-facing: no | Response: workspace options | Added in: original
+- `GET/POST /api/v1/account/roles/` and `GET/PATCH/DELETE /api/v1/account/roles/{id}/` â†’ `RoleViewSet`
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Response: roles | Added in: Phase 2 admin master-data exposure
+- `POST /api/v1/account/password-reset/` â†’ `PasswordResetView.post`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: reset initiation result | Added in: original, now phone-first logic backed | Added in: original
+- `POST /api/v1/account/password-reset/confirm/` â†’ `PasswordResetConfirmView.post`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: password reset result | Added in: original
+- `POST /api/v1/account/verify-email/` and `POST /api/v1/account/verify-email-change/` â†’ email verification endpoints
+  Auth: no | Permission: `AllowAny` | Flutter-facing: low | Response: verification result | Added in: original
+- `POST /api/v1/account/location/` â†’ `UserLocationView.post`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes | Response: persisted user location state | Added in: Phase 3
 
-- JWT config: `DEFAULT_AUTHENTICATION_CLASSES` uses `rest_framework_simplejwt.authentication.JWTAuthentication`; `AUTH_TOKEN_CLASSES` is access-token only (`AccessToken`); access lifetime is `1 hour` in non-debug and `30 days` in debug; refresh lifetime is `1 day` in non-debug and `30 days` in debug; refresh rotation is enabled with `ROTATE_REFRESH_TOKENS=True`; token blacklisting app is installed and used by the logout endpoint; `BLACKLIST_AFTER_ROTATION` is not explicitly set in repo settings.
-- Default DRF permission: `IsAuthenticated` globally, overridden per-view/action for public endpoints.
-- Throttle scopes in repo settings: `auth_login`, `auth_register`, `password_reset`, `verify_email`, `availability_check`, `payment_init`, `booking_create`, `token_refresh`, `token_blacklist`, `payment_verify`, `payment_callback`, `payment_webhook`, `currency_rates`, `currency_convert`.
-- Custom permission classes and what they guard:
-  - `IsAdmin`: authenticated superuser or role code `admin`; used for company approval/rejection and owner-management flows.
-  - `IsCompany`: authenticated admin/company users; used for company-scoped actions.
-  - `IsCompanyOrIndividualOwner`: authenticated admin/company/owner users; used for analytics views.
-  - `IsUser`: authenticated non-admin regular users; used where a plain user role is required.
-  - `IsOwnerOrReadOnly`: safe methods always allowed; unsafe methods require object ownership via `obj.user`.
-  - `IsAuthenticatedOrReadOnly`: safe methods public, unsafe methods authenticated.
-  - `IsCompanyOwner`: admin/company or object ownership through `user`, `company.user`, or `individual_owner`; used for staff, company-managed listing mutations, and payment ledger.
-  - `IsListingOwner`: admin/company/front-desk style listing ownership checks through `company`, `individual_owner`, `guest_house`, and `hotel` relationships; used for listing CRUD and inventory management.
-  - `IsBookingOwner`: admin or booking owner; also checks hotel-company ownership through booking items; used for booking cancellation/update restrictions.
-  - `IsCarRentalOwner`: admin or renter/car-owner; used for car-rental cancellation/update restrictions.
-  - `CanModifyBooking`: admin or pending-booking owner; used where only pending bookings are mutable.
-  - `IsPublicReadOnly`: safe methods public, writes authenticated; used for read-heavy endpoints.
-  - `IsCompanyOrFrontDesk`: allows company or front-desk roles, walking up parent roles when needed.
-  - `ORPermission`: runtime composition helper that passes if any wrapped permission passes.
-  - `IsGuestHouseBookingOwner`: admin, renter, or guesthouse-host owner; used for guesthouse booking modifications/cancellation.
-- OAuth2 scopes: none configured in repository settings or app code.
+### Core
+- `GET /api/v1/core/facilities/`, `GET /api/v1/core/facilities/{id}/`, `POST/PATCH/DELETE` same routes for admin â†’ `FacilityViewSet`
+  Auth: read no, write yes | Permission: `AllowAny` for read, `IsAdmin` for write | Flutter-facing: read yes | Response: facility objects | Added in: original read, Phase 2 admin write surface
+- `GET /api/v1/core/currencies/` â†’ `CurrencyViewSet.list`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: currency code/name list | Added in: original
+- `GET /api/v1/core/currencies/rates/` â†’ `CurrencyViewSet.rates`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: latest USD-based rate map | Added in: original
+- `POST /api/v1/core/currency/convert/` â†’ `CurrencyConvertAPIView.post`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: converted amount and effective rate | Added in: original
 
-## 5. Redis Usage
+### Listings
+- `GET/POST /api/v1/listing/rooms/`, `GET/PATCH/DELETE /api/v1/listing/rooms/{id}/` â†’ `RoomListingViewSet`
+  Auth: read no, write yes | Permission: action-based owner/admin | Flutter-facing: yes for read | Response: room listing payload with geo, verification, favorites, price quote | Added in: original
+- `GET /api/v1/listing/rooms/{id}/price-preview/` â†’ `RoomListingViewSet.price_preview`
+  Auth: no | Permission: public | Flutter-facing: yes | Response: quote for one room | Added in: original
+- `GET /api/v1/listing/rooms/availability-matrix/` â†’ `RoomListingViewSet.availability_matrix`
+  Auth: yes | Permission: owner/admin | Flutter-facing: no | Response: owner inventory matrix | Added in: original
+- `POST /api/v1/listing/rooms/{id}/verify/`, `POST /api/v1/listing/rooms/{id}/unverify/` â†’ admin verify actions
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Added in: Phase 2
+- `GET/POST /api/v1/listing/guest-houses/`, `GET/PATCH/DELETE /api/v1/listing/guest-houses/{id}/` â†’ `GuestHouseProfileViewSet`
+  Auth: read no, write yes | Permission: action-based | Flutter-facing: yes for read | Response: guesthouse payload | Added in: original
+- `GET /api/v1/listing/guest-houses/check-availability/` â†’ `GuestHouseProfileViewSet.check_availability`
+  Auth: no | Permission: public | Flutter-facing: yes | Response: guesthouse availability | Added in: original
+- `POST /api/v1/listing/guest-houses/{id}/verify/`, `POST /api/v1/listing/guest-houses/{id}/unverify/` â†’ admin verify actions
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Added in: Phase 2
+- `GET/POST /api/v1/listing/guest-house-rooms/`, `GET/PATCH/DELETE /api/v1/listing/guest-house-rooms/{id}/` â†’ `GuestHouseRoomViewSet`
+  Auth: read no, write yes | Permission: action-based | Flutter-facing: yes for read | Response: guesthouse room payload | Added in: original
+- `GET /api/v1/listing/guest-house-rooms/availability-matrix/` â†’ `GuestHouseRoomViewSet.availability_matrix`
+  Auth: yes | Permission: owner/admin | Flutter-facing: no | Response: room matrix | Added in: original
+- `POST /api/v1/listing/guest-house-rooms/{id}/verify/`, `POST /api/v1/listing/guest-house-rooms/{id}/unverify/` â†’ admin verify actions
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Added in: Phase 2
+- `GET/POST /api/v1/listing/cars/`, `GET/PATCH/DELETE /api/v1/listing/cars/{id}/` â†’ `CarListingViewSet`
+  Auth: read no, write yes | Permission: action-based | Flutter-facing: yes for read | Response: car listing payload with compliance and geo fields | Added in: original, additive fields in Phase 2/3
+- `POST /api/v1/listing/cars/{id}/check_availability/` â†’ `CarListingViewSet.check_availability`
+  Auth: no | Permission: public | Flutter-facing: yes | Response: date-range availability | Added in: original
+- `GET /api/v1/listing/cars/available_for_rent/` â†’ `CarListingViewSet.available_for_rent`
+  Auth: no | Permission: public | Flutter-facing: yes | Response: rentable cars | Added in: original
+- `GET /api/v1/listing/cars/my_listings/` â†’ `CarListingViewSet.my_listings`
+  Auth: yes | Permission: owner/admin | Flutter-facing: no | Response: owner cars | Added in: original
+- `POST /api/v1/listing/cars/{id}/verify/`, `POST /api/v1/listing/cars/{id}/unverify/` â†’ admin verify actions
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Added in: Phase 2
+- `GET/POST /api/v1/listing/car-sales/`, `GET /api/v1/listing/car-sales/{id}/` â†’ `CarSaleListingViewSet.list/create/retrieve`
+  Auth: read no, create yes | Permission: action-based | Flutter-facing: yes | Response: sale listing with `reveal_state` and payment state context | Added in: Phase 2
+- `POST /api/v1/listing/car-sales/{id}/request-contact/` â†’ `CarSaleListingViewSet.request_contact`
+  Auth: no for guest flow, yes optional for user | Permission: public with OTP-backed guest path | Flutter-facing: yes | Response: reveal request/payment-init payload | Added in: Phase 2
+- `GET /api/v1/listing/car-sales/{id}/contact/` â†’ `CarSaleListingViewSet.contact`
+  Auth: conditional by reveal ownership or guest proof | Permission: action-based | Flutter-facing: yes | Response: seller contact only after verified payment | Added in: Phase 2
+- `POST /api/v1/listing/car-sales/guest-otp/` â†’ `CarSaleListingViewSet.guest_otp`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: OTP challenge for guest contact reveal | Added in: Phase 2
+- `POST /api/v1/listing/car-sales/{id}/verify/`, `POST /api/v1/listing/car-sales/{id}/unverify/` â†’ admin verify actions
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Added in: Phase 2
+- `GET/POST /api/v1/listing/properties/`, `GET/PATCH/DELETE /api/v1/listing/properties/{id}/` â†’ `PropertyListingViewSet`
+  Auth: read no, write yes | Permission: action-based | Flutter-facing: yes for read | Response: property-rental listing payload | Added in: original
+- `POST /api/v1/listing/properties/{id}/verify/`, `POST /api/v1/listing/properties/{id}/unverify/` â†’ admin verify actions
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Added in: Phase 2
+- `GET/POST /api/v1/listing/property-sales/`, `GET /api/v1/listing/property-sales/{id}/` â†’ `PropertySaleListingViewSet`
+  Auth: read no, create yes | Permission: action-based | Flutter-facing: yes | Response: property-sale listing with reveal state | Added in: Phase 2
+- `POST /api/v1/listing/property-sales/{id}/request-contact/` â†’ `PropertySaleListingViewSet.request_contact`
+  Auth: no for guest flow, yes optional for user | Permission: public with OTP-backed guest path | Flutter-facing: yes | Response: reveal request/payment-init payload | Added in: Phase 2
+- `GET /api/v1/listing/property-sales/{id}/contact/` â†’ `PropertySaleListingViewSet.contact`
+  Auth: conditional | Permission: action-based | Flutter-facing: yes | Response: seller contact after verified payment | Added in: Phase 2
+- `POST /api/v1/listing/property-sales/guest-otp/` â†’ `PropertySaleListingViewSet.guest_otp`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: OTP challenge | Added in: Phase 2
+- `POST /api/v1/listing/property-sales/{id}/verify/`, `POST /api/v1/listing/property-sales/{id}/unverify/` â†’ admin verify actions
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Added in: Phase 2
+- `GET /api/v1/listing/amenities/`, `GET /api/v1/listing/amenities/{id}/`, admin write same routes â†’ `AmenityViewSet`
+  Auth: read no, write yes | Permission: public read / admin write | Flutter-facing: yes for read | Response: amenity list | Added in: original read, Phase 2 admin write surface
+- `GET/POST /api/v1/listing/bookings/`, `GET/PATCH/DELETE /api/v1/listing/bookings/{id}/` â†’ `BookingViewSet`
+  Auth: create supports guest/public, list/detail owner/admin | Permission: action-based | Flutter-facing: yes | Response: hotel booking payload with items, totals, status, terms snapshot | Added in: original
+- `POST /api/v1/listing/bookings/guest-otp/request/` â†’ `BookingViewSet.guest_otp_request`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: guest booking OTP challenge | Added in: Phase 2
+- `GET /api/v1/listing/bookings/lookup/` â†’ `BookingViewSet.lookup`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: guest booking lookup by phone-verified proof | Added in: original, behavior updated in Phase 3
+- `POST /api/v1/listing/bookings/price-preview/` â†’ `BookingViewSet.price_preview`
+  Auth: no | Permission: public | Flutter-facing: yes | Response: booking preview totals | Added in: original
+- `POST /api/v1/listing/bookings/walk-in/` â†’ `BookingViewSet.walk_in`
+  Auth: yes | Permission: `IsAuthenticated` with owner/front-desk rules | Flutter-facing: no | Response: created walk-in booking | Added in: original
+- `GET /api/v1/listing/bookings/workspace-bookings/` â†’ `BookingViewSet.workspace_bookings`
+  Auth: yes | Permission: owner/front-desk | Flutter-facing: no | Response: workspace booking list | Added in: original
+- `POST /api/v1/listing/bookings/{id}/cancel/` â†’ `BookingViewSet.cancel`
+  Auth: conditional owner/guest | Permission: action-based | Flutter-facing: yes | Response: cancel result with no-refund policy fields | Added in: original, additive policy fields in Phase 2
+- `POST /api/v1/listing/bookings/{id}/partial-cancel/` â†’ `BookingViewSet.partial_cancel`
+  Auth: yes | Permission: action-based | Flutter-facing: limited | Response: partial cancel result | Added in: original
+- `GET/POST /api/v1/listing/guesthouse-bookings/`, `GET/PATCH/DELETE /api/v1/listing/guesthouse-bookings/{id}/` â†’ `GuestHouseBookingViewSet`
+  Auth: mixed public create + owner list/detail | Permission: action-based | Flutter-facing: yes | Response: guesthouse booking payload | Added in: original
+- `POST /api/v1/listing/guesthouse-bookings/guest-otp/request/`, `GET /api/v1/listing/guesthouse-bookings/lookup/`, `GET /api/v1/listing/guesthouse-bookings/my_bookings/`, `POST /api/v1/listing/guesthouse-bookings/price-preview/`, `POST /api/v1/listing/guesthouse-bookings/walk-in/`, `GET /api/v1/listing/guesthouse-bookings/workspace-bookings/`, `POST /api/v1/listing/guesthouse-bookings/{id}/cancel/`
+  Auth: action-based | Flutter-facing: lookup/my-bookings/preview/cancel yes, workspace/walk-in no | Added in: original with Phase 2 guest OTP updates
+- `GET/POST /api/v1/listing/bookings-eventspaces/`, `GET/PATCH/DELETE /api/v1/listing/bookings-eventspaces/{id}/` â†’ `EventSpaceBookingViewSet`
+  Auth: mixed | Permission: action-based | Flutter-facing: yes | Response: event-space booking payload | Added in: original
+- `POST /api/v1/listing/bookings-eventspaces/guest-otp/request/`, `GET /api/v1/listing/bookings-eventspaces/lookup/`, `POST /api/v1/listing/bookings-eventspaces/price-preview/`, `POST /api/v1/listing/bookings-eventspaces/walk-in/`
+  Auth: action-based | Flutter-facing: yes except walk-in | Added in: original with Phase 2 guest OTP updates
+- `GET/POST /api/v1/listing/car-rentals/`, `GET/PATCH/DELETE /api/v1/listing/car-rentals/{id}/` â†’ `CarRentalViewSet`
+  Auth: mixed | Permission: action-based | Flutter-facing: yes | Response: car rental payload including compliance, extension, and payment fields | Added in: original, additive changes in Phase 2/3
+- `POST /api/v1/listing/car-rentals/guest-otp/request/`, `GET /api/v1/listing/car-rentals/lookup/`, `GET /api/v1/listing/car-rentals/my_rentals/`, `GET /api/v1/listing/car-rentals/guest-rentals/`, `POST /api/v1/listing/car-rentals/price-preview/`, `GET /api/v1/listing/car-rentals/rental_stats/`
+  Auth: action-based | Flutter-facing: lookup/guest-rentals/preview yes, stats no | Added in: original plus later phone-first guest access
+- `POST /api/v1/listing/car-rentals/{id}/confirm/`, `POST /api/v1/listing/car-rentals/{id}/cancel/`, `POST /api/v1/listing/car-rentals/{id}/reschedule/`, `POST /api/v1/listing/car-rentals/{id}/extension-price-preview/`, `POST /api/v1/listing/car-rentals/{id}/request-extension/`
+  Auth: conditional | Permission: action-based | Flutter-facing: yes | Response: lifecycle updates, extension preview/init result | Added in: original for confirm/cancel, Phase 2 for reschedule, Phase 3 for extension flow
+- `GET/POST /api/v1/listing/property-rentals/bookings/`, `GET /api/v1/listing/property-rentals/bookings/{id}/`, `POST /api/v1/listing/property-rentals/bookings/{id}/cancel/`, `POST /api/v1/listing/property-rentals/bookings/price-preview/`, `POST /api/v1/listing/property-rentals/bookings/guest-otp/request/`
+  Auth: mixed | Permission: action-based | Flutter-facing: yes | Response: property-rental booking payload and price preview | Added in: Phase 2
+- `GET/POST /api/v1/listing/event-spaces/`, `GET/PATCH/DELETE /api/v1/listing/event-spaces/{id}/`, `GET /api/v1/listing/event-spaces/search/`, `POST /api/v1/listing/event-spaces/{id}/verify/`, `POST /api/v1/listing/event-spaces/{id}/unverify/`
+  Auth: public read, owner/admin write, admin verify | Flutter-facing: read/search yes | Added in: original, verify in Phase 2
+- `GET /api/v1/listing/stays/search/` â†’ `StaySearchView.get`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: hotel search grouped by hotel and available rooms | Added in: original
+- `PUT /api/v1/listing/stays/availability/{id}/update/` â†’ `StayAvailabilityUpdateView.put`
+  Auth: yes | Permission: owner/admin | Flutter-facing: no | Response: updated availability row | Added in: original
+- `GET /api/v1/listing/car-availabilities/by-car-and-date/`, `GET /api/v1/listing/car-availabilities/by-dates/`, `PATCH /api/v1/listing/car-availabilities/{id}/update/`
+  Auth: read no, update yes | Permission: public checks / authenticated owner update | Flutter-facing: check endpoints yes | Added in: original
+- `GET /api/v1/listing/terms/`, `GET /api/v1/listing/terms/{id}/`, `GET /api/v1/listing/terms/hotel/{hotel_id}/`, `GET /api/v1/listing/terms/guesthouse/{gh_id}/`, `GET /api/v1/listing/terms/company/{company_id}/`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: terms records | Added in: original
+- `GET/POST /api/v1/listing/addon-offerings/`, `GET/PATCH/DELETE /api/v1/listing/addon-offerings/{id}/`
+  Auth: read no, write yes | Permission: owner/admin | Flutter-facing: read yes | Response: add-on payload | Added in: original
+- `GET/POST /api/v1/listing/seasons/`, `GET/PATCH/DELETE /api/v1/listing/seasons/{id}/`, `GET/POST /api/v1/listing/seasonal-rates/`, `GET/PATCH/DELETE /api/v1/listing/seasonal-rates/{id}/`
+  Auth: yes | Permission: `IsCompanyOwner` | Flutter-facing: no | Response: season/rate config | Added in: original
+- `GET /api/v1/listing/inventory/grid/` â†’ `InventoryGridView.get`
+  Auth: yes | Permission: `IsAuthenticated`, `IsListingOwner` | Flutter-facing: no | Response: owner inventory grid | Added in: original
+- `GET /api/v1/listing/nearby/`, `GET /api/v1/listing/within-bounds/`, `GET /api/v1/listing/map-pins/`, `GET /api/v1/listing/feed/`, `GET /api/v1/listing/search/`, `GET /api/v1/listing/search/suggestions/`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: discovery/search payloads with `distance_km`, geo fields, map pins, radius context | Added in: Phase 3
+- `GET /api/v1/maps/autocomplete/`, `POST /api/v1/maps/place-detail/`, `GET /api/v1/maps/reverse-geocode/`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes | Response: Geoapify-backed place helpers | Added in: Phase 3
 
-- Celery broker config: `CELERY_BROKER_URL` defaults to `redis://redis:6379/0`; `CELERY_RESULT_BACKEND` defaults to `redis://redis:6379/0`; both can be overridden by env vars.
-- Cache keys in use: `notifications:unread_count:{user_id}` from `apps.notifications.services.get_unread_count_cache_key`.
-- TTL in use: unread-count cache is stored for `3600` seconds.
-- Other cache usage: `apps.notifications.services` deletes the unread-count key after notification mutations and stores unread counts on cache miss; no explicit `CACHES` setting is present in repo, so the backend is not explicitly pinned in code.
-- Rate limiting: DRF `ScopedRateThrottle` scopes are heavily used, but the throttle backend is not explicitly configured to Redis in repository settings; if Redis is used for throttles, that would come from deployment/runtime configuration rather than this codebase.
-- Other Redis usage: no explicit Redis session engine, lock manager, or pub/sub usage found in repository code.
+### Favorites
+- `GET/POST /api/v1/favorites/`, `GET/PATCH/DELETE /api/v1/favorites/{id}/`, `POST /api/v1/favorites/toggle/`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes | Response: favorite snapshot payload | Added in: original, Phase 2 snapshot alias/additive updates
+- `GET/POST /api/v1/favorites/guest/`, `POST /api/v1/favorites/guest/toggle/`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: guest favorites keyed by phone | Added in: Phase 2
 
-## 6. Known Gaps / TODOs
+### Payments
+- `POST /api/v1/payment/initiate/` â†’ `InitiatePaymentView.post`
+  Auth: no for guest bookings, yes for registered-user ownership checks | Permission: `AllowAny` + internal ownership rules | Flutter-facing: yes | Response: checkout URL, tx ref, amount/rate audit fields | Added in: original, additive tax/split/audit fields in Phase 2/3
+- `GET /api/v1/payment/callback/chapa/` â†’ `chapa_callback`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: internal | Response: callback handling result | Added in: original
+- `POST /api/v1/payment/webhook/chapa/` â†’ `chapa_webhook`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: internal | Response: webhook handling result | Added in: original
+- `GET /api/v1/payment/verify/{tx_ref}/` â†’ `verify_payment`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes | Response: serialized transaction plus Chapa verification block | Added in: original
+- `GET /api/v1/payment/verify-public/{tx_ref}/` â†’ `verify_payment_public`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: transaction or Chapa verification block | Added in: original
+- `PUT /api/v1/payment/cancel/{tx_ref}/` â†’ `cancel_payment`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes | Response: cancel result with no-refund policy fields | Added in: original, additive policy fields in Phase 2
+- `GET /api/v1/payment/ledger/`, `GET /api/v1/payment/ledger/{id}/` â†’ `OwnerPaymentViewSet`
+  Auth: yes | Permission: `IsCompanyOwner` | Flutter-facing: no | Response: owner transaction ledger plus summary | Added in: original
+- `POST /api/v1/payment/subaccounts/`, `GET /api/v1/payment/subaccounts/me/` â†’ subaccount views
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: vendor app/React yes, regular-user app no | Response: owner subaccount and split config | Added in: Phase 3
+- `GET /api/v1/payment/admin/transactions/`, `GET /api/v1/payment/admin/transactions/{id}/`, `POST /api/v1/payment/admin/transactions/{id}/dispute/open/`, `PATCH /api/v1/payment/admin/transactions/{id}/dispute/`, `POST /api/v1/payment/admin/transactions/{id}/dispute/resolve/`
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Response: admin payment monitoring and dispute triage | Added in: Phase 2
 
-- `apps/account/services.py`: `ImageCreationService.create_images` has a TODO to expect metadata attached in the payload.
-- `apps/account/models.py`: `IndividualOwnerProfile.national_id_number` is marked with a TODO to make it unique in the future.
-- `apps/listing/services.py`: one TODO notes attaching `min_available` to room instances for frontend use.
-- `apps/listing/services.py`: one TODO notes retry logic for payment-related flows.
-- `apps/core/services/email_service.py`: `send_payment_receipt` is a `pass` placeholder.
-- `apps/core/services/email_service.py`: `send_checkin_reminder` is a `pass` placeholder.
-- `apps.listing.views`: room price-preview endpoint is explicitly deprecated and emits a warning header; it will be removed in a future version.
-- `apps.listing.utils.is_user_staff_of_listing`: contains a stray `pass` statement before the real logic; it is not fatal but is a code smell.
-- `apps.payment.services`: the file contains duplicated Chapa initialize logic after `cancel_transaction`, which makes maintenance risky.
-- `apps.payment.services.handle_callback`: one error return contains a typo key `{" success": False, ...}` with a leading space.
-- `apps.account.views.StaffViewSet.available_workspaces`: references `car.make` even though `CarListing` uses `brand`; this path will mislabel car workspaces.
-- `apps.listing.services`: `GuestHouseAvailabilityService` is defined twice; the later class overwrites the earlier import target.
-- `apps.listing.services.WorkspaceStatusService`: uses incorrect Python `sum('field_name')` style aggregation in ORM context, which is a known hazard.
-- `apps.favorites.serializers._build_snapshot_for_object`: thumbnail lookup checks `first.file`, but listing images use the `image` field.
-- `apps.core.services.email_service`: the notification-email task depends on `send_notification_email`, which is implemented at the bottom of the file, but the task path is easy to miss because the service also contains several future-implementation placeholders.
-- Missing migrations: no obvious missing migration file was detected in the local scan for the apps touched here.
-- Incomplete signal handlers: no `NotImplementedError`, no HTTP 501 responses, and no placeholder API views returning 501 were found in the scan.
+### Analytics
+- `GET /api/v1/analytics/company/overview/`, `GET /api/v1/analytics/company/revenue/`, `GET /api/v1/analytics/company/activity/`
+  Auth: yes | Permission: `IsCompanyOrIndividualOwner` | Flutter-facing: no for regular-user app | Response: owner analytics | Added in: original
+- `GET /api/v1/analytics/frontdesk/stats/`, `GET /api/v1/analytics/frontdesk/availability/`
+  Auth: yes | Permission: `IsCompanyOrFrontDesk` | Flutter-facing: no | Response: front-desk dashboards | Added in: original
+- `GET /api/v1/analytics/admin/overview/`, `GET /api/v1/analytics/admin/revenue/`, `GET /api/v1/analytics/admin/payout-failures/`
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Response: platform admin metrics | Added in: Phase 2
+
+### Notifications
+- `GET /api/v1/notifications/`, `GET /api/v1/notifications/{id}/`, `DELETE /api/v1/notifications/{id}/`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes | Response: notification items | Added in: original
+- `PATCH /api/v1/notifications/{id}/mark-read/`, `POST /api/v1/notifications/mark-all-read/`, `DELETE /api/v1/notifications/bulk-delete/`, `GET /api/v1/notifications/unread-count/`, `POST /api/v1/notifications/mark-read-batch/`, `GET /api/v1/notifications/summary/`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes | Response: action wrappers/count/summary | Added in: original
+- `GET/PUT /api/v1/notifications/preferences/` â†’ `NotificationPreferenceView`
+  Auth: yes | Permission: `IsAuthenticated` | Flutter-facing: yes | Response: preference state | Added in: original
+- `GET/POST /api/v1/notifications/templates/`, `GET/PATCH/DELETE /api/v1/notifications/templates/{id}/`
+  Auth: yes | Permission: `IsAdmin` | Flutter-facing: no | Response: template CRUD | Added in: Phase 2
+
+### Promotions
+- `GET/POST /api/v1/promotions/campaigns/`, `GET/PUT/PATCH/DELETE /api/v1/promotions/campaigns/{id}/`
+  Auth: yes | Permission: `IsAuthenticated`, `IsAdmin` | Flutter-facing: no | Response: campaign CRUD | Added in: Phase 3
+- `GET/POST /api/v1/promotions/campaigns/{id}/placements/`
+  Auth: yes | Permission: `IsAuthenticated`, `IsAdmin` | Flutter-facing: no | Response: campaign placement CRUD-lite | Added in: Phase 3
+- `GET /api/v1/promotions/placements/`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: public promoted listing/category placements | Added in: Phase 3
+- `POST /api/v1/promotions/track/`
+  Auth: no | Permission: `AllowAny` | Flutter-facing: yes | Response: `204 No Content` tracking result | Added in: Phase 3
+
+## 3. Service Layer
+
+Canonical service files currently in use:
+- `apps/account/services.py`
+  - `ImageCreationService.create_images(content_object, images_payload)`: bulk-create generic images.
+  - `OtpService.create_challenge(phone, purpose) -> OtpChallenge`: issue OTP, cache payload, queue SMS.
+  - `OtpService.verify_challenge(challenge_id, code, purpose, issue_tokens=False, user=None) -> OtpVerificationResult`: verify OTP, consume challenge, optionally issue JWT.
+  - `GuestPhoneVerificationService.create_token(phone) -> str`: signed reusable guest-phone verification token.
+  - `GuestPhoneVerificationService.verify_token(token, phone) -> str`: validate signed guest-phone verification token.
+  - `GuestBookingConversionService.convert_for_user(user, otp_challenge_id=None, otp_code=None) -> GuestBookingConversionResult`: transfer guest bookings and guest favorites to a registered user.
+  - Agreement helpers: `get_latest_agreement`, `create_agreement`, `sign_agreement`, `revoke_agreement`, `is_agreement_active`.
+  - External deps: cache/Redis, JWT, SMS task queue.
+- `apps/listing/services.py`
+  - Listing creation/update helpers: `ListingService` methods for hotel rooms, guest houses, cars, properties, event spaces, address creation, verification, and async geocoding scheduling.
+  - OTP wrappers: `GuestBookingOtpService`, `GuestContactRevealOtpService`.
+  - Availability services: `StayAvailabilityService`, `GuestHouseAvailabilityService`, property-rental availability helpers, car availability helpers.
+  - Booking services: `BookingService`, `GuestHouseBookingService`, `EventSpaceBookingService`, `CarRentalService`, `PropertyRentalBookingService`.
+  - Pricing services: `PriceService`, `PriceCalculationService`.
+  - Terms services: `TermsService`.
+  - External deps: cache, SMS, email helper, notifications, Geoapify geocoding enqueue, payment linkage.
+- `apps/payment/services.py`
+  - Contact reveal state machine: `ContactRevealPaymentService`.
+  - Monitoring/disputes: `get_transaction_monitor_list`, `get_transaction_monitor_detail`, `open_dispute`, `update_dispute`, `resolve_dispute`.
+  - Receipt/signature/tax/split helpers: `get_chapa_receipt_url`, `verify_webhook_signature`, `is_tax_applicable`, `calculate_tax`, `get_payment_tax_breakdown`, `apply_tax_to_transaction`, `validate_split_config`, `get_effective_platform_split_config`, `get_effective_contact_reveal_fee`, `resolve_payment_owner_for_split`, `get_effective_split_config_for_owner`, `get_effective_split_config_for_booking`, `register_chapa_subaccount`.
+  - Main gateway service: `ChapaPaymentService` for initialize, verify/callback, webhook, cancel, split payout metadata, receipt URL wiring.
+  - External deps: Chapa HTTP API, Django settings, payment models, booking models.
+- `apps/analytics/services.py`
+  - Company overview/revenue/activity live and precomputed reads.
+  - Admin metrics cache and aggregation helpers.
+  - Cache helpers: `_analytics_cache_key`, `invalidate_analytics_cache`, `precompute_admin_analytics_cache`.
+  - External deps: Redis cache, payment transactions, booking models.
+- `apps/analytics/services_frontdesk.py`
+  - `compute_front_desk_stats`, `get_availability_matrix`.
+- `apps/notifications/services.py`
+  - `NotificationService.create_notification`, `mark_as_read`, `mark_all_as_read`, `get_unread_count`, `bulk_delete`, `mark_read_batch`.
+  - Listing deletion notification planning/dispatch helpers.
+  - External deps: email task, SMS task, push task, cache.
+- `apps/promotions/services.py`
+  - `get_promotable_content_type_ids`, `invalidate_active_placement_cache`, `get_active_placements`, `activate_campaign`, `deactivate_campaign`, `record_impression`, `record_click`.
+  - External deps: Redis cache, Celery tracking tasks.
+- `apps/core/services/currency_service.py`
+  - `CurrencyService.get_daily_exchange_rate`, `get_currencies`, `store_exchange_rates`, `seed_from_local_json`.
+  - External deps: Open Exchange Rates API.
+- `apps/core/services/email_service.py`
+  - `has_deliverable_email`.
+  - `EmailService.send_booking_confirmation`, `send_account_credentials`, `send_password_reset`, `send_verification_email`, `send_email_change_verification`, `send_email_change_notice`, `send_notification_email`.
+  - `send_payment_receipt` and `send_checkin_reminder` are placeholders.
+- `services/maps.py`
+  - `geocode_address`, `reverse_geocode`, `autocomplete_address`, `get_place_detail`.
+  - `calculate_distance_km`, `get_bounding_box`, `find_listings_near`, `build_map_pin`.
+  - External deps: Geoapify HTTP API, Redis cache.
+- `services/sms.py`
+  - `send_sms(to, message) -> bool`.
+  - `normalize_phone_number(phone) -> str`.
+  - External deps: AfroMessage HTTP API.
+- `services/payment.py`
+  - Not present. Canonical payment service remains `apps/payment/services.py`.
+- `services/otp.py`
+  - Not present. OTP logic lives in `apps/account/services.py`.
+
+## 4. Celery Tasks
+
+- `apps.core.tasks.fetch_daily_exchange_rates`
+  - Trigger: periodic beat
+  - Purpose: refresh currency rates from Open Exchange Rates
+  - Models: `CurrencyRate`
+  - Schedule: daily at `00:05`
+- `apps.account.tasks.send_otp_sms_task`
+  - Trigger: async on OTP creation
+  - Purpose: send OTP SMS from cached payload
+  - Models: `OtpChallenge`
+- `apps.account.tasks.cleanup_expired_otp_challenges`
+  - Trigger: periodic beat
+  - Purpose: delete expired OTP challenges and related cache keys
+  - Models: `OtpChallenge`
+  - Schedule: every 5 minutes
+- `apps.listing.tasks.auto_cancel_pending_booking`
+  - Trigger: async from booking `post_save` signal
+  - Purpose: cancel stale hotel bookings
+  - Models: `Booking`, `StayAvailability`
+- `apps.listing.tasks.auto_cancel_pending_guesthouse_booking`
+  - Trigger: async from guesthouse booking `post_save`
+  - Purpose: cancel stale guesthouse bookings
+  - Models: `GuestHouseBooking`, `GuestHouseInventory`
+- `apps.listing.tasks.auto_cancel_pending_property_rental_booking`
+  - Trigger: async from property-rental booking `post_save`
+  - Purpose: cancel stale property-rental bookings
+  - Models: `PropertyRentalBooking`, `PropertyRentalAvailability`
+- `apps.listing.tasks.cancel_all_expired_bookings`
+  - Trigger: periodic beat
+  - Purpose: safety sweep for all pending booking domains above
+  - Models: `Booking`, `GuestHouseBooking`, `PropertyRentalBooking`
+  - Schedule: every 5 minutes
+- `apps.listing.tasks.send_contact_reveal_unlocked_notification`
+  - Trigger: async after contact reveal unlock
+  - Purpose: create in-app notification and send SMS when reveal is unlocked
+  - Models: `ContactRevealRequest`, `PropertyContactRevealRequest`, `Notification`
+- `apps.listing.tasks.geocode_listing_async`
+  - Trigger: async on listing save or manual backfill
+  - Purpose: Geoapify geocode for address-bearing listings
+  - Models: address-bearing listing models
+  - Retries: `max_retries=3` with backoff `(30, 120, 300)`
+- `apps.analytics.tasks.process_dirty_analytics_dates`
+  - Trigger: periodic beat
+  - Purpose: materialize dirty company-date analytics
+  - Models: `AnalyticsDirtyDate`, `CompanyDailyMetrics`, `ListingDailyMetrics`
+  - Schedule: every 10 minutes
+- `apps.analytics.tasks.precompute_analytics_cache`
+  - Trigger: periodic beat
+  - Purpose: refresh admin analytics cache
+  - Models: `PaymentTransaction`, listing counts via read side
+  - Schedule: hourly
+- `apps.notifications.tasks.send_notification_email_task`
+  - Trigger: async from `NotificationService`
+  - Purpose: send email and mark delivery state
+  - Models: `Notification`
+- `apps.notifications.tasks.send_notification_sms_task`
+  - Trigger: async from `NotificationService`
+  - Purpose: send SMS and mark delivery state
+  - Models: `Notification`
+- `apps.notifications.tasks.send_notification_push_task`
+  - Trigger: async from `NotificationService`
+  - Purpose: push placeholder boundary and mark delivery state
+  - Models: `Notification`
+- `apps.promotions.tasks.sync_campaign_statuses`
+  - Trigger: periodic beat
+  - Purpose: activate scheduled campaigns and expire ended ones
+  - Models: `PromotionCampaign`, `PromotionPlacement`
+  - Schedule: every 5 minutes
+- `apps.promotions.tasks.record_impression_async`
+  - Trigger: async from placement serving
+  - Purpose: persist impressions
+  - Models: `PromotionImpression`
+- `apps.promotions.tasks.record_click_async`
+  - Trigger: async from click tracking
+  - Purpose: persist clicks
+  - Models: `PromotionClick`
+
+## 5. Authentication and Permissions
+
+- JWT config:
+  - Access token lifetime: `30 days` in `DEBUG`, `1 hour` otherwise.
+  - Refresh token lifetime: `30 days` in `DEBUG`, `1 day` otherwise.
+  - Refresh rotation: enabled.
+  - Auth class: `rest_framework_simplejwt.authentication.JWTAuthentication`.
+- Phone/OTP config:
+  - `OTP_CODE_LENGTH=6`
+  - `OTP_EXPIRY_SECONDS=300`
+  - `OTP_MAX_ATTEMPTS=5`
+  - `OTP_COOLDOWN_SECONDS=60`
+  - Guest reusable verification token max age: `GUEST_PHONE_VERIFICATION_MAX_AGE_SECONDS` default `31536000`.
+  - Guest booking OTP enforcement default: `REQUIRE_GUEST_BOOKING_OTP=True`.
+- Custom permission classes:
+  - `IsAdmin`: superuser or `RoleCode.ADMIN`.
+  - `IsCompany`: admin or company role.
+  - `IsCompanyOrIndividualOwner`: owner-side access across company and individual-owner paths.
+  - `IsUser`: regular-user role or admin.
+  - `IsOwnerOrReadOnly`, `IsAuthenticatedOrReadOnly`, `IsPublicReadOnly`.
+  - `IsCompanyOwner`: owner/admin payment and company object protection.
+  - `IsListingOwner`: owner/admin/front-desk listing object access.
+  - `IsBookingOwner`, `IsGuestHouseBookingOwner`, `IsCarRentalOwner`, `CanModifyBooking`.
+  - `IsCompanyOrFrontDesk`.
+  - `ORPermission`: permission combiner.
+- Throttles:
+  - Auth/login, OTP request/verify, password reset, email verify, availability check, payment init/verify/callback/webhook, token refresh/logout, currency endpoints.
+
+## 6. Redis Usage
+
+- OTP:
+  - `otp:pending:{challenge_id}`
+  - TTL: `OTP_EXPIRY_SECONDS`
+  - Invalidated on send success, verify success, failed send cleanup, periodic cleanup
+- OTP cooldown:
+  - `otp:cooldown:{phone}:{purpose}`
+  - TTL: `OTP_COOLDOWN_SECONDS`
+  - Invalidated on verify success, failed send cleanup, periodic cleanup
+- Maps/geocoding:
+  - `maps:geocode:{sha256(address)}`
+  - `maps:reverse:{rounded_lat}:{rounded_lng}`
+  - `maps:place:{place_id}`
+  - TTL: `GEOCODING_CACHE_TTL`
+  - Invalidated by TTL only
+- Listing discovery/search:
+  - `listing:nearby:{sha256(payload)}`
+  - `listing:bounds:{sha256(payload)}`
+  - `listing:pins:{sha256(payload)}`
+  - `listing:feed:proximity:{sha256(payload)}`
+  - `listing:feed:standard:{sha256(payload)}`
+  - `search:suggestions:{sha256(payload)}`
+  - TTL: `PROXIMITY_CACHE_TTL`, `MAP_PINS_CACHE_TTL`, and suggestions hardcoded `60s`
+  - Invalidated by TTL only
+- Notifications:
+  - `notifications:unread_count:{user_id}`
+  - TTL: `3600`
+  - Invalidated on notification create, mark-read, mark-all-read, bulk-delete, batch mark-read
+- Analytics:
+  - Version key: `analytics:admin:version`
+  - Data keys: `analytics:v{version}:{metric}:{suffix}`
+  - TTL: `ANALYTICS_CACHE_TTL=3600`
+  - Invalidated by `invalidate_analytics_cache()`
+- Promotions:
+  - Version key: `promotions:placements:version`
+  - Data keys: `promotions:v{version}:placements:...`
+  - TTL: `PROMOTION_CACHE_TTL=300`
+  - Invalidated on campaign/placement writes and campaign status transitions
+
+## 7. Maps Integration
+
+- Active provider:
+  - Geoapify only. Google Maps backend logic is deprecated and no longer the active path.
+- Approach:
+  - Decimal lat/lng fields on models.
+  - Haversine distance in `services/maps.py`.
+  - Bounding-box prefilter + Haversine refinement.
+  - No PostGIS or GeoDjango.
+- Service:
+  - `services/maps.py`
+  - Key functions: `geocode_address`, `reverse_geocode`, `autocomplete_address`, `get_place_detail`, `calculate_distance_km`, `get_bounding_box`, `find_listings_near`, `build_map_pin`
+- Models with coordinates:
+  - `apps.core.Address`
+  - `apps.core.GeoLocatedModel` descendants:
+    - `apps.account.HotelProfile`
+    - `apps.listing.RoomListing`
+    - `apps.listing.GuestHouseProfile`
+    - `apps.listing.GuestHouseRoom`
+    - `apps.listing.CarListing`
+    - `apps.listing.CarSaleListing`
+    - `apps.listing.PropertyListing`
+    - `apps.listing.PropertySaleListing`
+    - `apps.listing.EventSpaceListing`
+  - User location fields:
+    - `apps.account.User.last_known_lat`
+    - `apps.account.User.last_known_lng`
+- Map-related endpoints:
+  - `POST /api/v1/account/location/`
+  - `GET /api/v1/maps/autocomplete/`
+  - `POST /api/v1/maps/place-detail/`
+  - `GET /api/v1/maps/reverse-geocode/`
+  - `GET /api/v1/listing/nearby/`
+  - `GET /api/v1/listing/within-bounds/`
+  - `GET /api/v1/listing/map-pins/`
+  - `GET /api/v1/listing/feed/`
+  - `GET /api/v1/listing/search/`
+  - `GET /api/v1/listing/search/suggestions/`
+
+## 8. Payment Integration (Chapa)
+
+- Canonical service location:
+  - `apps/payment/services.py`
+- Main capabilities present:
+  - Payment initialization
+  - Callback verification
+  - Webhook verification
+  - Public and authenticated verify endpoints
+  - Pending transaction cancel
+  - Owner ledger
+  - Admin monitoring/disputes
+  - Platform split config resolution
+  - Owner-specific split override
+  - Chapa subaccount registration
+  - Contact reveal payments
+  - Property-rental tax calculation
+  - Receipt URL generation
+- Webhook endpoint:
+  - `POST /api/v1/payment/webhook/chapa/`
+- Callback endpoint:
+  - `GET /api/v1/payment/callback/chapa/`
+- Payment endpoints:
+  - `POST /api/v1/payment/initiate/`
+  - `GET /api/v1/payment/verify/{tx_ref}/`
+  - `GET /api/v1/payment/verify-public/{tx_ref}/`
+  - `PUT /api/v1/payment/cancel/{tx_ref}/`
+  - `GET /api/v1/payment/ledger/`
+  - `GET /api/v1/payment/ledger/{id}/`
+  - `POST /api/v1/payment/subaccounts/`
+  - `GET /api/v1/payment/subaccounts/me/`
+  - `GET /api/v1/payment/admin/transactions/`
+  - `GET /api/v1/payment/admin/transactions/{id}/`
+  - dispute actions under `/api/v1/payment/admin/transactions/{id}/...`
+
+## 9. SMS Service
+
+- Service:
+  - `services/sms.py`
+- Public function:
+  - `send_sms(to, message) -> bool`
+- Used by:
+  - `apps.account.tasks.send_otp_sms_task`
+  - `apps.listing.tasks.send_contact_reveal_unlocked_notification`
+  - `apps.notifications.tasks.send_notification_sms_task`
+  - `apps.notifications.services.NotificationService.dispatch_saved_listing_deletion_notifications`
+  - booking confirmation SMS-first flow inside `apps/listing/services.py`
+- Notes:
+  - Provider access is centralized here only.
+  - Uses AfroMessage hardcoded send URL and Ethiopian phone normalization.
+
+## 10. Background Tasks Summary
+
+- Beat-scheduled tasks:
+  - `apps.core.tasks.fetch_daily_exchange_rates` â†’ daily `00:05`
+  - `apps.listing.tasks.cancel_all_expired_bookings` â†’ every 5 minutes
+  - `apps.account.tasks.cleanup_expired_otp_challenges` â†’ every 5 minutes
+  - `apps.analytics.tasks.process_dirty_analytics_dates` â†’ every 10 minutes
+  - `apps.analytics.tasks.precompute_analytics_cache` â†’ every hour
+  - `apps.promotions.tasks.sync_campaign_statuses` â†’ every 5 minutes
+- Async tasks:
+  - OTP SMS delivery
+  - notification email/SMS/push
+  - hotel/guesthouse/property booking auto-cancel follow-ups
+  - contact reveal unlocked notifications
+  - async geocoding
+  - promotion impression/click writes
+
+## 11. Known Limitations or Follow-ups
+
+- `schema.yaml` and scanned route/view surface appear aligned; no obvious mismatch was found during this pass.
+- `services/payment.py` does not exist; any docs pointing there should point to `apps/payment/services.py`.
+- `services/otp.py` does not exist; OTP lives in `apps/account/services.py`.
+- `apps/listing/services.py` remains the highest-coupling file and contains multiple domains in one place.
+- `apps.listing.services.GuestHouseAvailabilityService` was historically duplicated; keep checking the live file before refactors.
+- `apps/listing/models.Transaction` is a legacy booking-only transaction model; `apps.payment.models.PaymentTransaction` is the active payment ledger.
+- `apps/payment.models.PaymentTransaction.booking` is legacy; `booking_object` is the active generic relation.
+- `apps/core.Address.google_place_id` is a legacy name now that Geoapify is the active provider.
+- `AFRO_MESSAGE_URL` still exists in settings, but per project rule the SMS service should continue using the hardcoded provider URL in `services/sms.py`.
+
