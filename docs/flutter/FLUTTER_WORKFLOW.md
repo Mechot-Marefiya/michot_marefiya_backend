@@ -636,3 +636,10 @@ Build the app around these product truths:
 - verified and unverified listings can both appear, but the badge matters
 - map and discovery features should use backend REST responses, not direct provider logic
 - account conversion should feel like continuity, not a reset
+
+
+## Seed the project locally
+Run 
+```
+docker compose exec api sh -lc "python manage.py migrate && python manage.py seed_data --clear --seed 20260616 --days 45"
+```
