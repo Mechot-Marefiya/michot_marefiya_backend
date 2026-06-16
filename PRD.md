@@ -1,394 +1,437 @@
-**Mechot Marefiya Platform — Product Requirements Document (PRD)**
+# Mechot Marefiya Platform - Product Requirements Document (PRD)
 
-**Version:** 1.0
+**Version:** 2.0
 
-**Status:** Final Draft
+**Status:** Codebase-aligned
 
-**Prepared by:** Backend Developer (from presentation + stakeholder comments)
+**Source of truth:** `CODEBASE_MAP.md`, current backend modules, and current API contract in `schema.yaml`
 
-**1\. Overview**
+**Last updated:** June 16, 2026
 
-Mechot Marefiya is a comprehensive digital marketplace platform built specifically for the Ethiopian market. It consolidates hotel bookings, guesthouse rentals, event space bookings, car rentals, car sales, and house/property sales and rentals into a single platform. All transactions are in Ethiopian Birr (ETB), powered by Chapa as the payment gateway, and delivered primarily through a Flutter mobile application.
+## 1. Overview
 
-The platform's core uniqueness is enabling regular private individuals to rent or sell their own property (house, car, room) through the platform — with the platform acting as a licensed intermediary to handle tax and regulatory compliance on their behalf.
+Mechot Marefiya is a multi-domain marketplace platform for the Ethiopian market. It supports discovery, booking, payment, contact-reveal, owner operations, company workspaces, and platform administration across hospitality, rentals, and sales use cases.
 
-**2\. User Types**
+The platform currently supports:
 
-The platform has four distinct user types:
+- Hotels and room bookings
+- Guest houses and room bookings
+- Event space bookings
+- Car rentals
+- Car sales contact reveal
+- Property rentals
+- Property sales contact reveal
 
-**2.1 Customers (Registered Users)** Users who download the app or visit the website to book or purchase services. Registration is phone-based. Email is optional and used for supplementary notifications. All verification (OTP, identity checks) happens via phone.
+The backend is built with Django REST Framework and serves app and web clients through stable REST APIs. Payments are handled through Chapa. The platform uses Ethiopian Birr (ETB) as its primary business currency.
 
-**2.2 Guest Users** Users who book or order without creating an account. They provide only a phone number. Guests can place bookings with the same functionality as registered users for their first interaction. The system must support converting a guest to a registered user, carrying over their full booking history.
+## 2. Product Surfaces
 
-**2.3 Companies** Businesses that register on the platform to list hotels, guesthouses, event spaces, car fleets, cars for sale, or houses for sale/rent. They self-register via the app and go through an admin approval process before their listings go live.
+The current product is split across the following surfaces:
 
-**2.4 Individual Owners** Private individuals who want to list their personal property (house, car, room) for rent or sale. Individual owners do NOT self-register. They are verified in person by the platform admin, who then creates their profile and staff account manually on the system. This is a deliberate trust and compliance design decision.
+- Customer-facing client applications for browsing, booking, payment, favorites, notifications, and account management
+- Company and owner-facing dashboards for listing management, bookings, payouts, and analytics
+- Front desk and workspace operations for staff handling operational bookings and check-in style workflows
+- Django admin and admin APIs for approvals, verification, monitoring, promotions, and platform controls
 
-**2.5 Platform Admin** Manages the entire platform — approves companies and individual owner profiles, verifies listings, monitors transactions, manages master data (facility types, amenity types, notification templates, roles), runs promotional configurations, and resolves disputes.
+## 3. User Types
 
-**3\. Authentication & Identity**
+The current codebase supports these user and operator types:
 
-- **Primary login method:** Phone number (OTP-based).
-- **Email:** Optional. Can be set up after registration but is not required for any core function.
-- **All verifications** (account activation, booking confirmations, password changes) use phone-based OTP.
-- Guest users interact using phone only, with no account required.
+### 3.1 Regular Users
 
-**4\. Listings & Services**
+Registered customers who browse listings, save favorites, make bookings, pay through Chapa, manage their history, and view payment or receipt information.
 
-**4.1 Hotel Rooms**
+### 3.2 Guest Users
 
-Full hotel experience: room types, amenities, facilities, seasonal pricing, add-ons (breakfast, airport shuttle, extra bed, etc.), terms and conditions, and availability calendar.
+Unregistered users who can still interact with booking and reveal flows using phone-based verification. Guest activity is preserved and can later be attached to a registered account after verification.
 
-**4.2 Guesthouses**
+### 3.3 Companies
 
-Smaller privately run accommodations. Same structure as hotels but typically with fewer room types and simpler setup. Managed identically through the listing system.
+Businesses that onboard to operate listings such as hotels, guest houses, car fleets, event spaces, and other managed inventory. Company users work through company-linked profiles and staff workspaces.
 
-**4.3 Event Spaces**
+### 3.4 Front Desk / Workspace Staff
 
-Conference halls, auditoriums, meeting rooms. Bookable by the day for corporate or social events.
+Operational staff assigned to a workspace. They can access domain-specific operational views, especially around bookings and hospitality workflows, without being platform admins.
 
-**4.4 Car Rentals**
+### 3.5 Individual Owners
 
-Individual cars or fleets available for daily rental. Managed per unit. Supports both company-owned fleets and privately owned individual cars.
+Private owners who can manage their own listings and bookings through an owner profile path. This is especially important for property rentals and sales-style connector flows.
 
-**Car Rental rules:**
+### 3.6 Platform Admins
 
-- Renting with a driver and without a driver are treated as distinct rental types with different requirements.
-- Without-driver rentals require additional documentation from the renter (driver's license, cheque guarantee, etc.). The full detail of this documentation workflow is on hold pending further specification.
-- Cars with code-3 plate numbers can only be rented when the renter provides a valid Business License. Other car types cannot be rented
-- Car owners may optionally require the renter to fill out a form before completing the rental. This form is customizable by the owner.
-- The rental booking must include a date-changing feature — renters should be able to adjust rental dates if the date they change to is not taken for that booking item.
-- Before a car rental listing goes live, it should be reviewed. If verified by admin, a "Verified" tag is shown. If not yet verified, the listing shows "Not Verified." But still visible so both are visible but tagged appropriately.
+Platform-level operators who manage approvals, listing activation, verification, payment monitoring, disputes, promotions, templates, roles, and system-wide controls.
 
-**4.5 Car Sales**
+## 4. Authentication and Identity
 
-Cars can be sold, not just rented. The platform acts as a connector (not a broker). When a client is interested in purchasing a car, they request the seller's contact details. After paying a contact-reveal fee, the platform provides the seller's contact and the transaction continues off-platform between the two parties.
+The current platform is phone-first, but not OTP-only.
 
-Any type of car can be listed for sale.
+### 4.1 Current Authentication Model
 
-**4.6 House/Property Rentals**
+- JWT authentication is the primary API auth mechanism
+- Token issuance is available through `POST /api/v1/auth/token/`
+- The current login payload is phone plus password
+- Token refresh is available through `POST /api/v1/auth/token/refresh/`
 
-Regular individuals can rent out their house, apartment, or rooms. The platform acts as a licensed intermediary — since private individuals do not have a rental license, the platform handles tax obligations and regulatory compliance on their behalf.
+### 4.2 OTP Flows
 
-Pricing flow for unlicensed individual house rentals:
+Phone verification is implemented through dedicated OTP endpoints:
 
-- Owner sets their desired price (e.g., 3,000 ETB/month).
-- Platform adds its service charge on top.
-- Platform adds 15% tax (to remit to the government).
-- The client-facing price reflects all three components.
-- The individual owner has a formal agreement with the platform for this arrangement.
+- `POST /api/v1/auth/otp/request/`
+- `POST /api/v1/auth/otp/verify/`
 
-**4.7 House/Property Sales**
+OTP is used in account and guest-linked verification flows, including some booking and contact-reveal journeys.
 
-Houses and any kind of property can be sold through the platform. Same connector model as car sales: the platform connects buyer and seller, the buyer pays to reveal the seller's contact details, and the actual transaction happens between the parties directly.
+### 4.3 Guest Conversion
 
-**5\. Listing Verification**
+The platform preserves guest activity and supports converting guest-linked history into a registered account after verification. The current account API includes a dedicated guest-booking conversion flow.
 
-- Every listing (hotel, car, guesthouse, event space, house) submitted by a company or individual must go through admin verification before or after going live.
-- If verified: a "Verified by Mechot" badge is shown on the listing.
-- If not yet verified: a "Not Verified" label is shown.
-- The admin records the date of verification for each listing.
-- This system applies to all listing types, including car rentals (see 4.4).
-- It won’t affect the visibility but tag should be shown.
+### 4.4 Identity Controls
 
-**6\. Booking System**
+The user model and related services support phone verification state, phone change tracking, role-based behavior, and location-linked profile data.
 
-**6.1 Booking Flow (General)**
+## 5. Listing and Service Domains
 
-1.  User selects a listing and dates.
-2.  System checks real-time availability for every day in the requested period.
-3.  System calculates the correct price per day (accounting for seasonal pricing, weekend rates, and multipliers).
-4.  User selects add-ons if applicable.
-5.  Full cost breakdown displayed.
-6.  Terms & Conditions presented. User must agree before proceeding.
-7.  System permanently records: which T&C version was agreed to, the exact timestamp, and a full copy of the T&C text at that moment.
-8.  Booking created with status: PENDING.
-9.  Unique booking reference generated (e.g., H-X7Y2Z9 for hotels, C-AB3DE4 for cars).
-10. User proceeds to payment.
+The current product supports the following listing families:
 
-**6.2 Service Charge on First Booking**
+### 5.1 Hotels
 
-Every client's first booking on the platform is free of service charge. This applies to phone numbers so each phone number will get one service fee free booking whether the client is a guest or a registered user each phone number will get one free service fee free service.
+Hotels support room listings, availability, pricing, amenities, facilities, add-ons, booking flows, and booking snapshots.
 
-For registered user we will only allow 3 phone number changes and a week ban before changing another that way we will control abuse of this feature.
+### 5.2 Guest Houses
 
-**6.3 Service Charge Scope**
+Guest houses support room inventory, availability, booking flows, and owner or company operations similar to hospitality inventory but under a dedicated guest-house domain.
 
-The platform service charge is applied only to the core booking amount. It does NOT apply to add-ons. For example: if a customer books a hotel room and adds breakfast and dinner, the service fee is calculated only on the room booking price, not on the add-on prices.
+### 5.3 Event Spaces
 
-**6.4 Walk-In Customers**
+Event spaces support event-oriented listing, availability, and booking operations.
 
-Receptionists can create bookings manually via the staff dashboard for walk-in guests. Walk-in bookings are tagged with status WALK-IN. No service charge is applied to the platform for walk-in bookings — this is a direct hotel-to-guest transaction that does not go through the platform payment split.
+### 5.4 Car Rentals
 
-**6.5 Guest Checkout**
+Car rentals support availability, booking, operational requirements, and post-booking change flows. The current codebase includes:
 
-Guests can complete bookings without an account using only their phone number. The system records the booking tied to the phone number. Guest history must be preserved and associated with the phone number so that it can be transferred when the guest converts to a registered user. An OTP will be sent on bookings to confirm if the user is indeed a legit and also user booking using there own number.
+- Driver and non-driver rental modes
+- Optional pre-rental requirements
+- `requires_code_3`
+- `requires_business_license`
+- reschedule and extension request support
 
-**6.6 Booking Date Restriction**
+### 5.5 Car Sales
 
-To protect against pricing volatility (since prices can change frequently), the platform admin can set a check-in date restriction window. For example: admin sets a 5-day forward restriction. If today is June 1, a customer cannot set a check-in date beyond June 6. This restriction is configurable by the listing owner and applies per-listing category as designed. Default will be 5 days.
+Car sales are handled as connector flows. The buyer does not complete the sale on-platform. Instead, the platform monetizes contact reveal after payment and verification.
 
-**6.7 No Refunds**
+### 5.6 Property Rentals
 
-No refund is available for any service payment on the platform. This is a firm business rule. It must be clearly communicated in T&C and on payment confirmation screens.
+Property rentals support direct booking-style flows, pricing previews, owner-side operations, and compliance-aware payment handling. This is now a real implemented booking domain, not just a planned concept.
 
-**7\. Pricing System**
+### 5.7 Property Sales
 
-**7.1 Seasonal Pricing**
+Property sales are also handled as connector flows where payment is for contact reveal, not for the full sale transaction itself.
 
-Listing owners (hotels, guesthouses, car owners) can define seasonal pricing rules:
+## 6. Discovery, Search, and Maps
 
-- Season name (e.g., "Ethiopian Christmas - Genna")
-- Date range or specific recurring days (e.g., "Every Friday and Saturday")
-- Multiplier (e.g., 1.5 for 50% increase, 0.8 for 20% discount)
-- Priority level (when multiple rules overlap on the same date, the higher priority rule wins)
+The platform has active discovery and geospatial features.
 
-**7.2 Add-On Pricing**
+### 6.1 Search and Feed
 
-Add-ons are priced separately from the base booking. Service charges are not applied to add-on amounts.
+Implemented API capabilities include:
 
-**7.3 Historical Price Preservation**
+- listing feed
+- structured search
+- search suggestions
+- nearby listing discovery
+- within-bounds queries
+- map pin responses
 
-The price at the time of booking is permanently recorded. If the owner later changes the price, existing bookings are not affected.
+### 6.2 Maps Provider
 
-**8\. Payment System (Chapa Integration)**
+The backend currently uses Geoapify-backed map and geocoding integrations rather than direct Google data calls. The API surface includes:
 
-**8.1 Payment Gateway**
+- `/api/v1/maps/autocomplete/`
+- `/api/v1/maps/place-detail/`
+- `/api/v1/maps/reverse-geocode/`
 
-Chapa is the exclusive payment gateway. Chapa's own processing fees are charged to the platform (the system), not passed directly to the customer or vendor.
+### 6.3 Listing Visibility in Discovery
 
-**8.2 Split Payments**
+A listing must be active to appear publicly. Verification is a separate trust signal and does not control visibility by itself.
 
-On every successful payment, Chapa automatically splits funds into two accounts:
+## 7. Verification, Approval, and Visibility
 
-- Platform account: receives the service commission (e.g., 5% of the booking amount).
-- Vendor/owner account (Chapa subaccount): receives the remainder (e.g., 95%).
+The current codebase distinguishes clearly between activation and verification.
 
-**Important:** The split is calculated only on the booking amount, not on add-ons.
+### 7.1 Activation
 
-**8.3 Walk-In Exclusion**
+- Inactive listings are not publicly visible
+- Admin review can activate a listing for public visibility
 
-For walk-in customer bookings processed by staff at the venue, no platform commission is deducted. The full amount goes to the hotel or vendor. But if the staff decided to use Chapa as there payment method they will pay the service fee demanded by Chapa gateway for every successful transaction.
+### 7.2 Verification
 
-**8.4 Contact-Reveal Payments (Car/House Sales)**
+- Verification is a separate status and badge system
+- Verified listings expose verification metadata such as verification timestamps and verifier attribution
+- A listing may be active but still unverified
+- Unverified status does not automatically hide the listing
 
-For car and house sale listings, when a buyer requests the seller's contact details, they pay a contact-reveal fee. After payment confirmation, the platform shares the seller's contact. No commission split on the sale transaction itself — the platform's role ends at connection.
+This rule applies across listing families, including vehicles and property-style listings.
 
-**8.5 Individual House Rental Payment Flow**
+## 8. Booking Lifecycle
 
-For unlicensed individual property renters:
+The codebase implements a multi-step booking lifecycle across its booking domains.
 
-- Platform adds its service charge and 15% government tax to the individual's stated price.
-- Total (owner price + service charge + 15% tax) is what the client pays.
-- Platform remits the tax portion appropriately.
+### 8.1 Core Booking Principles
 
-**8.6 No Refunds**
+- real availability checks
+- pricing evaluation before booking
+- booking reference generation
+- pending-to-confirmed payment lifecycle
+- immutable historical booking snapshots
+- terms acceptance tracking
 
-The payment system does not support refunds. This is enforced at the platform level.
+### 8.2 Supported Booking Domains
 
-**9\. Favorites & Saved Listings**
+Implemented booking models and services exist for:
 
-- Registered users and guests can save (heart/favorite) listings without booking.
-- When a listing is saved, a snapshot is captured: current price, photos, and description at that moment.
-- If the listing is later modified, the saved snapshot remains unchanged.
-- **Deletion Alert:** If a listing that a user has saved or liked (without booking) is deleted from the platform, the user is automatically notified that the listing they saved is no longer available. This applies to all saved/liked-but-not-booked items.
+- hotel stays
+- guest house stays
+- event spaces
+- car rentals
+- property rentals
 
-**10\. Availability Management**
+### 8.3 Guest Booking Support
 
-**10.1 Hotel / Guesthouse / Event Space**
+Guest booking is supported through phone-based flows. The platform preserves the relationship between a guest identity and their booking history so it can later be converted.
 
-Day-by-day availability counter maintained per room type or space. When a booking is confirmed, availability is decremented for each booked day. When a booking is cancelled, availability is re-incremented.
+### 8.4 Operational Booking Paths
 
-**10.2 Car Rental**
+The codebase also supports workspace and front-desk-oriented operational behavior, which is distinct from normal self-service customer booking.
 
-Day-by-day availability counter per car listing (tracks units, not individual cars). Supports fleet logic: one listing can represent multiple identical cars. Booking decrements available units; cancellation re-increments them.
+## 9. Availability and Pricing
 
-**10.3 On/Off Availability Switch**
+### 9.1 Availability
 
-For hotel staff and property managers, availability can be toggled using a simple on/off switch per room type or per listing per day — no complex calendar management required for basic operations.
+The current platform maintains availability models per listing family rather than using a single generic implementation. Availability is enforced through domain services for hospitality, events, cars, and property rentals.
 
-**11\. Admin Verification & Listing Control**
+### 9.2 Pricing
 
-- Every listing submitted by a company or individual is reviewed by the platform admin.
-- Admin can approve or reject listings with recorded reasons.
-- Verified listings display a "Verified by Mechot" badge with the date of verification.
-- Unverified listings display a "Not Verified" label but may still be shown (visibility policy TBD).
-- Admin can deactivate or remove listings that do not meet standards.
+The pricing system currently supports:
 
-**12\. Notifications**
+- listing-level or inventory-level prices
+- date-sensitive or seasonal pricing in relevant domains
+- price previews in booking flows
+- immutable recorded booking totals for historical accuracy
 
-**12.1 Delivery Channels**
+### 9.3 Add-ons and Related Commercial Data
 
-Every notification is sent through two channels simultaneously:
+Hospitality-style flows support add-ons and booking-side commercial extras where applicable.
 
-- In-app notification (visible in the Flutter app notification center).
-- SMS or push notification via phone (since phone is the primary contact method, not email).
+### 9.4 Booking Window Controls
 
-Email notifications can be sent additionally if the user has set up an optional email address.
+The current contract includes booking forward-window controls, including fields such as `booking_forward_window_days`.
 
-Users can configure which notifications they receive and through which channel.
+## 10. Terms, Compliance, and Historical Records
 
-**12.2 Customer Notifications**
+The backend treats legal acceptance and historical snapshots as first-class data.
 
-| **Event** | **Notification** |
+### 10.1 Terms Versioning
+
+Terms and conditions are versioned and stored against booking or listing-related flows through dedicated models and services.
+
+### 10.2 Immutable Booking History
+
+The system preserves historical facts at booking time, including:
+
+- booked pricing
+- terms accepted
+- related listing context
+- guest versus registered-user path
+
+### 10.3 Owner Compliance
+
+Individual-owner compliance agreements are implemented in the codebase and are especially relevant for owner-operated property rental scenarios.
+
+## 11. Payments and Financial Flows
+
+Chapa is the active payment integration and all payment behavior is centralized in the payment app and service layer.
+
+### 11.1 Supported Payment Operations
+
+The current payment system supports:
+
+- transaction initialization
+- verification
+- callback handling
+- webhook handling
+- cancellation handling
+- owner ledger views
+- receipt URL exposure
+- dispute and transaction monitoring fields
+
+### 11.2 Split and Payout Metadata
+
+The codebase includes payout and split-related metadata, including owner-facing payout tracking and Chapa subaccount registration flows.
+
+### 11.3 Tax Handling
+
+Payment records now include tax-oriented fields such as tax amount, tax rate, and liability status. Property rental flows for individual owners are part of this compliance-aware model.
+
+### 11.4 Refund Policy
+
+The platform enforces a no-refund business rule in its current payment behavior and surrounding product messaging.
+
+## 12. Contact-Reveal Connector Flows
+
+Car sales and property sales are currently implemented as contact-reveal products rather than end-to-end sale settlement flows.
+
+### 12.1 Flow Summary
+
+1. A buyer views a sale listing.
+2. The buyer initiates a contact reveal request.
+3. The platform collects payment for the reveal.
+4. After verification, the seller's contact information is revealed.
+5. The actual sale happens off-platform.
+
+### 12.2 Current Implementation Notes
+
+The current backend includes dedicated models, serializers, and schemas for contact reveal across both car sales and property sales, including guest-capable OTP-backed paths.
+
+## 13. Favorites and Saved State
+
+Favorites are implemented for both authenticated users and guests.
+
+The current behavior includes:
+
+- generic favorites support
+- snapshot-style saved listing behavior
+- listing-specific favorite serialization
+
+This allows saved-state behavior to survive later changes to live listing data.
+
+## 14. Notifications
+
+Notifications are a full application domain, not just ad hoc side effects.
+
+### 14.1 Channels
+
+The current notification system supports channel preferences and delivery metadata for:
+
+- in-app notifications
+- SMS-linked behavior
+- email-linked behavior
+- push-oriented delivery flags
+
+### 14.2 Notification Features
+
+The platform includes:
+
+- persisted notification records
+- user preferences
+- reusable templates
+- service-driven notification creation
+
+## 15. Promotions and Merchandising
+
+Promotions are now implemented as a first-class module.
+
+### 15.1 Admin Promotion Control
+
+The current product supports admin-managed promotional campaigns and placements.
+
+### 15.2 Public Promotion Surface
+
+The backend exposes public placement and tracking behavior so promoted inventory can be surfaced intentionally in customer-facing experiences.
+
+## 16. Analytics and Reporting
+
+Analytics are implemented for multiple operator personas.
+
+### 16.1 Current Analytics Coverage
+
+The backend includes analytics support for:
+
+- company dashboards
+- front desk and operational metrics
+- admin-level overview metrics
+- revenue and activity reporting
+
+### 16.2 Processing Model
+
+The current implementation mixes live queries and background or precomputed analytics support rather than relying on a purely one-mode design.
+
+## 17. Roles and Access Patterns
+
+The current role model in the codebase includes:
+
+- `user`
+- `admin`
+- `company`
+- `individual_owner`
+- `front_desk`
+
+Role and workspace information drive which operational surfaces a person sees and what data they can manage.
+
+## 18. Platform Administration
+
+Platform admins currently manage more than listing approval. Their responsibilities include:
+
+- company and owner approval flows
+- activation and verification decisions
+- payment transaction monitoring
+- disputes
+- promotions
+- roles and master data
+- notification templates and operational controls
+
+The Django admin remains part of the platform's real administrative surface alongside purpose-built APIs.
+
+## 19. Background Processing and System Tasks
+
+The codebase includes scheduled and background task behavior for operational continuity, including areas such as:
+
+- OTP cleanup
+- pending-booking auto-cancel behavior
+- analytics cache or materialization work
+- notification dispatch
+- promotion synchronization
+- geocoding-related tasks
+
+## 20. Data Integrity Rules
+
+The platform follows a historical-integrity model where past commercial facts are preserved. The current implementation is designed so that later listing edits do not rewrite the historical context of completed booking or payment records.
+
+Examples include preserving:
+
+- booking totals at the time of booking
+- terms acceptance state
+- payment records and receipt references
+- listing snapshots and related saved-state data
+
+## 21. Current Non-Goals and Boundaries
+
+The current backend does not act as a full on-platform broker for car sales or property sales. Those remain connector flows.
+
+The Django admin remains the platform-admin tool rather than being fully replaced by a customer-facing React or Flutter surface.
+
+Any future PRD updates should continue to treat the codebase and API contract as authoritative, especially for:
+
+- auth payloads
+- role names
+- endpoint paths
+- booking lifecycle behavior
+- payment semantics
+- activation versus verification rules
+
+## 22. Platform Summary
+
+| Capability | Current State |
 | --- | --- |
-| Account created | "Welcome to Mechot. Your account is active." |
-| Booking created | "Your booking \[REF\] has been received." |
-| Booking confirmed | "Your booking at \[Listing\] is confirmed." |
-| Booking cancelled | "Your booking \[REF\] has been cancelled." |
-| Payment successful | "Payment of \[amount\] ETB confirmed." |
-| Payment failed | "Payment unsuccessful, please try again." |
-| Saved listing deleted | "A listing you saved is no longer available." |
-
-**12.3 Vendor (Hotel / Owner) Notifications**
-
-| **Event** | **Notification** |
-| --- | --- |
-| New booking received | "New booking \[REF\] just came in." |
-| Booking cancelled | "Booking \[REF\] was cancelled." |
-| Payout completed | "\[Amount\] ETB sent to your Chapa account." |
-
-**12.4 Admin Notifications**
-
-| **Event** | **Notification** |
-| --- | --- |
-| New company registered | "New company registration needs review." |
-| New listing submitted | "A new listing has been submitted for review." |
-| Company approved/rejected | Confirmation of action taken. |
-
-**13\. Promotional Advertising**
-
-The platform supports promotional ad campaigns that can be configured and managed by the platform admin. Features include:
-
-- Running and scheduling promotions for specific listings or categories.
-- Customizing ad placement and duration.
-- Ad performance tracking.
-
-Full promotional ad specification is subject to further design, but the system must be built to accommodate this as a first-class admin feature. But the feature must be implemented with minimal way of doing it.
-
-**14\. Legal & Compliance**
-
-**14.1 T&C Versioning**
-
-Every listing owner (hotel, car owner, individual) can upload their own Terms & Conditions. The system versions each upload. When a new version is uploaded, the previous version is archived. Past bookings permanently retain the T&C version they were agreed to at booking time.
-
-**14.2 Permanent Booking Records**
-
-For every booking, the system immutably records:
-
-- Which T&C version was accepted.
-- Exact timestamp of acceptance.
-- Full copy of the T&C text as it existed at that time.
-- Whether the booker was a registered user or a guest.
-
-These records cannot be altered.
-
-**14.3 Individual Owner Licensing**
-
-Private individuals who rent their property through the platform do not hold a rental license. The platform acts as the licensed intermediary. A formal agreement is signed between the platform and the individual owner. The platform collects and remits the applicable 15% government tax on all transactions on their behalf.
-
-**15\. Analytics & Reporting**
-
-**15.1 Vendor Dashboard**
-
-Each vendor (hotel, car owner, individual) has access to a real-time analytics dashboard:
-
-- Revenue today / this week / this month.
-- New bookings, confirmed bookings, cancelled bookings.
-- Average booking value.
-- Top-performing listing or room type.
-- Per-day revenue chart (pre-computed for fast load).
-- Per-listing breakdown.
-
-**15.2 Pre-Computed Analytics**
-
-Analytics are computed in the background after each booking event, not calculated live on dashboard load. This ensures instant load times regardless of data volume.
-
-**15.3 Admin Dashboard**
-
-Platform-wide view:
-
-- Total transactions.
-- Platform revenue (commissions collected).
-- Pending company registrations.
-- Failed payouts requiring intervention.
-- Active listings by category.
-
-**16\. Data Integrity & Historical Accuracy**
-
-The platform follows a strict principle: the past never changes.
-
-| **What Might Change** | **How the System Protects Historical Accuracy** |
-| --- | --- |
-| Listing price changed | Each booking records the price at booking time. |
-| Listing deleted | Booking still shows full details of what was booked. |
-| T&C updated | Each booking records which version was agreed to. |
-| Add-on menu changed | Each booking records add-on price at booking time. |
-| Saved listing changes | Snapshot captures listing state at the time it was saved. |
-
-**17\. Car Rental — Additional Rules**
-
-- Renting with a driver and without a driver are treated as distinct products.
-- Without-driver rentals require documentation (driver's license, cheque guarantee and other things). Full document checklist is pending final specification.
-- Only Code-3 plate number cars that have a Business License is allowed to be rented.
-- Car owners can optionally require renters to fill out a custom form before the rental is finalized.
-- Renters can change the rental dates post-booking (subject to availability and T&C).
-- Car listings are subject to admin verification. Unverified cars display a "Not Verified" label but still visible.
-
-**18\. Car & House Sales — Connector Model**
-
-The platform does not act as a broker for sales. It acts as a connector:
-
-1.  Buyer views the listing and expresses interest.
-2.  Buyer pays a contact-reveal fee.
-3.  Upon payment, the seller's contact details are revealed to the buyer.
-4.  The actual transaction (negotiation, payment, transfer) takes place directly between buyer and seller outside the platform.
-
-This applies to both car sales and house/property sales. Any type of car and any type of house/property can be listed for sale.
-
-**19\. Guest-to-User Conversion**
-
-Guest users who have placed bookings using only their phone number can later create a registered account. Upon conversion:
-
-- Their full booking history is transferred to their new account.
-- Their phone number is used as the linking identifier.
-- No history is lost.
-- If a user wants to register and enters a phone number that already have a history we will send him/her an OTP to confirm if they are who they are before transferring history.
-
-**20\. Out of Scope / On Hold**
-
-The following items require further specification before development begins:
-
-- Without-driver car rental documentation checklist (driver's license, cheque guarantee, etc.).
-- Full detail of the renter form that car owners can optionally require.
-- Listing visibility policy for unverified listings (shown with label vs. hidden until verified).
-- Full detail of the promotional ad management feature.
-- Specific booking date restriction granularity (platform-wide vs. per-category vs. per-listing).
-
-Answers to above
-
-1, Listing visibility policy for unverified listings (shown with label vs. hidden until verified)?
-
-Every listings added by customers are not shown by default they should be in-active and admin reviews it and make it active. So admin can make a listing active but not verify the listing information if they haven’t seen it physically.
-
-Basically being active/in-active affects the listing to be visible to the platform but verified/un-verified does not affect visibility, it just adds a tag.
-
-**21\. Platform Summary**
-
-| **Capability** | **Details** |
-| --- | --- |
-| Payment Gateway | Chapa |
-| Primary Currency | Ethiopian Birr (ETB) |
-| Customer Interface | Flutter mobile app + website |
-| User Login | Phone number (OTP). Email optional and Password. |
-| Vendor Types | Companies + Individual Owners |
-| Listing Types | Hotels, Guesthouses, Event Spaces, Car Rentals, Car Sales, House Rentals, House Sales |
-| Guest Checkout | Supported. Phone only. History preserved. |
-| Service Fee | Applied on booking amount only, not add-ons. Waived on first booking. No fee on walk-ins. |
-| Refund Policy | No refunds on any service payment. |
-| Payment Split | Chapa splits to platform account + vendor account automatically. |
-| Notifications | In-app + SMS/Push. Email if configured. |
-| Analytics | Pre-computed, real-time vendor and admin dashboards. |
-| Legal Compliance | Full T&C versioning and acceptance audit trail. |
-| Listing Verification | Admin-verified badge system with verification date. |
-| Unique Value | Enables private individuals to rent/sell their property through a licensed intermediary with tax handled by the platform. |
+| Primary backend | Django REST Framework modular monolith |
+| Primary auth | JWT with phone-plus-password login, plus OTP verification flows |
+| Primary payment gateway | Chapa |
+| Primary currency | ETB |
+| Booking domains | Hotels, guest houses, event spaces, car rentals, property rentals |
+| Connector domains | Car sales, property sales |
+| Favorites | Supported for users and guests |
+| Promotions | Implemented |
+| Notifications | Implemented with preferences and templates |
+| Analytics | Implemented for company, front desk, and admin contexts |
+| Listing trust model | Activation controls visibility; verification adds trust metadata |
+| Compliance support | Terms versioning, owner agreements, tax-aware payment fields |
+| Distinctive platform value | Unified Ethiopian marketplace across booking, rentals, and connector sales with owner, company, and operational workflows in one system |
