@@ -16,7 +16,6 @@ def send_otp_sms_task(challenge_id):
         logger.warning("OTP challenge %s not found for SMS delivery.", challenge_id)
         return False
 
-    pending_key = f"{challenge.phone}:{challenge.purpose}"
     payload = cache.get(OtpChallengeCache.pending_key(challenge.id))
     if not payload:
         logger.warning("OTP payload missing from cache for challenge %s.", challenge_id)
@@ -29,7 +28,6 @@ def send_otp_sms_task(challenge_id):
     except Exception as exc:
         logger.exception("Failed to send OTP SMS for challenge %s", challenge_id)
         cache.delete(OtpChallengeCache.pending_key(challenge.id))
-        cache.delete(OtpChallengeCache.cooldown_key(payload["phone"], challenge.purpose))
         challenge.delete()
         return False
 
@@ -47,7 +45,6 @@ def cleanup_expired_otp_challenges():
     deleted_count = 0
     for challenge in expired:
         cache.delete(OtpChallengeCache.pending_key(challenge.id))
-        cache.delete(OtpChallengeCache.cooldown_key(challenge.phone, challenge.purpose))
         deleted_count += 1
     OtpChallenge.objects.filter(id__in=[challenge.id for challenge in expired]).delete()
     return deleted_count
@@ -59,10 +56,6 @@ class OtpChallengeCache:
         from django.conf import settings
 
         return getattr(settings, "OTP_REDIS_KEY_PREFIX", "otp")
-
-    @classmethod
-    def cooldown_key(cls, phone, purpose):
-        return f"{cls.prefix()}:cooldown:{phone}:{purpose}"
 
     @classmethod
     def pending_key(cls, challenge_id):

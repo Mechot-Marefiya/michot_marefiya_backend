@@ -141,8 +141,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 @extend_schema(tags=["Identity & Auth"])
 class OtpRequestView(APIView):
     permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "otp_request"
+    throttle_classes = []
     serializer_class = OtpRequestSerializer
 
     @extend_schema(
@@ -162,7 +161,7 @@ class OtpRequestView(APIView):
                 "challenge_token": str(challenge.id),
                 "purpose": challenge.purpose,
                 "expires_at": challenge.expires_at,
-                "cooldown_seconds": int(getattr(settings, "OTP_COOLDOWN_SECONDS", 60)),
+                "cooldown_seconds": 0,
                 "phone": challenge.phone,
             },
             status=status.HTTP_200_OK,

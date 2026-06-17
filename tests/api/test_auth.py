@@ -4,7 +4,6 @@
 # Last updated: 2026-06-01
 
 import pytest
-import time
 from django.core.cache import cache
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.hashers import make_password
@@ -427,27 +426,16 @@ def test_post_otp_request_sms_dispatch_failure_returns_400_not_500(mock_generate
 
 @patch("apps.account.services.OtpService.generate_code", return_value="123456")
 @patch("services.sms.send_sms", return_value=True)
-def test_post_otp_request_cooldown_blocks_second_request(mock_send_sms, mock_generate_code, api_client, user):
+def test_post_otp_request_allows_repeated_requests_without_cooldown(mock_send_sms, mock_generate_code, api_client, user):
     cache.clear()
     first = api_client.post("/api/v1/auth/otp/request/", {"phone": user.phone}, format="json")
-    second = api_client.post("/api/v1/auth/otp/request/", {"phone": user.phone}, format="json")
-
-    assert first.status_code == 200
-    assert second.status_code == 400
-    assert second.json()["detail"] == "Please wait before requesting another OTP."
-
-
-@patch("apps.account.services.OtpService.generate_code", return_value="123456")
-@patch("services.sms.send_sms", return_value=True)
-def test_post_otp_request_allows_request_after_cooldown_expires(mock_send_sms, mock_generate_code, api_client, user, settings):
-    cache.clear()
-    settings.OTP_COOLDOWN_SECONDS = 1
-    first = api_client.post("/api/v1/auth/otp/request/", {"phone": user.phone}, format="json")
-    time.sleep(1.1)
     second = api_client.post("/api/v1/auth/otp/request/", {"phone": user.phone}, format="json")
 
     assert first.status_code == 200
     assert second.status_code == 200
+    assert first.json()["cooldown_seconds"] == 0
+    assert second.json()["cooldown_seconds"] == 0
+    assert first.json()["challenge_id"] != second.json()["challenge_id"]
 
 
 @pytest.mark.parametrize("challenge_factory", ["wrong_code", "expired", "consumed", "locked"])

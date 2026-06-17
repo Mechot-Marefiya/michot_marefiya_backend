@@ -124,10 +124,6 @@ class OtpService:
         return int(getattr(settings, "OTP_MAX_ATTEMPTS", cls.DEFAULT_MAX_ATTEMPTS))
 
     @classmethod
-    def _cooldown_seconds(cls) -> int:
-        return int(getattr(settings, "OTP_COOLDOWN_SECONDS", cls.DEFAULT_COOLDOWN_SECONDS))
-
-    @classmethod
     def _message_for_purpose(cls, purpose: str) -> str:
         minutes = max(cls._expiry_seconds() // 60, 1)
         if purpose in cls.BOOKING_PURPOSES:
@@ -163,10 +159,6 @@ class OtpService:
             if purpose not in cls.BOOKING_PURPOSES:
                 raise OtpError("No active account found for this phone number.")
 
-        cooldown_key = OtpChallengeCache.cooldown_key(normalized_phone, purpose)
-        if cache.get(cooldown_key):
-            raise OtpError("Please wait before requesting another OTP.")
-
         code = cls.generate_code()
         expires_at = timezone.now() + timezone.timedelta(seconds=cls._expiry_seconds())
         OtpChallenge.objects.filter(
@@ -188,13 +180,11 @@ class OtpService:
             {"phone": normalized_phone, "message": message},
             timeout=cls._expiry_seconds(),
         )
-        cache.set(cooldown_key, str(challenge.id), timeout=cls._cooldown_seconds())
         try:
             cls._dispatch_sms_task(challenge.id)
         except Exception as exc:
             logger.exception("Failed to queue OTP SMS for %s", normalized_phone)
             cache.delete(OtpChallengeCache.pending_key(challenge.id))
-            cache.delete(cooldown_key)
             challenge.delete()
             raise OtpError("Could not send OTP. Please try again.") from exc
         return challenge
@@ -229,7 +219,6 @@ class OtpService:
 
         challenge.consumed_at = timezone.now()
         challenge.save(update_fields=["attempts", "consumed_at", "updated_at"])
-        cache.delete(OtpChallengeCache.cooldown_key(challenge.phone, challenge.purpose))
         cache.delete(OtpChallengeCache.pending_key(challenge.id))
 
         if purpose == OtpChallenge.Purpose.SIGNUP and challenge.user:

@@ -2165,4 +2165,75 @@ These are the current contract changes React must already handle from `API_CONTR
 | 2026-06-14 | Subaccount endpoints were added | enable owner/vendor payout setup screens |
 | 2026-06-14 | `receipt_url` was added to payment transaction responses | show receipt actions after successful payment |
 
+## Missed Routes
+
+These routes are onboarding flows that are easy to miss when wiring the React app. Keep them separate from the main section flow so they stand out during implementation.
+
+### Company Registration
+Workflow reference: `REACT_WORKFLOW.md` Section 2
+Method: `POST`
+URL: `/api/v1/account/companies/`
+Auth: no
+Roles: all
+
+Request body:
+- `email`: string - optional - company account email
+- `first_name`: string - required
+- `last_name`: string - required
+- `password`: string - required
+- `confirm_password`: string - required
+- `name`: string - required - company name
+- `license`: file - required - company license document
+- `logo`: file - optional
+- `category`: string - required
+- `description`: string - optional
+- `phone`: string - required
+- `tin`: string - optional
+- `business_license_number`: string - optional
+- `address`: object or JSON string - required - flexible address payload
+
+Success response (HTTP 201):
+- company profile payload using `CompanyProfileResponse`
+- `verification_required`: string - usually `phone`
+- `phone_verification_required`: boolean
+- `otp_challenge_id`: uuid
+- `otp_expires_at`: datetime
+- `otp_purpose`: string
+
+Error responses:
+- `400`: validation errors, duplicate user data, invalid address, or missing role configuration
+
+React notes:
+- this is the direct public company sign-up route
+- the response includes OTP metadata, so React should route the user into verification after a successful create
+- send the request as multipart form data because it includes files and a nested address payload
+
+### Company Apply
+Workflow reference: `REACT_WORKFLOW.md` Section 4
+Method: `POST`
+URL: `/api/v1/account/companies/apply/`
+Auth: yes (Bearer)
+Roles: company_staff / individual_owner / other authenticated users allowed by backend
+
+Request body:
+- `name`: string - required - company name
+- `license`: file - required - company license document
+- `address`: object or JSON string - required - flexible address payload
+- `phone`: string - required
+- `logo`: file - optional
+- `category`: string - required
+- `description`: string - optional
+
+Success response (HTTP 201):
+- company profile payload using `CompanyProfileResponse`
+
+Error responses:
+- `400`: validation errors or duplicate company profile on the same user
+- `401`: unauthenticated
+
+React notes:
+- this is the authenticated company application route
+- the created profile is stored with `PENDING` status until admin approval
+- use this path when an already signed-in user applies for a company account instead of creating a fresh login
+
 

@@ -37,13 +37,21 @@ SECRET_KEY = env("SECRET_KEY", cast=str)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env("DEBUG", default=True, cast=bool)
+AUTH_REGISTER_THROTTLE_RATE = env(
+    "AUTH_REGISTER_THROTTLE_RATE",
+    default="1000/min" if DEBUG else "10/hour",
+)
+AUTH_OTP_REQUEST_THROTTLE_RATE = env(
+    "AUTH_OTP_REQUEST_THROTTLE_RATE",
+    default="1000/min" if DEBUG else "5/min",
+)
 REQUIRE_GUEST_BOOKING_OTP = env("REQUIRE_GUEST_BOOKING_OTP", default=True, cast=bool)
 BOOKING_FORWARD_WINDOW_DAYS = env("BOOKING_FORWARD_WINDOW_DAYS", default=5, cast=int)
 OTP_CODE_LENGTH = env("OTP_CODE_LENGTH", default=6, cast=int)
 OTP_EXPIRY_SECONDS = env("OTP_EXPIRY_SECONDS", default=300, cast=int)
 OTP_TTL_SECONDS = OTP_EXPIRY_SECONDS
 OTP_MAX_ATTEMPTS = env("OTP_MAX_ATTEMPTS", default=5, cast=int)
-OTP_COOLDOWN_SECONDS = env("OTP_COOLDOWN_SECONDS", default=60, cast=int)
+OTP_COOLDOWN_SECONDS = env("OTP_COOLDOWN_SECONDS", default=1 if DEBUG else 60, cast=int)
 OTP_REDIS_KEY_PREFIX = env("OTP_REDIS_KEY_PREFIX", default="otp")
 GUEST_PHONE_VERIFICATION_MAX_AGE_SECONDS = env(
     "GUEST_PHONE_VERIFICATION_MAX_AGE_SECONDS",
@@ -243,9 +251,9 @@ REST_FRAMEWORK = {
         "anon": "60/min",          # Base limit for unauthenticated users
         "user": "5000/hour",       # Base limit for authenticated users
         "auth_login": "5/min",     # Strict limit for login attempts (Brute-force protection)
-        "otp_request": "5/min",
+        "otp_request": AUTH_OTP_REQUEST_THROTTLE_RATE,
         "otp_verify": "10/min",
-        "auth_register": "10/hour",# Prevent mass account creation
+        "auth_register": AUTH_REGISTER_THROTTLE_RATE,  # Keep production strict, but let local phone-first registration flow be testable
         "password_reset": "3/hour",# Prevent email spam/cost abuse
         "verify_email": "5/hour",  # Prevent verification token guessing
         "availability_check": "60/min", # Prevent database exhaustion (1 req/sec)
