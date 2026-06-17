@@ -132,17 +132,17 @@ class Command(BaseCommand):
     ]
 
     HOTEL_NAMES = [
-        "Abyssinia Grand Hotel",
-        "Blue Nile Signature",
-        "Meskel Crown Residence",
-        "Rift Valley Terrace",
+        "Holiday Addis Ababa",
+        "Sheraton Addis",
+        "Haile Resort",
+        "Radisson Blu",
     ]
 
     GUEST_HOUSE_NAMES = [
-        "Bole Palm Guest House",
-        "Lake Breeze Guest Home",
-        "Central Courtyard Stay",
-        "Garden Gate Residence",
+        "Wubet Pension",
+        "Yordanos Pension",
+        "Alem Pension",
+        "Taitu Pension",
     ]
 
     EVENT_SPACE_NAMES = [
@@ -165,18 +165,18 @@ class Command(BaseCommand):
     ]
 
     CAR_CATALOG = [
-        ("toyota", "Land Cruiser Prado", Decimal("9000.00"), "automatic", "diesel", "used"),
-        ("toyota", "Corolla Cross", Decimal("5200.00"), "automatic", "petrol", "used"),
-        ("hyundai", "Santa Fe", Decimal("6800.00"), "automatic", "diesel", "used"),
-        ("ford", "Everest", Decimal("7100.00"), "automatic", "diesel", "used"),
-        ("bmw", "X5", Decimal("11000.00"), "automatic", "petrol", "used"),
-        ("honda", "CR-V", Decimal("5600.00"), "automatic", "petrol", "used"),
+        ("toyota", "Corolla", Decimal("3000.00"), "automatic", "petrol", "used"),
+        ("honda", "Civic", Decimal("3200.00"), "automatic", "petrol", "used"),
+        ("hyundai", "Tucson", Decimal("4000.00"), "automatic", "petrol", "used"),
+        ("toyota", "Land Cruiser V8", Decimal("9000.00"), "automatic", "diesel", "used"),
+        ("lexus", "LX 570", Decimal("11000.00"), "automatic", "petrol", "used"),
+        ("mercedes-benz", "S-Class", Decimal("12000.00"), "automatic", "hybrid", "used"),
     ]
 
-    PROPERTY_TYPES = [
-        ("apartment", Decimal("4500.00")),
-        ("condo", Decimal("6200.00")),
-        ("villa", Decimal("18000.00")),
+    SALE_CAR_CATALOG = [
+        ("mercedes-benz", "S-Class", Decimal("12000000.00"), "automatic", "hybrid", "used"),
+        ("range rover", "Autobiography", Decimal("15000000.00"), "automatic", "petrol", "used"),
+        ("bmw", "7 Series", Decimal("11000000.00"), "automatic", "petrol", "used"),
     ]
 
     SALE_PROPERTY_TYPES = [
@@ -184,6 +184,53 @@ class Command(BaseCommand):
         ("commercial", Decimal("16500000.00")),
         ("land", Decimal("6000000.00")),
         ("villa", Decimal("24000000.00")),
+    ]
+
+    PROPERTY_RENTAL_PRESETS = [
+        (
+            "condo",
+            "Luxury Condominium",
+            Decimal("2000.00"),
+            "Luxury Lane",
+            "Addis Ababa",
+            "Addis Ababa",
+            "A modern condominium with premium amenities and city views.",
+            True,
+            "+251-911-123-456",
+        ),
+        (
+            "condo",
+            "Cozy Condominium",
+            Decimal("1000.00"),
+            "Cozy Road",
+            "Adama",
+            "Oromia",
+            "A cozy condominium perfect for singles or couples.",
+            False,
+            "+251-911-234-567",
+        ),
+        (
+            "apartment",
+            "Family Apartment",
+            Decimal("1500.00"),
+            "Central Avenue",
+            "Bahir Dar",
+            "Amhara",
+            "A spacious apartment for longer city stays.",
+            True,
+            "+251-911-345-678",
+        ),
+        (
+            "villa",
+            "Garden Villa",
+            Decimal("2500.00"),
+            "Garden Heights",
+            "Hawassa",
+            "Sidama",
+            "A quiet villa with lake-city access and a private garden feel.",
+            True,
+            "+251-911-456-789",
+        ),
     ]
 
     def add_arguments(self, parser):
@@ -398,7 +445,7 @@ class Command(BaseCommand):
                 "role": admin_role,
                 "is_staff": True,
                 "is_superuser": True,
-                "phone": "0911000000",
+                "phone": "0900000100",
             },
         )
         changed = False
@@ -684,21 +731,25 @@ class Command(BaseCommand):
         for index, company in enumerate(company_bundle["companies"], start=1):
             city = self.CITY_DATA[(index - 1) % len(self.CITY_DATA)]
             address = self._create_address(city, f"{60 + index} {city['area']} Hotel Avenue")
+            hotel_slug = self.HOTEL_NAMES[index - 1].lower().replace(" ", "").replace("-", "")
             hotel, _ = HotelProfile.objects.update_or_create(
                 company=company,
                 defaults={
                     "name": self.HOTEL_NAMES[index - 1],
-                    "description": f"{self.HOTEL_NAMES[index - 1]} offers business travel, family stays, and local cuisine in {city['city']}.",
+                    "description": (
+                        f"{self.HOTEL_NAMES[index - 1]} blends business-ready comfort, warm hospitality, "
+                        f"and local cuisine in {city['city']}."
+                    ),
                     "phone": company.phone,
-                    "website": f"https://{company.name.lower().replace(' ', '')}.demo",
+                    "website": f"https://{hotel_slug}.com",
                     "address": address,
                     "is_active": True,
                     "is_verified": True,
                     "verified_at": self.now - timedelta(days=10),
                     "verified_by": admin_user,
                     "verification_note": "Seeded as verified hotel.",
-                    "stars": 3 + (index % 3),
-                    "featured": index % 2 == 1,
+                    "stars": 5 if index == 2 else 4,
+                    "featured": index <= 2,
                     "latitude": city["lat"],
                     "longitude": city["lng"],
                     "formatted_address": f"{address.street_line1}, {city['sub_city']}, {city['city']}",
@@ -725,7 +776,10 @@ class Command(BaseCommand):
                     hotel=hotel,
                     title=title,
                     defaults={
-                        "description": f"{title} at {hotel.name} with strong business and leisure appeal.",
+                        "description": (
+                            f"{title} at {hotel.name} with city views, a calm work-friendly layout, "
+                            f"and modern finishes for leisure or business stays."
+                        ),
                         "base_price": base_price + Decimal(index * 150),
                         "currency": "ETB",
                         "total_units": 4 + index,
@@ -934,13 +988,16 @@ class Command(BaseCommand):
             address = self._create_address(city, f"{140 + index} {city['area']} Guest Compound")
             defaults = {
                 "title": self.GUEST_HOUSE_NAMES[index - 1],
-                "description": f"Warm and practical stay option in {city['city']} for small groups and long weekends.",
-                "base_price": Decimal("1700.00") + Decimal(index * 250),
+                "description": (
+                    f"{self.GUEST_HOUSE_NAMES[index - 1]} is a clean, welcoming stay in {city['city']} "
+                    f"with friendly service and practical comfort for budget travelers."
+                ),
+                "base_price": Decimal("1000.00") + Decimal(index * 120),
                 "currency": "ETB",
                 "address": address,
                 "phone": f"0955{index + 200000:06d}",
-                "website": f"https://guesthouse{index}.demo",
-                "rating": Decimal(f"4.{index + 1}0"),
+                "website": f"https://{self.GUEST_HOUSE_NAMES[index - 1].lower().replace(' ', '').replace('-', '')}.com",
+                "rating": Decimal(f"3.{7 + (index % 3)}"),
                 "is_active": True,
                 "is_verified": True,
                 "verified_at": self.now - timedelta(days=12),
@@ -979,7 +1036,10 @@ class Command(BaseCommand):
                     guest_house=guest_house,
                     title=title,
                     defaults={
-                        "description": f"{title} at {guest_house.title} with flexible short-stay comfort.",
+                        "description": (
+                            f"{title} at {guest_house.title} with simple comfort, reliable Wi-Fi, "
+                            f"and short-stay convenience."
+                        ),
                         "base_price": price + Decimal(index * 100),
                         "currency": "ETB",
                         "number_of_guests": guests,
@@ -1028,7 +1088,9 @@ class Command(BaseCommand):
             city = self.CITY_DATA[index % len(self.CITY_DATA)]
             defaults = {
                 "title": f"{brand.title()} {model_name}",
-                "description": f"Reliable {model_name} for airport runs, business trips, and family travel.",
+                "description": (
+                    f"Well-kept {model_name} for airport transfers, daily mobility, and comfortable city travel."
+                ),
                 "base_price": base_price,
                 "currency": "ETB",
                 "brand": brand,
@@ -1093,16 +1155,19 @@ class Command(BaseCommand):
             ("individual", individual_bundle["owners"][0]),
         ]
         for index, owner_ref in enumerate(owners, start=1):
-            brand, model_name, _, transmission, fuel_type, condition = self.CAR_CATALOG[(index + 2) % len(self.CAR_CATALOG)]
+            brand, model_name, base_price, transmission, fuel_type, condition = self.SALE_CAR_CATALOG[index - 1]
             city = self.CITY_DATA[(index + 2) % len(self.CITY_DATA)]
             defaults = {
-                "description": f"Well-maintained {model_name} for private sale with verified ownership records.",
-                "base_price": Decimal("2800000.00") + Decimal(index * 450000),
+                "description": (
+                    f"Luxury {model_name} for private sale with verified ownership records, "
+                    f"clean presentation, and immediate viewing availability."
+                ),
+                "base_price": base_price,
                 "currency": "ETB",
                 "brand": brand,
                 "model": model_name,
-                "year": 2018 + index,
-                "mileage": 24000 + (index * 9000),
+                "year": 2020 + (index - 1),
+                "mileage": 12000 + (index * 7000),
                 "fuel_type": fuel_type,
                 "transmission": transmission,
                 "condition": condition,
@@ -1148,19 +1213,21 @@ class Command(BaseCommand):
             ("individual", individual_bundle["owners"][2]),
         ]
         for index, owner_ref in enumerate(owners, start=1):
-            property_type, price = self.PROPERTY_TYPES[(index - 1) % len(self.PROPERTY_TYPES)]
-            city = self.CITY_DATA[(index + 3) % len(self.CITY_DATA)]
-            address = self._create_address(city, f"{200 + index} {city['area']} Residency")
+            property_type, preset_title, price, street_name, city_name, state_name, description, furnished, _phone = self.PROPERTY_RENTAL_PRESETS[
+                (index - 1) % len(self.PROPERTY_RENTAL_PRESETS)
+            ]
+            city = next((city for city in self.CITY_DATA if city["city"] == city_name and city["state"] == state_name), self.CITY_DATA[0])
+            address = self._create_address(city, f"{200 + index} {street_name}")
             defaults = {
-                "description": f"Comfortable {property_type} prepared for monthly or short-term furnished stays.",
-                "base_price": price + Decimal(index * 350),
+                "description": description,
+                "base_price": price,
                 "currency": "ETB",
                 "address": address,
                 "property_type": property_type,
-                "bedrooms": 1 + index,
-                "bathrooms": 1 + (index % 3),
-                "square_meters": Decimal(75 + (index * 28)),
-                "is_furnished": index % 2 == 0,
+                "bedrooms": 3 if property_type == "condo" else 2 + index,
+                "bathrooms": 1 + (index % 2),
+                "square_meters": Decimal(95 + (index * 18)),
+                "is_furnished": furnished,
                 "is_active": True,
                 "is_verified": True,
                 "verified_at": self.now - timedelta(days=8),
@@ -1170,16 +1237,15 @@ class Command(BaseCommand):
                 "longitude": city["lng"],
                 "formatted_address": f"{address.street_line1}, {city['city']}",
             }
-            title = f"{property_type.title()} Stay {index}"
             if owner_ref[0] == "company":
                 property_listing, _ = PropertyListing.objects.update_or_create(
-                    title=title,
+                    title=preset_title,
                     company=owner_ref[1],
                     defaults={**defaults, "individual_owner": None},
                 )
             else:
                 property_listing, _ = PropertyListing.objects.update_or_create(
-                    title=title,
+                    title=preset_title,
                     individual_owner=owner_ref[1],
                     defaults={**defaults, "company": None},
                 )
@@ -1215,7 +1281,9 @@ class Command(BaseCommand):
             city = self.CITY_DATA[(index + 4) % len(self.CITY_DATA)]
             address = self._create_address(city, f"{260 + index} {city['area']} Ownership Block")
             defaults = {
-                "description": f"Verified {property_type} listing suitable for owner-occupied or investment purchase.",
+                "description": (
+                    f"Verified {property_type} listing suitable for owner-occupied living or investment purchase."
+                ),
                 "base_price": price,
                 "currency": "ETB",
                 "address": address,

@@ -225,6 +225,13 @@ class OtpService:
             challenge.user.is_active = True
             challenge.user.phone_verified_at = timezone.now()
             challenge.user.save(update_fields=["is_active", "phone_verified_at", "updated_at"])
+        elif (
+            purpose == OtpChallenge.Purpose.LOGIN
+            and challenge.user
+            and not challenge.user.phone_verified_at
+        ):
+            challenge.user.phone_verified_at = timezone.now()
+            challenge.user.save(update_fields=["phone_verified_at", "updated_at"])
 
         tokens = None
         if issue_tokens and challenge.user:

@@ -262,6 +262,39 @@ def test_post_otp_verify_login_success(api_client, user):
     assert challenge.consumed_at is not None
 
 
+def test_post_otp_verify_login_marks_active_unverified_user_phone_verified(api_client, user):
+    user.phone_verified_at = None
+    user.is_active = True
+    user.save(update_fields=["phone_verified_at", "is_active", "updated_at"])
+    challenge = OtpChallenge.objects.create(
+        user=user,
+        phone=user.phone,
+        purpose=OtpChallenge.Purpose.LOGIN,
+        code_hash=make_password("123456"),
+        expires_at=timezone.now() + timezone.timedelta(minutes=5),
+        sent_at=timezone.now(),
+    )
+
+    response = api_client.post(
+        "/api/v1/auth/otp/verify/",
+        {
+            "challenge_id": str(challenge.id),
+            "code": "123456",
+            "purpose": "login",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["success"] is True
+    assert data["user"]["phone_verified"] is True
+    assert isinstance(data["access"], str)
+    assert isinstance(data["refresh"], str)
+    user.refresh_from_db()
+    assert user.phone_verified_at is not None
+
+
 def test_post_otp_verify_invalid_code(api_client, user):
     challenge = OtpChallenge.objects.create(
         user=user,
