@@ -475,6 +475,8 @@ class UserSerializer(serializers.ModelSerializer):
 class UserResponseSerializer(serializers.ModelSerializer):
     role = RoleSerializer(read_only=True, allow_null=True)
     workspace = serializers.SerializerMethodField()
+    company = serializers.SerializerMethodField()
+    individual_owner = serializers.SerializerMethodField()
     phone_verified = serializers.BooleanField(read_only=True)
 
     class Meta:
@@ -493,9 +495,31 @@ class UserResponseSerializer(serializers.ModelSerializer):
             "location_permission_granted",
             "is_active",
             "role",
+            "company",
+            "individual_owner",
             "workspace",
         ]
 
+    @extend_schema_field(LoginProfileSummarySerializer(allow_null=True))
+    def get_company(self, instance):
+        company = getattr(instance, "profile", None) or getattr(instance, "company", None)
+        if not company:
+            return None
+        return {
+            "id": str(company.id),
+            "name": company.name,
+        }
+
+    @extend_schema_field(LoginProfileSummarySerializer(allow_null=True))
+    def get_individual_owner(self, instance):
+        owner = getattr(instance, "individual_owner", None)
+        if not owner:
+            return None
+        name = f"{owner.first_name} {owner.last_name}".strip()
+        return {
+            "id": str(owner.id),
+            "name": name,
+        }
 
     @extend_schema_field(WORKSPACE_INFO_SCHEMA)
     def get_workspace(self, instance):

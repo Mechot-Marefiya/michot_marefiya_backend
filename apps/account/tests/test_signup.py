@@ -6,6 +6,8 @@ from django.urls import reverse
 from django.core.files.uploadedfile import SimpleUploadedFile
 from unittest.mock import patch
 
+from apps.account.enums import RoleCode
+
 
 @pytest.mark.django_db
 @patch("services.sms.send_sms", return_value=True)
@@ -90,6 +92,9 @@ def test_company_registration(api_client, company_role):
     assert res.status_code == 201
 
     assert res.data["name"] == "michot"
+    assert res.data["user"]["role"]["code"] == RoleCode.COMPANY.value
+    assert res.data["user"]["company"]["id"] == str(res.data["id"])
+    assert res.data["user"]["workspace"] is None
 
 
 @pytest.mark.django_db
