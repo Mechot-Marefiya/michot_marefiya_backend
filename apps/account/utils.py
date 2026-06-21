@@ -2,6 +2,14 @@ import secrets
 import string
 
 
+WORKSPACE_CATEGORY_LABELS = {
+    "hotel": "Hotel",
+    "guesthouse": "Guest House",
+    "car_rental": "Car Rental",
+    "event_space": "Event Space",
+}
+
+
 def generate_password(email=None):
     alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
     password_length = 12
@@ -30,3 +38,48 @@ def validate_password_strength(password):
         errors.append("Password must contain at least one letter.")
     
     return errors
+
+
+def get_workspace_summary(workspace):
+    if not workspace:
+        return None
+
+    model_name = workspace.__class__.__name__
+    workspace_type = None
+
+    if model_name == "HotelProfile":
+        workspace_type = "hotel"
+        workspace_name = getattr(workspace, "name", None) or str(workspace)
+    elif model_name == "GuestHouseProfile":
+        workspace_type = "guesthouse"
+        workspace_name = getattr(workspace, "title", None) or str(workspace)
+    elif model_name == "EventSpaceListing":
+        workspace_type = "event_space"
+        workspace_name = getattr(workspace, "title", None) or str(workspace)
+    elif model_name == "CarListing":
+        workspace_type = "car_rental"
+        workspace_name = " ".join(
+            part for part in [getattr(workspace, "brand", ""), getattr(workspace, "model", "")] if part
+        ).strip() or getattr(workspace, "title", None) or str(workspace)
+    else:
+        workspace_name = getattr(workspace, "title", None) or getattr(workspace, "name", None) or str(workspace)
+
+    return {
+        "id": str(workspace.id),
+        "name": workspace_name,
+        "workspace_type": workspace_type,
+    }
+
+
+def get_workspace_catalog_entry(workspace):
+    summary = get_workspace_summary(workspace)
+    if not summary:
+        return None
+
+    workspace_type = summary["workspace_type"]
+    return {
+        "id": summary["id"],
+        "type": workspace_type,
+        "name": summary["name"],
+        "category": WORKSPACE_CATEGORY_LABELS.get(workspace_type, "Workspace"),
+    }

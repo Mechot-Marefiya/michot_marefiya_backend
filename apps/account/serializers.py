@@ -31,7 +31,7 @@ from apps.notifications.models import Notification
 from apps.listing.services import ListingService
 from apps.core.services.email_service import EmailService
 from django.utils import timezone
-from apps.account.utils import generate_password
+from apps.account.utils import generate_password, get_workspace_summary
 from rest_framework import serializers
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_bytes, force_str
@@ -165,27 +165,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                     }
             elif self.user.role.code in [RoleCode.FRONT_DESK.value, "front_desk"]:
                 if self.user.workspace:
-                    workspace_type = "unknown"
-                    if hasattr(self.user.workspace, 'is_hotel'):
-                        workspace_type = "hotel"
-                        if self.user.workspace.__class__.__name__ == 'HotelProfile': workspace_type = "hotel"
-                    elif hasattr(self.user.workspace, 'is_guesthouse'):
-                        workspace_type = "guesthouse"
-                        if self.user.workspace.__class__.__name__ == 'GuestHouseProfile': workspace_type = "guesthouse"
-                    elif self.user.workspace.__class__.__name__ == 'CarListing':
-                        workspace_type = "car_rental"
-                    
-                    # Fallback
-                    if workspace_type == "unknown":
-                        model_name = self.user.workspace.__class__.__name__.lower()
-                        if 'hotel' in model_name: workspace_type = 'hotel'
-                        elif 'guesthouse' in model_name: workspace_type = 'guesthouse'
-
-                    data["workspace"] = {
-                        "id": str(self.user.workspace.id),
-                        "name": getattr(self.user.workspace, 'title', getattr(self.user.workspace, 'name', 'Unnamed Property')),
-                        "workspace_type": workspace_type
-                    }
+                    data["workspace"] = get_workspace_summary(self.user.workspace)
             
             if hasattr(self.user, "individual_owner") and self.user.individual_owner and (
                 self.user.role.code == RoleCode.INDIVIDUAL_OWNER.value or self.user.role.code == "individual_owner"
@@ -228,29 +208,7 @@ class StaffResponseSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(WORKSPACE_INFO_SCHEMA)
     def get_workspace(self, instance):
-        if not instance.workspace:
-            return None
-        
-        workspace_type = "unknown"
-        if hasattr(instance.workspace, 'is_hotel'):
-             workspace_type = "hotel"
-             if instance.workspace.__class__.__name__ == 'HotelProfile': workspace_type = "hotel"
-        elif hasattr(instance.workspace, 'is_guesthouse'):
-             workspace_type = "guesthouse"
-             if instance.workspace.__class__.__name__ == 'GuestHouseProfile': workspace_type = "guesthouse"
-        elif instance.workspace.__class__.__name__ == 'CarListing':
-             workspace_type = "car_rental"
-        
-        if workspace_type == "unknown":
-            model_name = instance.workspace.__class__.__name__.lower()
-            if 'hotel' in model_name: workspace_type = 'hotel'
-            elif 'guesthouse' in model_name: workspace_type = 'guesthouse'
-            
-        return {
-            "id": instance.workspace.id,
-            "name": getattr(instance.workspace, 'title', getattr(instance.workspace, 'name', 'Unnamed Property')),
-            "workspace_type": workspace_type
-        }
+        return get_workspace_summary(instance.workspace)
 
 
 class StaffCreateSerializer(serializers.ModelSerializer):
@@ -301,9 +259,23 @@ class StaffCreateSerializer(serializers.ModelSerializer):
         app_label, model_name = model_map[workspace_type]
         try:
             model_class = apps.get_model(app_label, model_name)
+            if model_class is None:
+                raise LookupError
+        except LookupError:
+            raise serializers.ValidationError({"workspace_type": "Workspace type configuration is invalid."})
+
+        try:
             workspace = model_class.objects.get(id=workspace_id)
-        except (LookupError, model_class.DoesNotExist):
-              raise serializers.ValidationError({"workspace_id": f"{model_name} not found."})
+        except model_class.DoesNotExist:
+            raise serializers.ValidationError({"workspace_id": f"{model_name} not found."})
+
+        if (
+            workspace_type == "car_rental"
+            and getattr(workspace, "listing_type", None) != model_class.ListingTypeChoices.RENT
+        ):
+            raise serializers.ValidationError(
+                {"workspace_id": "Only rent car listings can be assigned as car-rental workspaces."}
+            )
               
         is_owner = False
         if company:
@@ -333,10 +305,10 @@ class StaffCreateSerializer(serializers.ModelSerializer):
             email = build_placeholder_email(validated_data.get("phone"))
             validated_data["email"] = email
         
-        try:
-            role = Role.objects.get(code=RoleCode.FRONT_DESK.value)
-        except Role.DoesNotExist:
-            raise serializers.ValidationError({"error": "Front Desk role configuration missing."})
+        role, _ = Role.objects.get_or_create(
+            code=RoleCode.FRONT_DESK.value,
+            defaults={"name": "Front Desk"},
+        )
 
         password = generate_password(email or validated_data.get("phone"))
         
@@ -524,36 +496,7 @@ class UserResponseSerializer(serializers.ModelSerializer):
     @extend_schema_field(WORKSPACE_INFO_SCHEMA)
     def get_workspace(self, instance):
         """Return workspace data for front desk users."""
-        if not instance.workspace:
-            return None
-        
-        # Determine workspace type by checking the model class
-        workspace = instance.workspace
-        workspace_type = None
-        workspace_name = None
-        
-        # Check workspace model type
-        model_name = workspace.__class__.__name__
-        if model_name == 'HotelProfile':
-            workspace_type = 'hotel'
-            workspace_name = workspace.company.name if hasattr(workspace, 'company') else str(workspace)
-        elif model_name == 'GuestHouseProfile':
-            workspace_type = 'guesthouse'
-            workspace_name = getattr(workspace, 'title', str(workspace))
-        elif model_name == 'EventSpaceListing':
-            workspace_type = 'event_space'
-            workspace_name = getattr(workspace, 'title', str(workspace))
-        elif model_name == 'CarListing':
-            workspace_type = 'car_rental'
-            workspace_name = f"{getattr(workspace, 'brand', '')} {getattr(workspace, 'model', '')}".strip() or str(workspace)
-        else:
-            workspace_name = str(workspace)
-        
-        return {
-            'id': str(workspace.id),
-            'name': workspace_name,
-            'workspace_type': workspace_type
-        }
+        return get_workspace_summary(instance.workspace)
 
 
 class UserUpdateSerializer(serializers.ModelSerializer):

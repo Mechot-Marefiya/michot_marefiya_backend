@@ -76,6 +76,7 @@ from apps.account.serializers import (
     OwnerComplianceAgreementSerializer,
     RoleSerializer,
 )
+from apps.account.utils import get_workspace_catalog_entry
 from apps.listing.serializers import AddonOfferingListSerializer, VerifyActionSerializer
 from apps.account.enums import RoleCode
 from rest_framework.decorators import api_view, permission_classes
@@ -85,6 +86,7 @@ from apps.account.permissions import (
     IsOwnerOrReadOnly,
     IsAdmin,
     IsCompanyOwner,
+    IsCompanyOrIndividualOwner,
     IsPublicReadOnly,
 )
 from apps.account.services import (
@@ -273,7 +275,7 @@ class LogoutView(APIView):
 
 @extend_schema(tags=["Account Management"])
 class StaffViewSet(viewsets.ModelViewSet):
-    permission_classes = [IsCompanyOwner] # Uses the custom permission that checks company OR individual owner
+    permission_classes = [IsCompanyOrIndividualOwner]
     serializer_class = StaffResponseSerializer
     http_method_names = ['get', 'post', 'delete']
     throttle_scope = 'token_blacklist'
@@ -310,48 +312,41 @@ class StaffViewSet(viewsets.ModelViewSet):
     def available_workspaces(self, request):
         user = request.user
         workspaces = []
+        from apps.listing.models import CarListing, EventSpaceListing, GuestHouseProfile
         
         if user.company:
             hotels = HotelProfile.objects.filter(company=user.company)
             for hotel in hotels:
-                workspaces.append({
-                    'id': str(hotel.id),
-                    'type': 'hotel',
-                    'name': hotel.name,
-                    'category': 'Hotel'
-                })
-            
-            from apps.listing.models import GuestHouseProfile, CarListing
+                workspaces.append(get_workspace_catalog_entry(hotel))
+
             guesthouses = GuestHouseProfile.objects.filter(company=user.company)
             for gh in guesthouses:
-                workspaces.append({
-                    'id': str(gh.id),
-                    'type': 'guesthouse',
-                    'name': gh.title,
-                    'category': 'Guest House'
-                })
+                workspaces.append(get_workspace_catalog_entry(gh))
+
+            cars = CarListing.objects.filter(
+                company=user.company,
+                listing_type=CarListing.ListingTypeChoices.RENT,
+            )
+            for car in cars:
+                workspaces.append(get_workspace_catalog_entry(car))
+
+            event_spaces = EventSpaceListing.objects.filter(hotel__company=user.company)
+            for event_space in event_spaces:
+                workspaces.append(get_workspace_catalog_entry(event_space))
         
         elif user.individual_owner:
-            from apps.listing.models import GuestHouseProfile, CarListing
             guesthouses = GuestHouseProfile.objects.filter(individual_owner=user.individual_owner)
             for gh in guesthouses:
-                workspaces.append({
-                    'id': str(gh.id),
-                    'type': 'guesthouse',
-                    'name': gh.title,
-                    'category': 'Guest House'
-                })
+                workspaces.append(get_workspace_catalog_entry(gh))
             
-            cars = CarListing.objects.filter(individual_owner=user.individual_owner)
+            cars = CarListing.objects.filter(
+                individual_owner=user.individual_owner,
+                listing_type=CarListing.ListingTypeChoices.RENT,
+            )
             for car in cars:
-                workspaces.append({
-                    'id': str(car.id),
-                    'type': 'car_rental',
-                    'name': f"{car.make} {car.model}",
-                    'category': 'Car Rental'
-                })
+                workspaces.append(get_workspace_catalog_entry(car))
         
-        return Response(workspaces)
+        return Response([workspace for workspace in workspaces if workspace])
 
 
 @extend_schema(tags=["Account Management"])
