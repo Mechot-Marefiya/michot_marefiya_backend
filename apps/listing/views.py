@@ -1362,6 +1362,19 @@ class GuestHouseProfileViewSet(SavedListingDeletionNotificationMixin, AbstractMo
                 q |= Q(individual_owner=individual_owner)
             return queryset.filter(q).order_by("-created_at")
 
+        if user and user.is_authenticated and self.action in ["retrieve", "partial_update", "destroy"]:
+            company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+            individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+
+            owned_q = Q()
+            if company:
+                owned_q |= Q(company=company)
+            if individual_owner:
+                owned_q |= Q(individual_owner=individual_owner)
+
+            if owned_q:
+                return queryset.filter(Q(is_active=True) | owned_q).distinct().order_by("-created_at")
+
         return queryset.filter(is_active=True).order_by("-created_at")
 
     def get_serializer_context(self):
@@ -3593,7 +3606,8 @@ class BookingViewSet(AbstractModelViewSet):
             
         total_items = []
         item_subtotals = []
-        
+        addon_subtotals = []
+
         currencies = {item["room"].currency for item in items}
         if len(currencies) > 1:
             return Response({"detail": "All selected items must have the same currency."}, status=400)
@@ -3606,14 +3620,39 @@ class BookingViewSet(AbstractModelViewSet):
             
             price_details = PriceService.resolve_price_details_batch(room, check_in, check_out)
             item_base_total = sum(Decimal(str(d['price_per_unit'])) for d in price_details) * units
+            item_addons = []
+            item_addons_subtotal = Decimal("0.00")
+
+            for addon_input in item.get("addons", []):
+                offering = addon_input.get("_offering")
+                if not offering:
+                    continue
+
+                if offering.hotel_id != room.hotel_id:
+                    raise ValidationError({
+                        "addons": f"{offering.name} is not available for {room.hotel.name}"
+                    })
+
+                addon_line, addon_total = PriceCalculationService.build_addon_preview_line(
+                    offering=offering,
+                    requested_quantity=addon_input.get("quantity", 1),
+                    nights=(check_out - check_in).days,
+                    payment_currency=currency,
+                )
+                item_addons.append(addon_line)
+                item_addons_subtotal += addon_total
             
             item_subtotals.append(item_base_total)
+            addon_subtotals.append(item_addons_subtotal)
             total_items.append({
                 "id": str(room.id),
                 "title": room.title,
                 "units": units,
                 "price_per_unit": str(price_details[0]['price_per_unit']) if price_details else str(room.base_price),
                 "subtotal": str(item_base_total.quantize(Decimal('0.01'))),
+                "addons_subtotal": f"{item_addons_subtotal:.2f}",
+                "subtotal_with_addons": f"{(item_base_total + item_addons_subtotal):.2f}",
+                "addons": item_addons,
                 "breakdown": price_details
             })
             
@@ -3627,6 +3666,7 @@ class BookingViewSet(AbstractModelViewSet):
                 display_currency,
                 items=total_items,
                 fee_rate=get_effective_platform_fee_rate(phone=preview_phone),
+                addon_subtotals=addon_subtotals,
             )
         })
     @extend_schema(

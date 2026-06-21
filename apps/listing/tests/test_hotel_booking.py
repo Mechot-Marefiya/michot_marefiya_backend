@@ -4,7 +4,7 @@ from rest_framework.test import APITestCase
 from decimal import Decimal
 from datetime import date, timedelta
 from apps.listing.models import (
-    RoomListing, Booking, BookingItem, StayAvailability,
+    AddonOffering, RoomListing, Booking, BookingItem, StayAvailability,
     RoomInventory, Season, SeasonalRate, TermsAndConditions
 )
 from apps.listing.services import StayAvailabilityService, PriceService
@@ -257,6 +257,52 @@ class HotelBookingAPITests(APITestCase):
         
         booking.refresh_from_db()
         self.assertEqual(booking.status, Booking.BookingStatus.CANCELLED)
+
+    def test_booking_addon_total_matches_per_night_preview_rules(self):
+        self.client.force_authenticate(user=self.user)
+        url = reverse('bookings-list')
+
+        addon = AddonOffering.objects.create(
+            hotel=self.hotel,
+            name="Extra Bed",
+            description="Extra bed for each night",
+            category=AddonOffering.AddonCategory.AMENITY,
+            price_per_unit=Decimal("150.00"),
+            currency="ETB",
+            pricing_type=AddonOffering.PricingType.PER_NIGHT,
+            is_active=True,
+            max_quantity_per_booking=5,
+        )
+
+        check_in = date.today() + timedelta(days=1)
+        check_out = date.today() + timedelta(days=3)
+
+        data = {
+            "check_in_date": check_in.isoformat(),
+            "check_out_date": check_out.isoformat(),
+            "guest_phone": "0911222333",
+            "terms_accepted": True,
+            "terms_version": "1.0",
+            "items": [
+                {
+                    "room": str(self.room.id),
+                    "units_booked": 1,
+                    "addons": [
+                        {"offering_id": str(addon.id), "quantity": 2}
+                    ],
+                }
+            ],
+        }
+
+        response = self.client.post(url, data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+        booking = Booking.objects.get(id=response.data["id"])
+        booking_addon = booking.items.first().addons.first()
+
+        self.assertEqual(booking_addon.quantity, 2)
+        self.assertEqual(booking_addon.price_per_unit, Decimal("300.00"))
+        self.assertEqual(booking.total_price, Decimal("2600.00"))
     
     def test_price_quote_in_room_detail(self):
         """

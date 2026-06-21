@@ -850,6 +850,7 @@ class GuestHouseProfileResponseSerializer(serializers.ModelSerializer):
             "website",
             "license",
             "logo",
+            "is_active",
             "is_verified",
             "verified_at",
             "verified_by",
@@ -991,6 +992,7 @@ class GuestHouseProfileSerializer(PlaceResolutionMixin, serializers.ModelSeriali
             "website",
             "license",
             "logo",
+            "is_active",
             "place_id",
             "session_token",
         ]
@@ -3977,16 +3979,30 @@ class PriceBreakdownItemSerializer(serializers.Serializer):
     source = serializers.CharField()
     note = serializers.CharField(required=False, allow_null=True)
 
+class PricePreviewAddonSerializer(serializers.Serializer):
+    offering_id = serializers.UUIDField(help_text="ID of the selected addon offering")
+    name = serializers.CharField(help_text="Name of the selected addon")
+    pricing_type = serializers.CharField(help_text="How this addon is priced")
+    quantity = serializers.IntegerField(help_text="Requested addon quantity from the booking payload")
+    effective_quantity = serializers.IntegerField(help_text="Billable addon quantity after pricing-type rules are applied")
+    price_per_unit = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Addon unit price in the booking currency")
+    subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Calculated addon subtotal in the booking currency")
+    currency = serializers.CharField(help_text="ISO currency code (e.g., ETB)")
+
 class PricePreviewItemSerializer(serializers.Serializer):
     id = serializers.UUIDField(help_text="ID of the room or event space listing")
     title = serializers.CharField(help_text="Title of the listing")
     units = serializers.IntegerField(help_text="Number of units selected")
     price_per_unit = serializers.CharField(required=False, help_text="Base price per unit (if applicable)")
     subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Calculated subtotal for this item over the date range")
+    addons_subtotal = serializers.DecimalField(required=False, max_digits=10, decimal_places=2, help_text="Combined subtotal for selected addons attached to this item")
+    subtotal_with_addons = serializers.DecimalField(required=False, max_digits=10, decimal_places=2, help_text="Combined subtotal for the base item plus its selected addons")
+    addons = PricePreviewAddonSerializer(required=False, many=True, help_text="Selected addons attached to this item")
     breakdown = PriceBreakdownItemSerializer(many=True, help_text="Detailed price breakdown for this item")
 
 class PricePreviewTotalsSerializer(serializers.Serializer):
     items_subtotal = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Total price of all items excluding fees")
+    addons_subtotal = serializers.DecimalField(required=False, max_digits=10, decimal_places=2, help_text="Total price of all selected addons excluding fees")
     platform_fee = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Consolidated platform fee")
     platform_fee_percentage = serializers.DecimalField(max_digits=5, decimal_places=2, help_text="Platform fee percentage rate (e.g., 5.00)")
     grand_total = serializers.DecimalField(max_digits=10, decimal_places=2, help_text="Final price including all taxes and fees")

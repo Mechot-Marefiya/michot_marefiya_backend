@@ -556,6 +556,7 @@ Core response fields:
 - `is_favorite`
 - `rooms`
 - `phone`, `website`, `license`, `logo`
+- `is_active`
 - `is_verified`, `verified_at`, `verified_by`, `verification_note`
 
 Error responses:
@@ -1618,6 +1619,7 @@ Roles: company_staff
 
 Request body:
 - patch uses guesthouse or guesthouse-room patch request schemas
+- guesthouse patch accepts `is_active` so providers can activate or deactivate their own guest house
 
 Query params:
 - room detail supports `check_in`, `check_out`
@@ -1630,6 +1632,7 @@ Error responses:
 
 React notes:
 - use the room-level response for pricing-facing edits and preview context
+- authenticated owners can retrieve their own inactive guest house records from the same detail endpoint for management flows
 
 ### Guest House Availability Matrix
 Workflow reference: `REACT_WORKFLOW.md` Section 4

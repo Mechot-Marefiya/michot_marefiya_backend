@@ -1592,6 +1592,18 @@ def test_get_guesthouse_detail_public_contract(api_client, guest_house):
     _assert_verification_fields(data)
 
 
+def test_get_inactive_guesthouse_detail_owner_can_view_activation_state(company_client, guest_house):
+    guest_house.is_active = False
+    guest_house.save(update_fields=["is_active", "updated_at"])
+
+    response = company_client.get(f"/api/v1/listing/guest-houses/{guest_house.id}/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["id"] == str(guest_house.id)
+    assert data["is_active"] is False
+
+
 def test_post_guesthouse_create_unauthenticated(api_client, image_file, company):
     response = api_client.post(
         "/api/v1/listing/guest-houses/",
@@ -1641,6 +1653,22 @@ def test_patch_guesthouse_success(company_client, guest_house):
 
     assert response.status_code == 200
     assert response.json()["title"] == "Updated Guest House"
+
+
+def test_patch_guesthouse_owner_can_activate_inactive_listing(company_client, guest_house):
+    guest_house.is_active = False
+    guest_house.save(update_fields=["is_active", "updated_at"])
+
+    response = company_client.patch(
+        f"/api/v1/listing/guest-houses/{guest_house.id}/",
+        {"is_active": True},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    guest_house.refresh_from_db()
+    assert guest_house.is_active is True
+    assert response.json()["is_active"] is True
 
 
 def test_patch_guesthouse_forbidden_for_non_owner(auth_client, guest_house):

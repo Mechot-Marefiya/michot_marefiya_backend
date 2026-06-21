@@ -661,6 +661,92 @@ def get_effective_split_config_for_booking(booking):
     return get_effective_split_config_for_owner(owner)
 
 
+def get_effective_chapa_subaccount_id(owner):
+    stored_subaccount_id = (getattr(owner, "chapa_subaccount_id", None) or "").strip()
+    sandbox_subaccount_id = (getattr(settings, "CHAPA_SANDBOX_SUBACCOUNT_ID", "") or "").strip()
+    settings_module = getattr(settings, "SETTINGS_MODULE", "")
+    sandbox_override_allowed = bool(
+        sandbox_subaccount_id
+        and (getattr(settings, "DEBUG", False) or settings_module == "config.settings.test")
+    )
+
+    if sandbox_override_allowed and (
+        not stored_subaccount_id or stored_subaccount_id.startswith("demo-subaccount-")
+    ):
+        return sandbox_subaccount_id
+
+    return stored_subaccount_id or None
+
+
+def _is_chapa_subaccount_mismatch_response(response_data):
+    if not isinstance(response_data, dict):
+        return False
+
+    message = response_data.get("message")
+    if not isinstance(message, dict):
+        return False
+
+    return bool(message.get("subaccounts.id"))
+
+
+SPLIT_PAYMENT_CONFIGURATION_ERROR = (
+    "Payment is temporarily unavailable because this listing's payout account "
+    "is not configured correctly. Please contact support."
+)
+
+
+def _fail_split_payment(payment_tx, *, detail=None, provider_response=None):
+    payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
+    payment_tx.payout_status = PaymentTransaction.PayoutStatus.FAILED
+    split_error = provider_response or {"detail": detail or SPLIT_PAYMENT_CONFIGURATION_ERROR}
+    if isinstance(payment_tx.metadata, dict):
+        payment_tx.metadata["split_error"] = split_error
+    else:
+        payment_tx.metadata = {"split_error": split_error}
+    payment_tx.save(update_fields=["status", "payout_status", "metadata", "updated_at"])
+    return {
+        "success": False,
+        "code": "SPLIT_PAYMENT_CONFIGURATION_ERROR",
+        "error": SPLIT_PAYMENT_CONFIGURATION_ERROR,
+        "tx_ref": payment_tx.tx_ref,
+    }
+
+
+def _chapa_transaction_status(response_data):
+    if not isinstance(response_data, dict):
+        return ""
+
+    data = response_data.get("data")
+    if not isinstance(data, dict):
+        return ""
+
+    return str(data.get("status") or "").strip().lower()
+
+
+def _chapa_verification_is_success(response_data):
+    return (
+        isinstance(response_data, dict)
+        and response_data.get("status") == "success"
+        and _chapa_transaction_status(response_data) == "success"
+    )
+
+
+def _chapa_verification_is_pending(response_data):
+    return (
+        isinstance(response_data, dict)
+        and response_data.get("status") == "success"
+        and _chapa_transaction_status(response_data) in {"pending", "processing"}
+    )
+
+
+def _mark_payment_verification_pending(payment_tx, verification):
+    if isinstance(payment_tx.metadata, dict):
+        payment_tx.metadata["verification_pending"] = verification
+    else:
+        payment_tx.metadata = {"verification_pending": verification}
+    payment_tx.save(update_fields=["metadata", "updated_at"])
+
+
 def _chapa_base_url():
     return getattr(settings, "CHAPA_BASE_URL", ChapaPaymentService.BASE_URL).rstrip("/") + "/"
 
@@ -926,6 +1012,7 @@ class ChapaPaymentService:
         commission_amount = None
         vendor_payout_amount = None
         payout_status = PaymentTransaction.PayoutStatus.NOT_APPLICABLE
+        split_configuration_error = None
         
         vendor_obj = None
         vendor_company = None
@@ -935,8 +1022,7 @@ class ChapaPaymentService:
             vendor_obj = resolve_payment_owner_for_split(booking)
             subaccount_id = None
             if vendor_obj:
-                if hasattr(vendor_obj, 'chapa_subaccount_id'):
-                    subaccount_id = vendor_obj.chapa_subaccount_id
+                subaccount_id = get_effective_chapa_subaccount_id(vendor_obj)
                 
                 from apps.account.models import CompanyProfile, IndividualOwnerProfile
                 if isinstance(vendor_obj, CompanyProfile):
@@ -953,8 +1039,6 @@ class ChapaPaymentService:
                 
                 payload["subaccounts"] = {
                     "id": subaccount_id,
-                    "split_type": split["split_type"],
-                    "split_value": float(split["split_value"]),
                 }
                 
                 commission_rate = split["commission_rate"]
@@ -969,15 +1053,15 @@ class ChapaPaymentService:
                     vendor_share_fixed,
                 )
             else:
-                 # No subaccount found, so money stays in main account
-                 if vendor_obj:
-                     logger.warning(f"Vendor {vendor_obj} has no chapa_subaccount_id. Split failed.")
-                     payout_status = PaymentTransaction.PayoutStatus.FAILED
+                 # Missing payout configuration blocks checkout below.
+                 split_configuration_error = "The booking owner has no Chapa payout subaccount."
+                 logger.error("Split payment configuration missing for %s.", tx_ref)
+                 payout_status = PaymentTransaction.PayoutStatus.FAILED
                 
         except Exception as e:
             logger.error(f"Failed to configure split payment for {tx_ref}: {e}")
             payout_status = PaymentTransaction.PayoutStatus.FAILED
-            # Proceed without split (all money to main account) as fallback
+            split_configuration_error = str(e)
 
         with db_transaction.atomic():
             # Using GenericForeignKey for multi-booking-type support
@@ -1002,6 +1086,8 @@ class ChapaPaymentService:
                 vendor_individual=vendor_individual
             )
 
+            if split_configuration_error:
+                return _fail_split_payment(payment_tx, detail=split_configuration_error)
 
             try:
                 logger.debug("Chapa initialize payload: %s", payload)
@@ -1043,6 +1129,18 @@ class ChapaPaymentService:
                             payment_tx.metadata = {"error": str(e2)}
                         payment_tx.save()
                         return {"success": False, "error": str(e2), "tx_ref": tx_ref}
+
+                if payload.get("subaccounts") and _is_chapa_subaccount_mismatch_response(response_data):
+                    rejected_subaccount = payload["subaccounts"].get("id")
+                    logger.error(
+                        "Chapa rejected payout subaccount %s for %s; checkout was blocked.",
+                        rejected_subaccount,
+                        tx_ref,
+                    )
+                    return _fail_split_payment(
+                        payment_tx,
+                        provider_response=response_data,
+                    )
             except Exception as e:
                 payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
                 if isinstance(payment_tx.metadata, dict):
@@ -1144,12 +1242,13 @@ class ChapaPaymentService:
         commission_amount = None
         vendor_payout_amount = None
         payout_status = PaymentTransaction.PayoutStatus.NOT_APPLICABLE
+        split_configuration_error = None
         vendor_company = None
         vendor_individual = None
 
         try:
             vendor_obj = resolve_payment_owner_for_split(rental)
-            subaccount_id = getattr(vendor_obj, "chapa_subaccount_id", None) if vendor_obj else None
+            subaccount_id = get_effective_chapa_subaccount_id(vendor_obj) if vendor_obj else None
             if isinstance(vendor_obj, CompanyProfile):
                 vendor_company = vendor_obj
             elif isinstance(vendor_obj, IndividualOwnerProfile):
@@ -1161,18 +1260,18 @@ class ChapaPaymentService:
                 platform_share_fixed = split["commission_amount"].quantize(Decimal("0.01"))
                 payload["subaccounts"] = {
                     "id": subaccount_id,
-                    "split_type": split["split_type"],
-                    "split_value": float(split["split_value"]),
                 }
                 commission_rate = split["commission_rate"]
                 commission_amount = platform_share_fixed
                 vendor_payout_amount = vendor_share_fixed
                 payout_status = PaymentTransaction.PayoutStatus.PENDING
-            elif vendor_obj:
+            else:
                 payout_status = PaymentTransaction.PayoutStatus.FAILED
+                split_configuration_error = "The booking owner has no Chapa payout subaccount."
         except Exception as exc:
             logger.error("Failed to configure extension split payment for %s: %s", tx_ref, exc)
             payout_status = PaymentTransaction.PayoutStatus.FAILED
+            split_configuration_error = str(exc)
 
         content_type = ContentType.objects.get_for_model(extension_request)
         payment_tx = PaymentTransaction.objects.create(
@@ -1196,6 +1295,14 @@ class ChapaPaymentService:
             vendor_company=vendor_company,
             vendor_individual=vendor_individual,
         )
+
+        if split_configuration_error:
+            result = _fail_split_payment(payment_tx, detail=split_configuration_error)
+            __import__("apps.listing.services", fromlist=["CarRentalService"]).CarRentalService.mark_extension_request_failed(
+                extension_request,
+                reason=result["error"],
+            )
+            return result
 
         try:
             res = requests.post(
@@ -1227,6 +1334,14 @@ class ChapaPaymentService:
                 "checkout_url": response_data["data"]["checkout_url"],
                 "tx_ref": tx_ref,
             }
+
+        if payload.get("subaccounts") and _is_chapa_subaccount_mismatch_response(response_data):
+            result = _fail_split_payment(payment_tx, provider_response=response_data)
+            __import__("apps.listing.services", fromlist=["CarRentalService"]).CarRentalService.mark_extension_request_failed(
+                extension_request,
+                reason=result["error"],
+            )
+            return result
 
         payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
         if isinstance(payment_tx.metadata, dict):
@@ -1436,7 +1551,10 @@ class ChapaPaymentService:
 
                     verification = ChapaPaymentService.verify_payment(tx_ref)
 
-                    if verification.get("status") != "success":
+                    if not _chapa_verification_is_success(verification):
+                        if _chapa_verification_is_pending(verification):
+                            _mark_payment_verification_pending(payment_tx, verification)
+                            return {"success": False, "message": "Payment pending", "status": "pending"}
                         payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
                         if isinstance(payment_tx.metadata, dict):
                             payment_tx.metadata["verification_error"] = verification
@@ -1463,7 +1581,10 @@ class ChapaPaymentService:
                         return {"success": True, "message": "Car rental extension already applied"}
 
                     verification = ChapaPaymentService.verify_payment(tx_ref)
-                    if verification.get("status") != "success":
+                    if not _chapa_verification_is_success(verification):
+                        if _chapa_verification_is_pending(verification):
+                            _mark_payment_verification_pending(payment_tx, verification)
+                            return {"success": False, "message": "Payment pending", "status": "pending"}
                         payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
                         if isinstance(payment_tx.metadata, dict):
                             payment_tx.metadata["verification_error"] = verification
@@ -1558,7 +1679,10 @@ class ChapaPaymentService:
 
                 verification = ChapaPaymentService.verify_payment(tx_ref)
 
-                if verification.get("status") != "success":
+                if not _chapa_verification_is_success(verification):
+                    if _chapa_verification_is_pending(verification):
+                        _mark_payment_verification_pending(payment_tx, verification)
+                        return {"success": False, "message": "Payment pending", "status": "pending"}
                     payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
                     if isinstance(payment_tx.metadata, dict):
                         payment_tx.metadata["verification_error"] = verification

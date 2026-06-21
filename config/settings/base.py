@@ -436,6 +436,7 @@ CSRF_TRUSTED_ORIGINS = ['https://michotmarefia.com', 'https://www.michotmarefia.
 CHAPA_SECRET_KEY = env("CHAPA_SECRET_KEY", default=None)
 CHAPA_WEBHOOK_SECRET = env("CHAPA_WEBHOOK_SECRET", default=None)
 CHAPA_CALLBACK_URL = env("CHAPA_CALLBACK_URL", default=None)
+CHAPA_SANDBOX_SUBACCOUNT_ID = env("CHAPA_SANDBOX_SUBACCOUNT_ID", default="")
 FRONTEND_URL = env("FRONTEND_URL", default=None)
 AFRO_MESSAGE_TOKEN = env("AFRO_MESSAGE_TOKEN", default=None)
 AFRO_MESSAGE_URL = env("AFRO_MESSAGE_URL", default=None)

@@ -634,6 +634,7 @@ def test_contact_reveal_callback_unlocks_contact_and_fires_notification(
         lambda tx_ref: {
             "status": "success",
             "data": {
+                "status": "success",
                 "amount": str(payment.amount),
                 "currency": payment.currency,
                 "id": "chapa-contact-1",
@@ -802,8 +803,6 @@ def test_hotel_booking_payment_workflow_confirms_booking(auth_client, user, room
     assert initialize_payload["amount"] == "2000.00"
     assert initialize_payload["subaccounts"] == {
         "id": "sub-hotel-workflow",
-        "split_type": "percentage",
-        "split_value": 0.02,
     }
 
     def fake_verify(tx_ref):
@@ -811,6 +810,7 @@ def test_hotel_booking_payment_workflow_confirms_booking(auth_client, user, room
         return {
             "status": "success",
             "data": {
+                "status": "success",
                 "amount": str(payment_tx.amount),
                 "currency": payment_tx.currency,
                 "reference": "chapa-workflow-ref",
@@ -925,6 +925,7 @@ def test_guest_hotel_booking_without_email_can_pay_and_confirm(api_client, room,
         lambda tx_ref: {
             "status": "success",
             "data": {
+                "status": "success",
                 "amount": str(payment_tx.amount),
                 "currency": payment_tx.currency,
                 "reference": "chapa-guest-workflow-ref",
@@ -1014,6 +1015,7 @@ def test_registered_property_rental_booking_can_pay_and_confirm(
         lambda tx_ref: {
             "status": "success",
             "data": {
+                "status": "success",
                 "amount": str(payment_tx.amount),
                 "currency": payment_tx.currency,
                 "reference": "chapa-property-registered-ref",
@@ -1116,6 +1118,7 @@ def test_guest_property_rental_booking_without_email_can_pay_and_confirm(
         lambda tx_ref: {
             "status": "success",
             "data": {
+                "status": "success",
                 "amount": str(payment_tx.amount),
                 "currency": payment_tx.currency,
                 "reference": "chapa-property-guest-ref",
@@ -1210,8 +1213,6 @@ def _assert_nested_split_payload(payload, *, subaccount_id, split_type, split_va
     assert "split_value" not in payload
     assert payload["subaccounts"] == {
         "id": subaccount_id,
-        "split_type": split_type,
-        "split_value": split_value,
     }
 
 
@@ -1730,7 +1731,7 @@ def test_split_eligible_booking_families_use_nested_subaccounts_payload(
     )
 
 
-def test_missing_subaccount_marks_payout_failed_without_split_payload(settings, monkeypatch, user, room):
+def test_missing_subaccount_blocks_checkout_before_chapa(settings, monkeypatch, user, room):
     _enable_payment_settings(settings)
     booking = _build_booking(user, room)
     captured = _mock_chapa_initialize(monkeypatch)
@@ -1745,10 +1746,12 @@ def test_missing_subaccount_marks_payout_failed_without_split_payload(settings, 
         last_name=user.last_name,
     )
 
-    assert result["success"] is True
-    payload = json.loads(captured["data"])
-    assert "subaccounts" not in payload
+    assert result["success"] is False
+    assert result["code"] == "SPLIT_PAYMENT_CONFIGURATION_ERROR"
+    assert "checkout_url" not in result
+    assert captured == {}
     payment_tx = PaymentTransaction.objects.get(tx_ref=result["tx_ref"])
+    assert payment_tx.status == PaymentTransaction.PaymentStatus.FAILED
     assert payment_tx.payout_status == PaymentTransaction.PayoutStatus.FAILED
     assert payment_tx.vendor_company == room.hotel.company
 
@@ -1936,6 +1939,7 @@ def test_car_rental_extension_callback_success_updates_rental_end_date(user, car
         lambda tx_ref: {
             "status": "success",
             "data": {
+                "status": "success",
                 "amount": str(extension_request.amount),
                 "currency": extension_request.currency,
                 "id": f"chapa-{tx_ref}",
@@ -2569,6 +2573,7 @@ def test_success_webhook_verifies_before_confirming(api_client, settings, monkey
         return {
             "status": "success",
             "data": {
+                "status": "success",
                 "amount": "1000.00",
                 "currency": "ETB",
                 "reference": "chapa-ref-success",

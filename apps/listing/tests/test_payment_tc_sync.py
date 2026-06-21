@@ -4,8 +4,10 @@ from django.urls import reverse
 from rest_framework import status
 from apps.listing.models import TermsAndConditions, Booking
 from apps.payment.services import ChapaPaymentService
+from apps.payment.models import PaymentTransaction
 from datetime import date, timedelta
 from django.utils import timezone
+from django.test import override_settings
 from django.contrib.contenttypes.models import ContentType
 
 @pytest.mark.django_db
@@ -126,6 +128,116 @@ class TestPaymentTCSync:
         assert payload["meta"]["tc_version"] == "1.0"
         assert payload["meta"]["booking_id"] == str(booking.id)
         assert "tc_accepted_at" in payload["meta"]
+
+    @override_settings(
+        DEBUG=True,
+        CHAPA_SANDBOX_SUBACCOUNT_ID="1aa6f01d-d835-48ab-9dd3-946a74715ef6",
+        FRONTEND_URL="https://frontend.example/",
+    )
+    @patch('apps.payment.services.requests.post')
+    def test_chapa_payload_uses_sandbox_subaccount_for_seeded_demo_owner(self, mock_post, setup_tc_booking, hotel_profile):
+        tc, booking, user = setup_tc_booking
+        company = hotel_profile.company
+        company.chapa_subaccount_id = "demo-subaccount-company-1"
+        company.save(update_fields=["chapa_subaccount_id", "updated_at"])
+
+        mock_post.return_value.status_code = 200
+        mock_post.return_value.json.return_value = {
+            "status": "success",
+            "message": "Checkout URL created",
+            "data": {"checkout_url": "https://test.chapa.co/pay/xyz"}
+        }
+
+        result = ChapaPaymentService.initialize_payment(
+            booking=booking,
+            email=user.email,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            amount=2000
+        )
+
+        import json
+        payload = json.loads(mock_post.call_args.kwargs["data"])
+
+        assert result["success"] is True
+        assert payload["subaccounts"] == {
+            "id": "1aa6f01d-d835-48ab-9dd3-946a74715ef6"
+        }
+        assert payload["return_url"] == (
+            f"https://frontend.example/payments/complete?tx_ref={result['tx_ref']}"
+        )
+
+    @override_settings(DEBUG=True, CHAPA_SANDBOX_SUBACCOUNT_ID="1aa6f01d-d835-48ab-9dd3-946a74715ef6")
+    @patch('apps.payment.services.requests.post')
+    def test_chapa_blocks_checkout_when_sandbox_subaccount_is_rejected(self, mock_post, setup_tc_booking, hotel_profile):
+        tc, booking, user = setup_tc_booking
+        company = hotel_profile.company
+        company.chapa_subaccount_id = "demo-subaccount-company-1"
+        company.save(update_fields=["chapa_subaccount_id", "updated_at"])
+
+        rejected = MagicMock()
+        rejected.json.return_value = {
+            "status": "failed",
+            "message": {
+                "subaccounts.id": [
+                    "The subaccount ID you provided isn't associated with this account."
+                ]
+            },
+            "data": None,
+        }
+        mock_post.return_value = rejected
+
+        result = ChapaPaymentService.initialize_payment(
+            booking=booking,
+            email=user.email,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            amount=2000
+        )
+
+        import json
+        first_payload = json.loads(mock_post.call_args.kwargs["data"])
+        tx = PaymentTransaction.objects.get(tx_ref=result["tx_ref"])
+
+        assert result["success"] is False
+        assert result["code"] == "SPLIT_PAYMENT_CONFIGURATION_ERROR"
+        assert "checkout_url" not in result
+        assert mock_post.call_count == 1
+        assert first_payload["subaccounts"]["id"] == "1aa6f01d-d835-48ab-9dd3-946a74715ef6"
+        assert tx.status == PaymentTransaction.PaymentStatus.FAILED
+        assert tx.payout_status == PaymentTransaction.PayoutStatus.FAILED
+        assert "split_error" in tx.metadata
+
+    @patch.object(ChapaPaymentService, "verify_payment")
+    def test_pending_chapa_verification_does_not_confirm_booking(self, mock_verify, setup_tc_booking):
+        tc, booking, user = setup_tc_booking
+        content_type = ContentType.objects.get_for_model(booking)
+        tx = PaymentTransaction.objects.create(
+            content_type=content_type,
+            object_id=booking.id,
+            booking_type="booking",
+            tx_ref="MICHOT-PENDING-VERIFY",
+            amount=booking.total_price,
+            currency="ETB",
+            status=PaymentTransaction.PaymentStatus.PENDING,
+        )
+        mock_verify.return_value = {
+            "status": "success",
+            "data": {
+                "status": "pending",
+                "amount": str(booking.total_price),
+                "currency": "ETB",
+            },
+        }
+
+        result = ChapaPaymentService.handle_callback({"tx_ref": tx.tx_ref})
+
+        tx.refresh_from_db()
+        booking.refresh_from_db()
+        assert result["status"] == "pending"
+        assert tx.status == PaymentTransaction.PaymentStatus.PENDING
+        assert booking.status == Booking.BookingStatus.PENDING
+        assert "verification_pending" in tx.metadata
 
     def test_confirm_booking_integrity_check(self, setup_tc_booking):
         tc, booking, user = setup_tc_booking

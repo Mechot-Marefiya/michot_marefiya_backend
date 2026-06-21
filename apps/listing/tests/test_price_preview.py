@@ -4,7 +4,7 @@ from rest_framework.test import APITestCase
 from decimal import Decimal
 from datetime import date, timedelta
 from apps.listing.models import (
-    RoomListing, StayAvailability, GuestHouseProfile, GuestHouseRoom, EventSpaceListing,
+    AddonOffering, RoomListing, StayAvailability, GuestHouseProfile, GuestHouseRoom, EventSpaceListing,
     EventSpaceAvailability, GuestHouseInventory, Season, SeasonalRate
 )
 from apps.account.models import User, HotelProfile, CompanyProfile
@@ -154,6 +154,98 @@ class PricePreviewAPITests(APITestCase):
         self.assertEqual(response.data['totals']['grand_total'], '3150.00')
         self.assertEqual(response.data['items'][0]['breakdown'][0]['source'], 'seasonal')
 
+    def test_hotel_price_preview_includes_pricing_type_aware_addons(self):
+        self.client.force_authenticate(user=self.user)
+        url = reverse('bookings-price-preview')
+
+        per_booking = AddonOffering.objects.create(
+            hotel=self.hotel,
+            name="Airport Pickup",
+            description="One-time airport transfer",
+            category=AddonOffering.AddonCategory.TRANSPORT,
+            price_per_unit=Decimal("400.00"),
+            currency="ETB",
+            pricing_type=AddonOffering.PricingType.PER_BOOKING,
+            is_active=True,
+            max_quantity_per_booking=1,
+        )
+        per_night = AddonOffering.objects.create(
+            hotel=self.hotel,
+            name="Extra Bed",
+            description="Extra bed for each night",
+            category=AddonOffering.AddonCategory.AMENITY,
+            price_per_unit=Decimal("150.00"),
+            currency="ETB",
+            pricing_type=AddonOffering.PricingType.PER_NIGHT,
+            is_active=True,
+            max_quantity_per_booking=5,
+        )
+        per_unit = AddonOffering.objects.create(
+            hotel=self.hotel,
+            name="Laundry Bag",
+            description="Laundry bundle",
+            category=AddonOffering.AddonCategory.SERVICE,
+            price_per_unit=Decimal("50.00"),
+            currency="ETB",
+            pricing_type=AddonOffering.PricingType.PER_UNIT,
+            is_active=True,
+            max_quantity_per_booking=5,
+        )
+        per_person = AddonOffering.objects.create(
+            hotel=self.hotel,
+            name="Breakfast Buffet",
+            description="Breakfast per person",
+            category=AddonOffering.AddonCategory.MEAL,
+            price_per_unit=Decimal("75.00"),
+            currency="ETB",
+            pricing_type=AddonOffering.PricingType.PER_PERSON,
+            is_active=True,
+            max_quantity_per_booking=5,
+        )
+
+        check_in = date.today() + timedelta(days=1)
+        check_out = date.today() + timedelta(days=3)
+
+        data = {
+            "check_in_date": check_in.isoformat(),
+            "check_out_date": check_out.isoformat(),
+            "items": [
+                {
+                    "room": str(self.room.id),
+                    "units_booked": 2,
+                    "addons": [
+                        {"offering_id": str(per_booking.id), "quantity": 1},
+                        {"offering_id": str(per_night.id), "quantity": 2},
+                        {"offering_id": str(per_unit.id), "quantity": 3},
+                        {"offering_id": str(per_person.id), "quantity": 4},
+                    ],
+                }
+            ],
+        }
+
+        response = self.client.post(url, data, format="json")
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        self.assertEqual(response.data["totals"]["items_subtotal"], "4000.00")
+        self.assertEqual(response.data["totals"]["addons_subtotal"], "1450.00")
+        self.assertEqual(response.data["totals"]["platform_fee"], "200.00")
+        self.assertEqual(response.data["totals"]["grand_total"], "5650.00")
+
+        item = response.data["items"][0]
+        self.assertEqual(item["addons_subtotal"], "1450.00")
+        self.assertEqual(item["subtotal_with_addons"], "5450.00")
+        self.assertEqual(len(item["addons"]), 4)
+
+        addon_map = {addon["name"]: addon for addon in item["addons"]}
+        self.assertEqual(addon_map["Airport Pickup"]["effective_quantity"], 1)
+        self.assertEqual(addon_map["Airport Pickup"]["subtotal"], "400.00")
+        self.assertEqual(addon_map["Extra Bed"]["effective_quantity"], 4)
+        self.assertEqual(addon_map["Extra Bed"]["subtotal"], "600.00")
+        self.assertEqual(addon_map["Laundry Bag"]["effective_quantity"], 3)
+        self.assertEqual(addon_map["Laundry Bag"]["subtotal"], "150.00")
+        self.assertEqual(addon_map["Breakfast Buffet"]["effective_quantity"], 4)
+        self.assertEqual(addon_map["Breakfast Buffet"]["subtotal"], "300.00")
+
     def test_guesthouse_price_preview(self):
         self.client.force_authenticate(user=self.user)
         url = reverse('guesthouse-bookings-price-preview')
@@ -231,6 +323,7 @@ class PricePreviewAPITests(APITestCase):
         
         # Verify Base Totals (ETB)
         self.assertEqual(response.data['totals']['items_subtotal'], '1000.00')
+        self.assertEqual(response.data['totals']['addons_subtotal'], '0.00')
         self.assertEqual(response.data['totals']['currency'], 'ETB')
         
         # Verify Converted Totals (USD)
@@ -239,6 +332,7 @@ class PricePreviewAPITests(APITestCase):
         # 1050 ETB / 100 = 10.50 USD
         self.assertIsNotNone(response.data['conversion'])
         self.assertEqual(response.data['conversion']['items_subtotal'], '10.00')
+        self.assertEqual(response.data['conversion']['addons_subtotal'], '0.00')
         self.assertEqual(response.data['conversion']['platform_fee'], '0.50')
         self.assertEqual(response.data['conversion']['grand_total'], '10.50')
         self.assertEqual(response.data['conversion']['to'], 'USD')

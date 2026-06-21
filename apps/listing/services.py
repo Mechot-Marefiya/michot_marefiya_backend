@@ -1505,6 +1505,55 @@ class PriceService:
 
 class PriceCalculationService:
     @staticmethod
+    def get_addon_billing_price_per_unit(*, pricing_type, addon_price, nights):
+        addon_price = Decimal(str(addon_price))
+        if pricing_type == "per_night":
+            return addon_price * Decimal(max(int(nights or 0), 1))
+        return addon_price
+
+    @staticmethod
+    def get_addon_effective_quantity(*, pricing_type, requested_quantity, nights):
+        requested_quantity = int(requested_quantity or 1)
+        if pricing_type == "per_night":
+            return requested_quantity * max(int(nights or 0), 1)
+        return requested_quantity
+
+    @staticmethod
+    def build_addon_preview_line(*, offering, requested_quantity, nights, payment_currency):
+        addon_price = Decimal(offering.price_per_unit)
+        if offering.currency != payment_currency:
+            try:
+                addon_price = convert_currency(offering.price_per_unit, offering.currency, payment_currency)
+            except Exception:
+                addon_price = Decimal(offering.price_per_unit)
+
+        effective_quantity = PriceCalculationService.get_addon_effective_quantity(
+            pricing_type=offering.pricing_type,
+            requested_quantity=requested_quantity,
+            nights=nights,
+        )
+        billing_price_per_unit = PriceCalculationService.get_addon_billing_price_per_unit(
+            pricing_type=offering.pricing_type,
+            addon_price=addon_price,
+            nights=nights,
+        )
+        subtotal = Decimal(billing_price_per_unit) * Decimal(int(requested_quantity or 1))
+
+        return (
+            {
+                "offering_id": str(offering.id),
+                "name": offering.name,
+                "pricing_type": offering.pricing_type,
+                "quantity": int(requested_quantity or 1),
+                "effective_quantity": effective_quantity,
+                "price_per_unit": f"{Decimal(addon_price):.2f}",
+                "subtotal": f"{subtotal:.2f}",
+                "currency": payment_currency,
+            },
+            subtotal,
+        )
+
+    @staticmethod
     def calculate_totals(item_subtotals, fee_rate=None):
         # Base math for calculating totals. Returns raw Decimals.
         items_subtotal = sum(Decimal(str(s)) for s in item_subtotals)
@@ -1546,13 +1595,17 @@ class PriceCalculationService:
         }
 
     @staticmethod
-    def calculate_preview_totals(item_subtotals, currency="ETB", display_currency=None, items=None, fee_rate=None):
-        
-        base_res = PriceCalculationService.calculate_totals(item_subtotals, fee_rate=fee_rate)
+    def calculate_preview_totals(item_subtotals, currency="ETB", display_currency=None, items=None, fee_rate=None, addon_subtotals=None):
+        base_res = PriceCalculationService.calculate_totals_with_addons(
+            item_subtotals,
+            addon_subtotals,
+            fee_rate=fee_rate,
+        )
         
         response = {
             "totals": {
                 "items_subtotal": f"{base_res['items_subtotal']:.2f}",
+                "addons_subtotal": f"{base_res['addons_subtotal']:.2f}",
                 "platform_fee": f"{base_res['platform_fee']:.2f}",
                 "platform_fee_percentage": f"{base_res['platform_fee_percentage']:.2f}",
                 "grand_total": f"{base_res['grand_total']:.2f}",
@@ -1566,6 +1619,7 @@ class PriceCalculationService:
             from django.utils.timezone import now
             try:
                 conv_subtotal, rate = convert_currency(base_res["items_subtotal"], currency, display_currency, return_rate=True)
+                conv_addons = convert_currency(base_res["addons_subtotal"], currency, display_currency)
                 conv_fee = convert_currency(base_res["platform_fee"], currency, display_currency)
                 conv_grand = convert_currency(base_res["grand_total"], currency, display_currency)
                 
@@ -1575,6 +1629,7 @@ class PriceCalculationService:
                     "rate": f"{rate:g}",
                     "calculated_at": now().isoformat(),
                     "items_subtotal": f"{conv_subtotal:.2f}",
+                    "addons_subtotal": f"{conv_addons:.2f}",
                     "platform_fee": f"{conv_fee:.2f}",
                     "platform_fee_percentage": f"{base_res['platform_fee_percentage']:.2f}",
                     "grand_total": f"{conv_grand:.2f}",
@@ -1771,6 +1826,12 @@ class BookingService:
                             addon_price = convert_currency(offering.price_per_unit, offering.currency, payment_currency)
                         except Exception:
                             addon_price = offering.price_per_unit
+                    requested_quantity = int(addon_input.get('quantity', 1) or 1)
+                    addon_billing_price = PriceCalculationService.get_addon_billing_price_per_unit(
+                        pricing_type=offering.pricing_type,
+                        addon_price=addon_price,
+                        nights=nights,
+                    )
 
                     from apps.listing.models import BookingAddon
                     BookingAddon.objects.create(
@@ -1779,8 +1840,8 @@ class BookingService:
                         name=offering.name,
                         description=offering.description,
                         category=offering.category,
-                        quantity=addon_input.get('quantity', 1),
-                        price_per_unit=addon_price,
+                        quantity=requested_quantity,
+                        price_per_unit=addon_billing_price,
                         currency=payment_currency # now matches booking
                     )
             StayAvailabilityService.update_availability(
