@@ -5065,13 +5065,13 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedEventSpaceListingRequest'
+              $ref: '#/components/schemas/PatchedEventSpaceListingUpdateRequest'
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedEventSpaceListingRequest'
+              $ref: '#/components/schemas/PatchedEventSpaceListingUpdateRequest'
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedEventSpaceListingRequest'
+              $ref: '#/components/schemas/PatchedEventSpaceListingUpdateRequest'
       security:
       - jwtAuth: []
       responses:
@@ -5242,7 +5242,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedEventSpaceListingList'
+                $ref: '#/components/schemas/PaginatedEventSpaceListingResponseList'
           description: ''
   /api/v1/listing/feed/:
     get:
@@ -13538,70 +13538,19 @@ components:
       - terms_url
       - total_item_cost
       - total_price
-    EventSpaceListing:
+    EventSpaceHotelSummary:
       type: object
-      description: Serializer used for POST/PUT operations, relying on the service
-        layer.
       properties:
-        images:
-          type: array
-          items:
-            type: string
-            format: uri
-        title:
-          type: string
-          description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
-          maxLength: 255
-        company_id:
+        id:
           type: string
           format: uuid
-        description:
+          readOnly: true
+        name:
           type: string
-          description: Detailed description of the listing.
-        base_price:
-          type: string
-          format: decimal
-          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
-          nullable: true
-          title: Price
-          description: Price of the service/product (if applicable).
-        currency:
-          type: string
-          description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
-          maxLength: 3
-        booking_forward_window_days:
-          type: integer
-          maximum: 2147483647
-          minimum: 0
-          description: Maximum number of days ahead a booking can start for this listing.
-        address:
-          $ref: '#/components/schemas/AddressSchema'
-        amenities:
-          type: array
-          items:
-            type: string
-            format: uuid
-        number_of_guests:
-          type: integer
-          maximum: 2147483647
-          minimum: 0
-        total_units:
-          type: integer
-          maximum: 2147483647
-          minimum: 0
-          title: Total eventspace of This Type
-          description: How many eventspace of this type exist in the property.
-        space_type:
-          $ref: '#/components/schemas/SpaceTypeEnum'
-        floor_area_sqm:
-          type: integer
-          maximum: 2147483647
-          minimum: 0
-          nullable: true
+          title: Hotel Name
+          maxLength: 255
       required:
-      - company_id
-      - space_type
-      - title
+      - id
     EventSpaceListingRequest:
       type: object
       description: Serializer used for POST/PUT operations, relying on the service
@@ -13617,9 +13566,14 @@ components:
           minLength: 1
           description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
           maxLength: 255
+        hotel_id:
+          type: string
+          format: uuid
+          writeOnly: true
         company_id:
           type: string
           format: uuid
+          writeOnly: true
         description:
           type: string
           description: Detailed description of the listing.
@@ -13671,7 +13625,7 @@ components:
           minimum: 0
           nullable: true
       required:
-      - company_id
+      - hotel_id
       - space_type
       - title
     EventSpaceListingResponse:
@@ -13680,6 +13634,14 @@ components:
         id:
           type: string
           format: uuid
+          readOnly: true
+        hotel_id:
+          type: string
+          format: uuid
+          readOnly: true
+        hotel:
+          allOf:
+          - $ref: '#/components/schemas/EventSpaceHotelSummary'
           readOnly: true
         images:
           type: array
@@ -13758,6 +13720,9 @@ components:
           readOnly: true
           description: Complete pricing breakdown including platform fees. Populated
             only when check_in/check_out dates are provided.
+        is_active:
+          type: boolean
+          description: Whether the listing is active and visible.
         is_verified:
           type: boolean
           description: Whether the listing has been verified by an administrator.
@@ -13779,6 +13744,8 @@ components:
       required:
       - amenities
       - conversion
+      - hotel
+      - hotel_id
       - id
       - images
       - price_quote
@@ -16308,35 +16275,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/EventSpaceBookingResponse'
-    PaginatedEventSpaceListingList:
-      type: object
-      properties:
-        count:
-          type: integer
-          example: 123
-        total_pages:
-          type: integer
-          example: 15
-        current_page:
-          type: integer
-          example: 1
-        page_size:
-          type: integer
-          example: 10
-        next:
-          type: string
-          nullable: true
-          format: uri
-          example: http://api.example.org/accounts/?page=404
-        previous:
-          type: string
-          nullable: true
-          format: uri
-          example: http://api.example.org/accounts/?page=2
-        results:
-          type: array
-          items:
-            $ref: '#/components/schemas/EventSpaceListing'
     PaginatedEventSpaceListingResponseList:
       type: object
       properties:
@@ -17566,10 +17504,8 @@ components:
           $ref: '#/components/schemas/PaymentTransactionDisputeStatusEnum'
         note:
           type: string
-    PatchedEventSpaceListingRequest:
+    PatchedEventSpaceListingUpdateRequest:
       type: object
-      description: Serializer used for POST/PUT operations, relying on the service
-        layer.
       properties:
         images:
           type: array
@@ -17581,9 +17517,6 @@ components:
           minLength: 1
           description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
           maxLength: 255
-        company_id:
-          type: string
-          format: uuid
         description:
           type: string
           description: Detailed description of the listing.
@@ -17634,6 +17567,8 @@ components:
           maximum: 2147483647
           minimum: 0
           nullable: true
+        is_active:
+          type: boolean
     PatchedFacilityRequest:
       type: object
       properties:

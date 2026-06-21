@@ -76,7 +76,7 @@ from apps.account.serializers import (
     OwnerComplianceAgreementSerializer,
     RoleSerializer,
 )
-from apps.account.utils import get_company_scope, get_workspace_catalog_entry
+from apps.account.utils import get_company_scope, get_individual_owner_scope, get_workspace_catalog_entry
 from apps.listing.serializers import AddonOfferingListSerializer, VerifyActionSerializer
 from apps.account.enums import RoleCode
 from rest_framework.decorators import api_view, permission_classes
@@ -291,13 +291,16 @@ class StaffViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if not getattr(user, "is_authenticated", False):
             return qs.none()
-        
-        if user.company:
-            return qs.filter(company=user.company)
-        elif user.individual_owner:
-            return qs.filter(individual_owner=user.individual_owner)
-            
-        return qs.none() 
+
+        company = get_company_scope(user)
+        if company:
+            return qs.filter(company=company)
+
+        individual_owner = get_individual_owner_scope(user)
+        if individual_owner:
+            return qs.filter(individual_owner=individual_owner)
+
+        return qs.none()
 
     def get_serializer_class(self):
         if self.action == 'create':

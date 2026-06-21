@@ -3615,15 +3615,27 @@ class StayAvailabilityUpdateSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("available_rooms must be non-negative.")
         return value
+
+
+class EventSpaceHotelSummarySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HotelProfile
+        fields = ["id", "name"]
+
+
 class EventSpaceListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True)
     amenities = AmenityResponseSSerializer(many=True)
     verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
+    hotel_id = serializers.UUIDField(source="hotel.id", read_only=True)
+    hotel = EventSpaceHotelSummarySerializer(read_only=True)
 
     class Meta:
         model = EventSpaceListing
         fields = [
             "id",
+            "hotel_id",
+            "hotel",
             "images",
             "latitude",
             "longitude",
@@ -3642,25 +3654,33 @@ class EventSpaceListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMix
             "floor_area_sqm",
             "conversion",
             "price_quote",
+            "is_active",
             "is_verified",
             "verified_at",
             "verified_by",
             "verification_note",
         ]
+
+
 class EventSpaceListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     """Serializer used for POST/PUT operations, relying on the service layer."""
     
     address = FlexibleAddressField(required=False)
     images = serializers.ListField(child=serializers.ImageField(), required=False) 
     amenities = EventSpaceAmenitiesField(required=False) 
-
-    company_id = serializers.UUIDField()
+    hotel_id = serializers.PrimaryKeyRelatedField(
+        source="hotel",
+        queryset=HotelProfile.objects.select_related("company", "address"),
+        write_only=True,
+    )
+    company_id = serializers.UUIDField(required=False, write_only=True)
 
     class Meta:
         model = EventSpaceListing
         fields = [
             "images",
             "title",
+            "hotel_id",
             "company_id",
             "description",
             "base_price",
@@ -3677,16 +3697,6 @@ class EventSpaceListingSerializer(PlaceResolutionMixin, serializers.ModelSeriali
             # Add other fields as needed for creation
         ]
 
-    def validate_company_id(self, value):
-        user = self.context['request'].user
-        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
-
-        if not user.is_superuser and not (hasattr(user, 'role') and user.role and user.role.code == 'admin'):
-            if str(value) != str(getattr(company, 'id', '')):
-                raise serializers.ValidationError("You do not have permission to manage this company.")
-                
-        return value
-
     def validate_currency(self, value):
         if not value:
             return value
@@ -3696,7 +3706,35 @@ class EventSpaceListingSerializer(PlaceResolutionMixin, serializers.ModelSeriali
         return value
 
     def validate(self, data):
-        return self._resolve_place_detail(data)
+        data = self._resolve_place_detail(data)
+        request = self.context["request"]
+        user = request.user
+        hotel = data["hotel"]
+        company = getattr(user, "company", None) or getattr(user, "profile", None)
+        company_id = data.get("company_id")
+        is_admin = user.is_superuser or (
+            hasattr(user, "role") and user.role and user.role.code == RoleCode.ADMIN.value
+        )
+
+        if company_id and str(company_id) != str(hotel.company_id):
+            raise serializers.ValidationError(
+                {"hotel_id": "Selected hotel does not belong to the provided company_id."}
+            )
+
+        if not is_admin:
+            if company is None:
+                raise serializers.ValidationError("Only company owners can create event spaces.")
+            if str(hotel.company_id) != str(company.id):
+                raise serializers.ValidationError(
+                    {"hotel_id": "You do not have permission to manage this hotel."}
+                )
+
+        if "address" not in data and hotel.address is None:
+            raise serializers.ValidationError(
+                {"address": "Selected hotel does not have an address to inherit."}
+            )
+
+        return data
 
     # The Address validation is handled by the nested AddressSerializer
     # if you use the standard nested serializer structure (as shown above).
@@ -3728,6 +3766,63 @@ class EventSpaceListingSerializer(PlaceResolutionMixin, serializers.ModelSeriali
         """
         Uses the Response Serializer for the representation of the created/updated object.
         """
+        return EventSpaceListingResponseSerializer(instance, context=self.context).to_representation(
+            instance
+        )
+
+
+class EventSpaceListingUpdateSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
+    address = FlexibleAddressField(required=False)
+    images = serializers.ListField(child=serializers.ImageField(), required=False)
+    amenities = EventSpaceAmenitiesField(required=False)
+    is_active = serializers.BooleanField(required=False)
+
+    class Meta:
+        model = EventSpaceListing
+        fields = [
+            "images",
+            "title",
+            "description",
+            "base_price",
+            "currency",
+            "booking_forward_window_days",
+            "address",
+            "amenities",
+            "place_id",
+            "session_token",
+            "number_of_guests",
+            "total_units",
+            "space_type",
+            "floor_area_sqm",
+            "is_active",
+        ]
+
+    def validate_currency(self, value):
+        if not value:
+            return value
+        value = value.upper()
+        if len(value) != 3:
+            raise serializers.ValidationError("Currency must be a 3-letter ISO code.")
+        return value
+
+    def validate(self, data):
+        data = self._resolve_place_detail(data)
+        desired_active = data.get("is_active")
+        if desired_active is True and not self.instance.is_verified:
+            raise serializers.ValidationError(
+                {"is_active": "Event spaces can only be activated after admin verification."}
+            )
+        return data
+
+    @transaction.atomic()
+    def update(self, instance, validated_data):
+        self._pop_session_token(validated_data)
+        kept_image_ids = self.initial_data.getlist("kept_image_ids") if "kept_image_ids" in self.initial_data else None
+        if kept_image_ids is None and "kept_image_ids" in self.initial_data:
+             kept_image_ids = self.initial_data["kept_image_ids"]
+        return ListingService.update_event_space_listing(instance, validated_data, kept_image_ids)
+
+    def to_representation(self, instance):
         return EventSpaceListingResponseSerializer(instance, context=self.context).to_representation(
             instance
         )

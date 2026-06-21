@@ -484,14 +484,16 @@ class ListingService:
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
         amenity_ids = validated_data.pop("amenities", [])
-        
-        company_id = validated_data.pop("company_id")
-        hotel = get_object_or_404(HotelProfile, company__id=company_id)
-        
+
+        validated_data.pop("company_id", None)
+        hotel = validated_data.pop("hotel")
+
         if address_data:
             address_instance = ListingService.create_address(address_data)
         else:
-            address_instance = hotel.company.address
+            if hotel.address is None:
+                raise ValidationError({"address": "Selected hotel does not have an address to inherit."})
+            address_instance = ListingService.clone_address(hotel.address)
 
         instance = EventSpaceListing.objects.create(
             hotel=hotel,
@@ -513,6 +515,20 @@ class ListingService:
         ListingGeocodingService.schedule(instance, should_dispatch=not skip_async_geocoding)
 
         return instance
+
+    @staticmethod
+    def clone_address(address: Address) -> Address:
+        return Address.objects.create(
+            street_line1=address.street_line1,
+            country=address.country,
+            city=address.city,
+            sub_city=address.sub_city,
+            state=address.state,
+            postal_code=address.postal_code,
+            latitude=address.latitude,
+            longitude=address.longitude,
+            google_place_id=address.google_place_id,
+        )
 
     @staticmethod
     def get_or_create_address(address_data: dict) -> Address:
@@ -2767,6 +2783,7 @@ class EventSpaceAvailabilityService:
             .filter(
                 space_listing__hotel=hotel,
                 space_listing__space_type=space_type,
+                space_listing__is_active=True,
                 date__gte=check_in_date,
                 date__lt=check_out_date,
                 available_eventspace__gt=0 # Must have at least 1 unit available
@@ -2782,7 +2799,7 @@ class EventSpaceAvailabilityService:
         # Extract listing IDs
         listing_ids = [row["space_listing"] for row in qs]
 
-        listings = EventSpaceListing.objects.filter(id__in=listing_ids)
+        listings = EventSpaceListing.objects.filter(id__in=listing_ids, is_active=True)
 
         return listings, qs
 
@@ -2924,6 +2941,7 @@ class EventSpaceAvailabilityService:
         availability_qs = (
             EventSpaceAvailability.objects
             .filter(
+                space_listing__is_active=True,
                 date__gte=check_in_date,
                 date__lt=check_out_date,
                 available_eventspace__gte=required_quantity
@@ -2938,7 +2956,7 @@ class EventSpaceAvailabilityService:
 
         available_listing_ids = [row["space_listing"] for row in availability_qs]
 
-        listings_qs = EventSpaceListing.objects.filter(id__in=available_listing_ids)
+        listings_qs = EventSpaceListing.objects.filter(id__in=available_listing_ids, is_active=True)
 
         if address_query:
             listings_qs = listings_qs.filter(

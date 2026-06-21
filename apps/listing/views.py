@@ -103,6 +103,7 @@ from apps.listing.serializers import (
     PropertyListingSerializer,
     RoomListingResponseSerializer,
     EventSpaceListingSerializer,
+    EventSpaceListingUpdateSerializer,
     EventSpaceListingResponseSerializer,
     RoomListingSerializer,PartialCancelSerializer,
     SearchResultSerializer,StayAvailabilityUpdateSerializer,
@@ -3476,7 +3477,7 @@ class BookingViewSet(AbstractModelViewSet):
         if not self.request.user or not self.request.user.is_authenticated:
             return Booking.objects.none()
         
-        queryset = Booking.objects.prefetch_related("items", "items__room")
+        queryset = Booking.objects.prefetch_related("items", "items__room").order_by("-created_at")
         
         # Admin sees all
         if self.request.user.is_superuser or (
@@ -3491,16 +3492,11 @@ class BookingViewSet(AbstractModelViewSet):
         if mode == 'host':
             if hasattr(self.request.user, 'role') and self.request.user.role:
                 if self.request.user.role.code == RoleCode.COMPANY.value:
-                    if hasattr(self.request.user, 'profile') and self.request.user.profile:
-                        # Ensure HotelProfile is imported if needed, usually available via models
-                        company = self.request.user.profile
-                        try:
-                            hotel = HotelProfile.objects.get(company=company)
-                            return queryset.filter(
-                                items__room__hotel=hotel
-                            ).distinct()
-                        except HotelProfile.DoesNotExist:
-                            pass
+                    company = getattr(self.request.user, "company", None) or getattr(self.request.user, "profile", None)
+                    if company:
+                        return queryset.filter(
+                            items__room__hotel__company=company
+                        ).distinct()
             return queryset.none()
 
         # Users see only their own bookings
@@ -3511,14 +3507,10 @@ class BookingViewSet(AbstractModelViewSet):
 
         # Company sees bookings for their hotels (Development branch logic)
         if hasattr(self.request.user, 'role') and self.request.user.role and self.request.user.role.code == RoleCode.COMPANY.value:
-             if hasattr(self.request.user, 'profile') and self.request.user.profile:
-                  company = self.request.user.profile
-                  try:
-                      hotel = HotelProfile.objects.get(company=company)
-                      hotel_bookings = queryset.filter(items__room__hotel=hotel).distinct()
-                      return (user_bookings | hotel_bookings).distinct()
-                  except HotelProfile.DoesNotExist:
-                      pass
+             company = getattr(self.request.user, "company", None) or getattr(self.request.user, "profile", None)
+             if company:
+                  hotel_bookings = queryset.filter(items__room__hotel__company=company).distinct()
+                  return (user_bookings | hotel_bookings).distinct().order_by("-created_at")
         
         return user_bookings
     
@@ -4062,18 +4054,24 @@ class EventSpaceListingViewSet(SavedListingDeletionNotificationMixin, AbstractMo
             # Update/Delete requires the user to own the listing
             return [IsListingOwner()]
 
+    def get_serializer_class(self):
+        if self.action in ["update", "partial_update"]:
+            return EventSpaceListingUpdateSerializer
+        return EventSpaceListingSerializer
+
     # --- Queryset Logic ---
     def get_queryset(self):
         queryset = super().get_queryset()
         
         user = self.request.user
         managed_only = self.request.query_params.get('managed') == 'true'
+        modifying_actions = {"update", "partial_update", "destroy"}
 
         # Admin sees all
         if user and (user.is_superuser or (hasattr(user, 'role') and user.role and user.role.code == RoleCode.ADMIN.value)):
             return queryset
 
-        if managed_only and user and user.is_authenticated:
+        if user and user.is_authenticated and (managed_only or self.action in modifying_actions):
             company = getattr(user, 'company', None) or getattr(user, 'profile', None)
             individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
             
@@ -4178,7 +4176,7 @@ class EventSpaceListingViewSet(SavedListingDeletionNotificationMixin, AbstractMo
             description="Optional address search term"
         ),
     ],
-    responses={200: EventSpaceListingSerializer(many=True)}
+    responses={200: EventSpaceListingResponseSerializer(many=True)}
 )
     @action(detail=False, methods=['get'])
     def search(self, request):

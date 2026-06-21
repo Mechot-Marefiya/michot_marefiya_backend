@@ -8,7 +8,8 @@ from apps.listing.models import (
     RoomInventory, Season, SeasonalRate, TermsAndConditions
 )
 from apps.listing.services import StayAvailabilityService, PriceService
-from apps.account.models import User, HotelProfile, CompanyProfile
+from apps.account.models import User, HotelProfile, CompanyProfile, Role
+from apps.account.enums import RoleCode
 from apps.core.models import Address
 from django.contrib.contenttypes.models import ContentType
 
@@ -22,6 +23,11 @@ class HotelBookingAPITests(APITestCase):
     
     def setUp(self):
         """Create test data used across multiple tests"""
+        self.company_role, _ = Role.objects.get_or_create(
+            name="Company",
+            code=RoleCode.COMPANY.value,
+        )
+
         # Create test user
         self.user = User.objects.create_user(
             email="test@example.com",
@@ -47,6 +53,9 @@ class HotelBookingAPITests(APITestCase):
             address=self.address,
             phone="+251911111111"
         )
+        self.user.role = self.company_role
+        self.user.company = self.company
+        self.user.save(update_fields=["role", "company"])
         
         # Create hotel
         self.hotel = HotelProfile.objects.create(
@@ -346,6 +355,108 @@ class HotelBookingAPITests(APITestCase):
         
         # price_quote should not be in response when dates not provided
         self.assertNotIn('price_quote', response.data)
+
+    def test_company_host_booking_list_includes_all_owned_hotels_without_workspace(self):
+        self.user.workspace_content_type = None
+        self.user.workspace_object_id = None
+        self.user.save(update_fields=["workspace_content_type", "workspace_object_id"])
+
+        second_address = Address.objects.create(
+            street_line1="Second Hotel St",
+            city="Addis Ababa",
+            sub_city="Kazanchis",
+            country="Ethiopia",
+        )
+        second_hotel = HotelProfile.objects.create(
+            company=self.company,
+            address=second_address,
+            name="Second Hotel",
+            stars=4,
+            is_active=True,
+        )
+        second_room = RoomListing.objects.create(
+            hotel=second_hotel,
+            address=second_address,
+            title="Business Room",
+            base_price=Decimal("1200.00"),
+            currency="ETB",
+            total_units=3,
+            number_of_guests=2,
+            room_size_sqm=32,
+            bed_type=RoomListing.BedType.QUEEN,
+            is_active=True,
+        )
+        self.create_availability_range(second_room, date.today() + timedelta(days=1), 30)
+
+        guest_user = User.objects.create_user(
+            email="guest@example.com",
+            password="password123",
+            first_name="Guest",
+            last_name="User",
+            phone="0911333444",
+        )
+        check_in = date.today() + timedelta(days=2)
+        check_out = check_in + timedelta(days=1)
+
+        booking_one = Booking.objects.create(
+            user=guest_user,
+            check_in_date=check_in,
+            check_out_date=check_out,
+            guest_first_name="Guest",
+            guest_last_name="User",
+            guest_email="guest@example.com",
+            guest_phone="0911333444",
+            total_price=Decimal("1050.00"),
+            currency="ETB",
+            status=Booking.BookingStatus.PENDING,
+            terms_accepted=True,
+            terms_version="1.0",
+        )
+        BookingItem.objects.create(
+            booking=booking_one,
+            room=self.room,
+            units_booked=1,
+            price_per_unit=Decimal("1000.00"),
+        )
+
+        booking_two = Booking.objects.create(
+            user=guest_user,
+            check_in_date=check_in + timedelta(days=1),
+            check_out_date=check_out + timedelta(days=1),
+            guest_first_name="Guest",
+            guest_last_name="User",
+            guest_email="guest@example.com",
+            guest_phone="0911333444",
+            total_price=Decimal("1260.00"),
+            currency="ETB",
+            status=Booking.BookingStatus.CONFIRMED,
+            terms_accepted=True,
+            terms_version="1.0",
+        )
+        BookingItem.objects.create(
+            booking=booking_two,
+            room=second_room,
+            units_booked=1,
+            price_per_unit=Decimal("1200.00"),
+        )
+
+        self.client.force_authenticate(user=self.user)
+
+        host_response = self.client.get(reverse("bookings-list"), {"mode": "host"})
+        self.assertEqual(host_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(host_response.data["count"], 2)
+        self.assertEqual(
+            {item["id"] for item in host_response.data["results"]},
+            {str(booking_one.id), str(booking_two.id)},
+        )
+
+        filtered_response = self.client.get(
+            reverse("bookings-list"),
+            {"mode": "host", "status": Booking.BookingStatus.CONFIRMED},
+        )
+        self.assertEqual(filtered_response.status_code, status.HTTP_200_OK)
+        self.assertEqual(filtered_response.data["count"], 1)
+        self.assertEqual(filtered_response.data["results"][0]["id"], str(booking_two.id))
 
 
 class PriceServiceUnitTests(APITestCase):

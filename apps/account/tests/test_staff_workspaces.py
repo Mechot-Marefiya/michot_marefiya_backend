@@ -163,6 +163,46 @@ def test_company_profile_fallback_can_still_assign_staff(mock_send_sms, api_clie
 
 
 @patch("apps.account.serializers.send_sms", return_value=True)
+def test_company_profile_fallback_can_list_and_delete_assigned_staff(mock_send_sms, api_client):
+    user, company = create_company_user()
+    user.company = None
+    user.save(update_fields=["company"])
+    hotel = HotelProfile.objects.create(company=company, name="Team Hotel", stars=4)
+
+    api_client.force_authenticate(user=user)
+    create_response = api_client.post(
+        reverse("staff-list"),
+        {
+            "first_name": "Team",
+            "last_name": "Member",
+            "phone": "+251911000015",
+            "workspace_id": str(hotel.id),
+            "workspace_type": "hotel",
+        },
+        format="json",
+    )
+
+    assert create_response.status_code == 201
+    created_staff = User.objects.get(phone="0911000015")
+    staff_id = str(created_staff.id)
+
+    list_response = api_client.get(reverse("staff-list"))
+    assert list_response.status_code == 200
+    assert list_response.data["count"] == 1
+    assert list_response.data["results"][0]["id"] == staff_id
+    assert list_response.data["results"][0]["workspace"] == {
+        "id": str(hotel.id),
+        "name": "Team Hotel",
+        "workspace_type": "hotel",
+    }
+
+    delete_response = api_client.delete(reverse("staff-detail", args=[staff_id]))
+    assert delete_response.status_code == 204
+    assert not User.objects.filter(id=staff_id).exists()
+    assert mock_send_sms.called
+
+
+@patch("apps.account.serializers.send_sms", return_value=True)
 def test_individual_owner_can_view_workspaces_and_create_staff(mock_send_sms, api_client):
     user, owner = create_individual_owner_user()
     create_guesthouse(individual_owner=owner, title="Owner Guesthouse")
