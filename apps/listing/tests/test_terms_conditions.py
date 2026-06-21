@@ -37,7 +37,9 @@ class TestTermsAndConditionsModel:
         
         v1.refresh_from_db()
         assert v1.is_active is False
+        assert v1.status == TermsAndConditions.Status.ARCHIVED
         assert v2.is_active is True
+        assert v2.status == TermsAndConditions.Status.ACTIVE
 
     def test_saving_inactive_version_does_not_deactivate_active_one(self, hotel_profile):
         ct = ContentType.objects.get_for_model(hotel_profile)
@@ -62,7 +64,9 @@ class TestTermsAndConditionsModel:
         
         v1.refresh_from_db()
         assert v1.is_active is True
+        assert v1.status == TermsAndConditions.Status.ACTIVE
         assert v2.is_active is False
+        assert v2.status == TermsAndConditions.Status.DRAFT
 
 @pytest.mark.django_db
 class TestTermsService:
@@ -119,6 +123,43 @@ class TestTermsService:
                 terms_version="99.9",
                 terms_accepted=True
             )
+
+    def test_create_draft_terms_defaults_to_draft(self, hotel_profile, company_user):
+        draft = TermsService.create_draft_terms(
+            content_object=hotel_profile,
+            title="Draft Terms",
+            content="Draft Content",
+            created_by=company_user,
+        )
+
+        assert draft.status == TermsAndConditions.Status.DRAFT
+        assert draft.is_active is False
+        assert draft.created_by == company_user
+
+    def test_publish_terms_archives_previous_active_version(self, hotel_profile):
+        active = TermsAndConditions.objects.create(
+            content_object=hotel_profile,
+            version="1.0",
+            title="Current Terms",
+            content="Current Content",
+            effective_date=date.today(),
+            is_active=True,
+        )
+        draft = TermsService.create_draft_terms(
+            content_object=hotel_profile,
+            title="New Terms",
+            content="New Content",
+        )
+
+        TermsService.publish_terms(draft)
+        active.refresh_from_db()
+        draft.refresh_from_db()
+
+        assert active.status == TermsAndConditions.Status.ARCHIVED
+        assert active.is_active is False
+        assert draft.status == TermsAndConditions.Status.ACTIVE
+        assert draft.is_active is True
+        assert draft.published_at is not None
 
 @pytest.mark.django_db
 class TestTermsAPIIntegration:

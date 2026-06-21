@@ -12,9 +12,10 @@ import uuid
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.views import APIView
 from rest_framework import status,filters
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, ValidationError as DRFValidationError
 from rest_framework import serializers
 from rest_framework.response import Response
 from django.db import transaction
@@ -67,6 +68,7 @@ from apps.listing.models import (
     GuestHouseBooking,
     GuestHouseBookingItem,
     AddonOffering,
+    TermsAndConditions,
     Season, SeasonalRate,
 )
 from apps.account.models import(CompanyProfile,IndividualOwnerProfile,HotelProfile)
@@ -117,6 +119,10 @@ from apps.listing.serializers import (
     EventSpaceBookingResponseSerializer,
     EventSpaceBookingSerializer,
     GuestHouseBookingSerializer,
+    TermsAndConditionsSerializer,
+    TermsAndConditionsManagementSerializer,
+    TermsAndConditionsCreateSerializer,
+    TermsAndConditionsPatchSerializer,
     AddonOfferingSerializer,
     AddonOfferingListSerializer,
     BookingLookupSerializer,
@@ -139,6 +145,7 @@ from apps.listing.services import (
     PriceService, GuestHouseAvailabilityService, EventSpaceAvailabilityService,
     PriceCalculationService, CarRentalService, PropertyRentalAvailabilityService,
     PropertyRentalBookingService, get_effective_platform_fee_rate, GuestBookingOtpError,
+    TermsService,
     GuestContactRevealOtpService, _phone_variants,
     verify_listing, unverify_listing,
 )
@@ -4462,50 +4469,236 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
 
 
 @extend_schema(tags=["Terms & Conditions"])
-class TermsAndConditionsViewSet(viewsets.ReadOnlyModelViewSet):
+class TermsAndConditionsViewSet(AbstractModelViewSet):
     """
-    API endpoints for retrieving Terms & Conditions.
-    
-    - list: Get all T&C (admin only)
-    - retrieve: Get specific T&C by ID  
-    - hotel/{hotel_id}: Get active T&C for a hotel
+    Public read endpoints remain available for active terms, while provider users
+    can manage draft/history/lifecycle operations on company-owned scopes.
     """
-    from apps.listing.serializers import TermsAndConditionsSerializer
-    from apps.listing.models import TermsAndConditions
-    
+
     serializer_class = TermsAndConditionsSerializer
     permission_classes = [AllowAny]
-    queryset = TermsAndConditions.objects.filter(is_active=True)
-    
+    queryset = TermsAndConditions.objects.select_related("content_type", "created_by")
+
+    def get_queryset(self):
+        queryset = TermsAndConditions.objects.select_related("content_type", "created_by")
+        if self.action == "list":
+            return queryset.filter(is_active=True)
+        return queryset
+
+    def get_permissions(self):
+        if self.action in ["list", "retrieve", "hotel_terms", "guesthouse_terms", "company_terms"]:
+            return [AllowAny()]
+        return [IsAuthenticated()]
+
+    def get_serializer_class(self):
+        if self.action in ["create_hotel_terms", "create_guesthouse_terms", "create_company_terms"]:
+            return TermsAndConditionsCreateSerializer
+        if self.action == "partial_update":
+            return TermsAndConditionsPatchSerializer
+        if self.action in [
+            "retrieve",
+            "hotel_history",
+            "guesthouse_history",
+            "company_history",
+            "publish",
+            "archive",
+        ]:
+            return TermsAndConditionsManagementSerializer
+        return TermsAndConditionsSerializer
+
+    def _is_admin(self, user) -> bool:
+        return bool(
+            user
+            and user.is_authenticated
+            and (
+                user.is_superuser
+                or (hasattr(user, "role") and user.role and user.role.code == RoleCode.ADMIN.value)
+            )
+        )
+
+    def _is_company_user(self, user) -> bool:
+        return bool(
+            user
+            and user.is_authenticated
+            and hasattr(user, "role")
+            and user.role
+            and user.role.code == RoleCode.COMPANY.value
+        )
+
+    def _company_owned_by_user(self, user, company) -> bool:
+        if not company:
+            return False
+        return (
+            getattr(user, "company", None) == company
+            or getattr(user, "profile", None) == company
+            or getattr(company, "user_id", None) == getattr(user, "id", None)
+        )
+
+    def _can_manage_scope(self, user, scope_object) -> bool:
+        if self._is_admin(user):
+            return True
+        if not self._is_company_user(user):
+            return False
+        if isinstance(scope_object, CompanyProfile):
+            return self._company_owned_by_user(user, scope_object)
+        if isinstance(scope_object, HotelProfile):
+            return self._company_owned_by_user(user, getattr(scope_object, "company", None))
+        if isinstance(scope_object, GuestHouseProfile):
+            return self._company_owned_by_user(user, getattr(scope_object, "company", None))
+        return False
+
+    def _assert_can_manage_scope(self, user, scope_object):
+        if not self._can_manage_scope(user, scope_object):
+            raise PermissionDenied("You do not have permission to manage terms for this scope.")
+
+    def _raise_drf_validation(self, exc):
+        detail = getattr(exc, "message_dict", None) or getattr(exc, "messages", None) or str(exc)
+        raise DRFValidationError(detail)
+
+    def _get_scope_object(self, scope_type: str, scope_id):
+        model_map = {
+            "hotel": HotelProfile,
+            "guesthouse": GuestHouseProfile,
+            "company": CompanyProfile,
+        }
+        return get_object_or_404(model_map[scope_type], id=scope_id)
+
+    def _get_terms_instance(self, pk):
+        return get_object_or_404(
+            TermsAndConditions.objects.select_related("content_type", "created_by"),
+            id=pk,
+        )
+
+    def _serialize_management(self, term):
+        return TermsAndConditionsManagementSerializer(term, context=self.get_serializer_context()).data
+
+    def _build_history_response(self, queryset):
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            serializer = TermsAndConditionsManagementSerializer(
+                page,
+                many=True,
+                context=self.get_serializer_context(),
+            )
+            return self.get_paginated_response(serializer.data)
+        serializer = TermsAndConditionsManagementSerializer(
+            queryset,
+            many=True,
+            context=self.get_serializer_context(),
+        )
+        return Response(serializer.data)
+
+    def _create_scoped_terms(self, request, scope_type: str, scope_id):
+        scope_object = self._get_scope_object(scope_type, scope_id)
+        self._assert_can_manage_scope(request.user, scope_object)
+
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        term = TermsService.create_draft_terms(
+            content_object=scope_object,
+            created_by=request.user,
+            **serializer.validated_data,
+        )
+        return Response(self._serialize_management(term), status=status.HTTP_201_CREATED)
+
+    def _active_scope_response(self, scope_object, detail_message: str):
+        terms = TermsService.get_active_terms(content_object=scope_object)
+        if not terms:
+            return Response({"detail": detail_message}, status=status.HTTP_404_NOT_FOUND)
+        serializer = TermsAndConditionsSerializer(terms, context=self.get_serializer_context())
+        return Response(serializer.data)
+
+    @extend_schema(exclude=True)
+    def create(self, request, *args, **kwargs):
+        return Response(
+            {"detail": 'Method "POST" not allowed.'},
+            status=status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    @extend_schema(
+        summary="Get terms details by record ID",
+        responses={200: TermsAndConditionsManagementSerializer, 404: None},
+    )
+    def retrieve(self, request, *args, **kwargs):
+        term = self._get_terms_instance(kwargs["pk"])
+        can_manage = self._can_manage_scope(request.user, term.content_object)
+        if not term.is_active and not can_manage:
+            raise NotFound()
+        serializer_class = TermsAndConditionsManagementSerializer if can_manage else TermsAndConditionsSerializer
+        serializer = serializer_class(term, context=self.get_serializer_context())
+        return Response(serializer.data)
+
+    @extend_schema(
+        summary="Update a draft terms record",
+        request=TermsAndConditionsPatchSerializer,
+        responses={200: TermsAndConditionsManagementSerializer, 403: OpenApiTypes.OBJECT, 404: None},
+    )
+    def partial_update(self, request, *args, **kwargs):
+        term = self._get_terms_instance(kwargs["pk"])
+        self._assert_can_manage_scope(request.user, term.content_object)
+
+        serializer = self.get_serializer(term, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        try:
+            term = TermsService.update_draft_terms(term, **serializer.validated_data)
+        except DjangoValidationError as exc:
+            self._raise_drf_validation(exc)
+
+        return Response(self._serialize_management(term))
+
+    @extend_schema(
+        summary="Delete a draft terms record",
+        responses={204: None, 403: OpenApiTypes.OBJECT, 404: None},
+    )
+    def destroy(self, request, *args, **kwargs):
+        term = self._get_terms_instance(kwargs["pk"])
+        self._assert_can_manage_scope(request.user, term.content_object)
+        try:
+            TermsService.delete_draft_terms(term)
+        except DjangoValidationError as exc:
+            self._raise_drf_validation(exc)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
     @extend_schema(
         summary="Get active Terms & Conditions for a hotel",
         description="Retrieve the currently active T&C for a specific hotel",
         parameters=[
-            OpenApiParameter(
-                "hotel_id",
-                OpenApiTypes.UUID,
-                location=OpenApiParameter.PATH,
-            ),
+            OpenApiParameter("hotel_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
         ],
-        responses={200: TermsAndConditionsSerializer, 404: None}
+        responses={200: TermsAndConditionsSerializer, 404: None},
     )
-    @action(detail=False, methods=['get'], url_path='hotel/(?P<hotel_id>[^/.]+)')
+    @action(detail=False, methods=["get"], url_path="hotel/(?P<hotel_id>[^/.]+)")
     def hotel_terms(self, request, hotel_id=None):
-        """Get active T&C for a hotel"""
-        from apps.account.models import HotelProfile
-        from apps.listing.services import TermsService
-        
-        hotel = get_object_or_404(HotelProfile, id=hotel_id)
-        terms = TermsService.get_active_terms(content_object=hotel)
-        
-        if not terms:
-            return Response(
-                {"detail": "No terms and conditions available for this hotel."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        serializer = self.serializer_class(terms)
-        return Response(serializer.data)
+        hotel = self._get_scope_object("hotel", hotel_id)
+        return self._active_scope_response(
+            hotel,
+            "No terms and conditions available for this hotel.",
+        )
+
+    @hotel_terms.mapping.post
+    @extend_schema(
+        summary="Create draft Terms & Conditions for a hotel",
+        parameters=[
+            OpenApiParameter("hotel_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
+        ],
+        request=TermsAndConditionsCreateSerializer,
+        responses={201: TermsAndConditionsManagementSerializer, 403: OpenApiTypes.OBJECT, 404: None},
+    )
+    def create_hotel_terms(self, request, hotel_id=None):
+        return self._create_scoped_terms(request, "hotel", hotel_id)
+
+    @extend_schema(
+        summary="List terms history for a hotel",
+        parameters=[
+            OpenApiParameter("hotel_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
+        ],
+        responses={200: TermsAndConditionsManagementSerializer(many=True), 403: OpenApiTypes.OBJECT, 404: None},
+    )
+    @action(detail=False, methods=["get"], url_path="hotel/(?P<hotel_id>[^/.]+)/history")
+    def hotel_history(self, request, hotel_id=None):
+        hotel = self._get_scope_object("hotel", hotel_id)
+        self._assert_can_manage_scope(request.user, hotel)
+        return self._build_history_response(TermsService.get_scope_terms_history(hotel))
 
     @extend_schema(
         summary="Get active Terms & Conditions for a guest house",
@@ -4513,51 +4706,109 @@ class TermsAndConditionsViewSet(viewsets.ReadOnlyModelViewSet):
         parameters=[
             OpenApiParameter("gh_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
         ],
-        responses={200: TermsAndConditionsSerializer, 404: None}
+        responses={200: TermsAndConditionsSerializer, 404: None},
     )
-    @action(detail=False, methods=['get'], url_path='guesthouse/(?P<gh_id>[^/.]+)')
+    @action(detail=False, methods=["get"], url_path="guesthouse/(?P<gh_id>[^/.]+)")
     def guesthouse_terms(self, request, gh_id=None):
-        """Get active T&C for a guest house"""
-        from apps.listing.models import GuestHouseProfile
-        from apps.listing.services import TermsService
-        
-        gh = get_object_or_404(GuestHouseProfile, id=gh_id)
-        terms = TermsService.get_active_terms(content_object=gh)
-        
-        if not terms:
-            return Response(
-                {"detail": "No terms and conditions available for this guest house."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        serializer = self.serializer_class(terms)
-        return Response(serializer.data)
+        guesthouse = self._get_scope_object("guesthouse", gh_id)
+        return self._active_scope_response(
+            guesthouse,
+            "No terms and conditions available for this guest house.",
+        )
+
+    @guesthouse_terms.mapping.post
+    @extend_schema(
+        summary="Create draft Terms & Conditions for a guest house",
+        parameters=[
+            OpenApiParameter("gh_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
+        ],
+        request=TermsAndConditionsCreateSerializer,
+        responses={201: TermsAndConditionsManagementSerializer, 403: OpenApiTypes.OBJECT, 404: None},
+    )
+    def create_guesthouse_terms(self, request, gh_id=None):
+        return self._create_scoped_terms(request, "guesthouse", gh_id)
 
     @extend_schema(
-        summary="Get active Terms & Conditions for a company (Car Rental)",
-        description="Retrieve the currently active T&C for a specific company (Car Rental, etc.)",
+        summary="List terms history for a guest house",
+        parameters=[
+            OpenApiParameter("gh_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
+        ],
+        responses={200: TermsAndConditionsManagementSerializer(many=True), 403: OpenApiTypes.OBJECT, 404: None},
+    )
+    @action(detail=False, methods=["get"], url_path="guesthouse/(?P<gh_id>[^/.]+)/history")
+    def guesthouse_history(self, request, gh_id=None):
+        guesthouse = self._get_scope_object("guesthouse", gh_id)
+        self._assert_can_manage_scope(request.user, guesthouse)
+        return self._build_history_response(TermsService.get_scope_terms_history(guesthouse))
+
+    @extend_schema(
+        summary="Get active Terms & Conditions for a company",
+        description="Retrieve the currently active T&C for a specific company scope",
         parameters=[
             OpenApiParameter("company_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
         ],
-        responses={200: TermsAndConditionsSerializer, 404: None}
+        responses={200: TermsAndConditionsSerializer, 404: None},
     )
-    @action(detail=False, methods=['get'], url_path='company/(?P<company_id>[^/.]+)')
+    @action(detail=False, methods=["get"], url_path="company/(?P<company_id>[^/.]+)")
     def company_terms(self, request, company_id=None):
-        """Get active T&C for a company"""
-        from apps.account.models import CompanyProfile
-        from apps.listing.services import TermsService
-        
-        company = get_object_or_404(CompanyProfile, id=company_id)
-        terms = TermsService.get_active_terms(content_object=company)
-        
-        if not terms:
-            return Response(
-                {"detail": "No terms and conditions available for this company."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        serializer = self.serializer_class(terms)
-        return Response(serializer.data)
+        company = self._get_scope_object("company", company_id)
+        return self._active_scope_response(
+            company,
+            "No terms and conditions available for this company.",
+        )
+
+    @company_terms.mapping.post
+    @extend_schema(
+        summary="Create draft Terms & Conditions for a company",
+        parameters=[
+            OpenApiParameter("company_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
+        ],
+        request=TermsAndConditionsCreateSerializer,
+        responses={201: TermsAndConditionsManagementSerializer, 403: OpenApiTypes.OBJECT, 404: None},
+    )
+    def create_company_terms(self, request, company_id=None):
+        return self._create_scoped_terms(request, "company", company_id)
+
+    @extend_schema(
+        summary="List terms history for a company",
+        parameters=[
+            OpenApiParameter("company_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
+        ],
+        responses={200: TermsAndConditionsManagementSerializer(many=True), 403: OpenApiTypes.OBJECT, 404: None},
+    )
+    @action(detail=False, methods=["get"], url_path="company/(?P<company_id>[^/.]+)/history")
+    def company_history(self, request, company_id=None):
+        company = self._get_scope_object("company", company_id)
+        self._assert_can_manage_scope(request.user, company)
+        return self._build_history_response(TermsService.get_scope_terms_history(company))
+
+    @extend_schema(
+        summary="Publish a draft terms record",
+        responses={200: TermsAndConditionsManagementSerializer, 403: OpenApiTypes.OBJECT, 404: None},
+    )
+    @action(detail=True, methods=["post"], url_path="publish")
+    def publish(self, request, pk=None):
+        term = self._get_terms_instance(pk)
+        self._assert_can_manage_scope(request.user, term.content_object)
+        try:
+            term = TermsService.publish_terms(term)
+        except DjangoValidationError as exc:
+            self._raise_drf_validation(exc)
+        return Response(self._serialize_management(term))
+
+    @extend_schema(
+        summary="Archive an active terms record",
+        responses={200: TermsAndConditionsManagementSerializer, 403: OpenApiTypes.OBJECT, 404: None},
+    )
+    @action(detail=True, methods=["post"], url_path="archive")
+    def archive(self, request, pk=None):
+        term = self._get_terms_instance(pk)
+        self._assert_can_manage_scope(request.user, term.content_object)
+        try:
+            term = TermsService.archive_terms(term)
+        except DjangoValidationError as exc:
+            self._raise_drf_validation(exc)
+        return Response(self._serialize_management(term))
 
 
 @extend_schema(tags=["Accommodations"])

@@ -1188,9 +1188,11 @@ def test_post_hotel_create_success(company_client, company, image_file):
     assert response.status_code == 201
     data = response.json()
     assert "id" in data
-    assert data["name"] == company.name
+    assert data["name"] == "Creations Hotel"
+    assert data["company_name"] == company.name
     assert data["is_active"] is False
     hotel_profile = HotelProfile.objects.get(id=data["id"])
+    assert hotel_profile.name == "Creations Hotel"
     assert hotel_profile.is_active is False
 
 

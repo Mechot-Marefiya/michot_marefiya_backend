@@ -2386,6 +2386,11 @@ class TermsAndConditions(AbstractBaseModel):
     Stores Terms & Conditions documents for hotels, event spaces, and guesthouses.
     Each object (hotel/space/guesthouse) can have multiple versions with only one active.
     """
+    class Status(models.TextChoices):
+        DRAFT = "draft", _("Draft")
+        ACTIVE = "active", _("Active")
+        ARCHIVED = "archived", _("Archived")
+
     # Polymorphic relationship: can be linked to Hotel, EventSpace, or GuestHouse
     content_type = models.ForeignKey(
         ContentType,
@@ -2421,11 +2426,49 @@ class TermsAndConditions(AbstractBaseModel):
         verbose_name=_("Effective Date"),
         help_text=_("Date when this version becomes active")
     )
-    
+
+    notes = models.TextField(
+        blank=True,
+        default="",
+        verbose_name=_("Notes"),
+        help_text=_("Optional provider note for this version")
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.DRAFT,
+        verbose_name=_("Status"),
+        help_text=_("Lifecycle state for this version")
+    )
+
     is_active = models.BooleanField(
         default=True,
         verbose_name=_("Is Active"),
         help_text=_("Only one version should be active at a time per object")
+    )
+
+    published_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Published At"),
+        help_text=_("When this version was published")
+    )
+
+    archived_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Archived At"),
+        help_text=_("When this version was archived")
+    )
+
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="terms_documents_created",
+        verbose_name=_("Created By"),
     )
     
     class Meta:
@@ -2448,14 +2491,49 @@ class TermsAndConditions(AbstractBaseModel):
     def __str__(self) -> str:
         obj_name = str(self.content_object) if self.content_object else f"{self.content_type}:{self.object_id}"
         return f"T&C v{self.version} for {obj_name}"
+
+    @property
+    def scope_type(self) -> str:
+        model_name = getattr(self.content_type, "model", "")
+        return {
+            "hotelprofile": "hotel",
+            "guesthouseprofile": "guesthouse",
+            "companyprofile": "company",
+        }.get(model_name, model_name)
+
+    @property
+    def scope_id(self):
+        return self.object_id
     
     def save(self, *args, **kwargs):
         """Override save to ensure only one active version per object"""
+        if self.is_active and self.status != self.Status.ACTIVE:
+            self.status = self.Status.ACTIVE
+
+        if self.status == self.Status.ACTIVE:
+            self.is_active = True
+            if not self.published_at:
+                self.published_at = now()
+            self.archived_at = None
+        elif self.status == self.Status.ARCHIVED:
+            self.is_active = False
+            if not self.archived_at:
+                self.archived_at = now()
+        else:
+            self.is_active = False
+            self.archived_at = None
+
         if self.is_active:
+            timestamp = now()
             # Deactivate all other versions for this object
             TermsAndConditions.objects.filter(
                 content_type=self.content_type,
                 object_id=self.object_id,
                 is_active=True
-            ).exclude(id=self.id).update(is_active=False)
+            ).exclude(id=self.id).update(
+                is_active=False,
+                status=self.Status.ARCHIVED,
+                archived_at=timestamp,
+                updated_at=timestamp,
+            )
         super().save(*args, **kwargs)

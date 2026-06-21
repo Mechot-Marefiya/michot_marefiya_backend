@@ -54,6 +54,7 @@ from apps.payment.services import ChapaPaymentService, ContactRevealPaymentServi
 from apps.notifications.models import Notification
 from apps.account.models import User
 from apps.listing.services import ListingService, BookingService
+from tests.conftest import CompanyProfileFactory
 
 pytestmark = pytest.mark.django_db
 
@@ -4505,6 +4506,202 @@ def test_get_terms_guesthouse_not_found(api_client, guest_house):
 
     assert response.status_code == 404
     assert "No terms and conditions available for this guest house." in response.json()["detail"]
+
+
+def test_post_terms_hotel_create_success(company_client, company_user, hotel):
+    response = company_client.post(
+        f"/api/v1/listing/terms/hotel/{hotel.id}/",
+        {
+            "title": "Hotel Provider Terms",
+            "content": "Draft hotel terms",
+            "effective_date": date.today().isoformat(),
+            "notes": "Provider draft",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["scope_type"] == "hotel"
+    assert data["scope_id"] == str(hotel.id)
+    assert data["status"] == TermsAndConditions.Status.DRAFT
+    assert data["is_active"] is False
+    assert data["created_by"] == str(company_user.id)
+    assert data["title"] == "Hotel Provider Terms"
+
+
+def test_post_terms_guesthouse_create_success(company_client, guest_house):
+    response = company_client.post(
+        f"/api/v1/listing/terms/guesthouse/{guest_house.id}/",
+        {
+            "title": "Guesthouse Terms",
+            "content": "Guesthouse provider draft",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["scope_type"] == "guesthouse"
+    assert data["scope_id"] == str(guest_house.id)
+    assert data["status"] == TermsAndConditions.Status.DRAFT
+
+
+def test_post_terms_company_create_success(company_client, company):
+    response = company_client.post(
+        f"/api/v1/listing/terms/company/{company.id}/",
+        {
+            "title": "Company Terms",
+            "content": "Company rental terms draft",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["scope_type"] == "company"
+    assert data["scope_id"] == str(company.id)
+    assert data["status"] == TermsAndConditions.Status.DRAFT
+
+
+def test_get_terms_hotel_history_returns_provider_versions(company_client, hotel):
+    active = _create_terms(hotel, version="1.0")
+    draft = TermsAndConditions.objects.create(
+        content_type=ContentType.objects.get_for_model(hotel),
+        object_id=hotel.id,
+        version="2.0",
+        title="Draft Terms",
+        content="Draft text",
+        effective_date=date.today() + timedelta(days=1),
+        is_active=False,
+    )
+
+    response = company_client.get(f"/api/v1/listing/terms/hotel/{hotel.id}/history/")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert {item["id"] for item in data["results"]} == {str(active.id), str(draft.id)}
+    assert {item["status"] for item in data["results"]} == {
+        TermsAndConditions.Status.ACTIVE,
+        TermsAndConditions.Status.DRAFT,
+    }
+
+
+def test_patch_terms_draft_success(company_client, hotel):
+    term = TermsAndConditions.objects.create(
+        content_type=ContentType.objects.get_for_model(hotel),
+        object_id=hotel.id,
+        version="1.0",
+        title="Draft Terms",
+        content="Draft text",
+        effective_date=date.today(),
+        is_active=False,
+    )
+
+    response = company_client.patch(
+        f"/api/v1/listing/terms/{term.id}/",
+        {
+            "title": "Updated Draft Terms",
+            "content": "Updated draft text",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    term.refresh_from_db()
+    assert term.title == "Updated Draft Terms"
+    assert term.content == "Updated draft text"
+    assert response.json()["status"] == TermsAndConditions.Status.DRAFT
+
+
+def test_delete_terms_draft_success(company_client, hotel):
+    term = TermsAndConditions.objects.create(
+        content_type=ContentType.objects.get_for_model(hotel),
+        object_id=hotel.id,
+        version="1.0",
+        title="Draft Terms",
+        content="Draft text",
+        effective_date=date.today(),
+        is_active=False,
+    )
+
+    response = company_client.delete(f"/api/v1/listing/terms/{term.id}/")
+
+    assert response.status_code == 204
+    assert TermsAndConditions.objects.filter(id=term.id).exists() is False
+
+
+def test_post_terms_publish_archives_previous_active_and_updates_public_scope(company_client, hotel, api_client):
+    active = _create_terms(hotel, version="1.0")
+    draft = TermsAndConditions.objects.create(
+        content_type=ContentType.objects.get_for_model(hotel),
+        object_id=hotel.id,
+        version="2.0",
+        title="Draft Terms",
+        content="Published draft text",
+        effective_date=date.today() + timedelta(days=1),
+        is_active=False,
+    )
+
+    response = company_client.post(f"/api/v1/listing/terms/{draft.id}/publish/")
+
+    assert response.status_code == 200
+    active.refresh_from_db()
+    draft.refresh_from_db()
+    assert active.status == TermsAndConditions.Status.ARCHIVED
+    assert active.is_active is False
+    assert draft.status == TermsAndConditions.Status.ACTIVE
+    assert draft.is_active is True
+
+    public_response = api_client.get(f"/api/v1/listing/terms/hotel/{hotel.id}/")
+    assert public_response.status_code == 200
+    assert public_response.json()["id"] == str(draft.id)
+
+
+def test_post_terms_archive_success(company_client, company, api_client):
+    active = _create_terms(company, version="1.0")
+
+    response = company_client.post(f"/api/v1/listing/terms/{active.id}/archive/")
+
+    assert response.status_code == 200
+    active.refresh_from_db()
+    assert active.status == TermsAndConditions.Status.ARCHIVED
+    assert active.is_active is False
+
+    public_response = api_client.get(f"/api/v1/listing/terms/company/{company.id}/")
+    assert public_response.status_code == 404
+
+
+@pytest.mark.parametrize("client_fixture", ["front_desk_client", "auth_client"])
+def test_terms_management_forbidden_for_non_company_roles(request, client_fixture, hotel):
+    client = request.getfixturevalue(client_fixture)
+
+    response = client.post(
+        f"/api/v1/listing/terms/hotel/{hotel.id}/",
+        {
+            "title": "Blocked Terms",
+            "content": "Blocked content",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 403
+
+
+def test_terms_management_forbidden_for_unrelated_company(api_client, django_user_model, company_role, hotel):
+    other_user = django_user_model.objects.create_user(
+        email="other-company@example.com",
+        password="pass1234",
+        role=company_role,
+    )
+    other_company = CompanyProfileFactory(user=other_user)
+    other_user.company = other_company
+    other_user.save(update_fields=["company"])
+    api_client.force_authenticate(user=other_user)
+
+    response = api_client.get(f"/api/v1/listing/terms/hotel/{hotel.id}/history/")
+
+    assert response.status_code == 403
 
 
 def test_get_addons_public_contract(api_client, addon):

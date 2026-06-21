@@ -1000,13 +1000,16 @@ Success response (200):
   - `title`
   - `content`
   - `effective_date`
-  - `is_active`
-  - `created_at`
-  - `updated_at`
+- `is_active`
+- `created_at`
+- `updated_at`
 
-#### Company Terms
+#### Scoped Active Terms
 Method: GET
-URL: `/api/v1/listing/terms/company/{company_id}/`
+URLs:
+- `/api/v1/listing/terms/hotel/{hotel_id}/`
+- `/api/v1/listing/terms/guesthouse/{gh_id}/`
+- `/api/v1/listing/terms/company/{company_id}/`
 Auth required: no
 
 Success response (200):
@@ -1020,7 +1023,94 @@ Success response (200):
 - `updated_at`
 
 Error responses:
-- `404`: no active company terms
+- `404`: no active scoped terms
+
+#### Provider Terms Create
+Method: POST
+URLs:
+- `/api/v1/listing/terms/hotel/{hotel_id}/`
+- `/api/v1/listing/terms/guesthouse/{gh_id}/`
+- `/api/v1/listing/terms/company/{company_id}/`
+Auth required: yes
+
+Request body:
+- `title`: string - required
+- `content`: string - required
+- `effective_date`: date - optional
+- `notes`: string - optional
+
+Success response (201):
+- `id`
+- `scope_type`: `hotel` | `guesthouse` | `company`
+- `scope_id`
+- `title`
+- `content`
+- `version`
+- `status`
+- `is_active`
+- `effective_date`
+- `created_at`
+- `updated_at`
+- `published_at`
+- `archived_at`
+- `created_by`
+
+Error responses:
+- `403`: front desk, regular user, or unrelated company
+- `404`: scope not found
+
+#### Provider Terms History
+Method: GET
+URLs:
+- `/api/v1/listing/terms/hotel/{hotel_id}/history/`
+- `/api/v1/listing/terms/guesthouse/{gh_id}/history/`
+- `/api/v1/listing/terms/company/{company_id}/history/`
+Auth required: yes
+
+Success response (200):
+- paginated list of terms management items with:
+  - `id`
+  - `scope_type`
+  - `scope_id`
+  - `title`
+  - `content`
+  - `version`
+  - `status`
+  - `is_active`
+  - `effective_date`
+  - `created_at`
+  - `updated_at`
+  - `published_at`
+  - `archived_at`
+  - `created_by`
+
+Error responses:
+- `403`: front desk, regular user, or unrelated company
+- `404`: scope not found
+
+#### Provider Terms Detail And Lifecycle
+Methods and URLs:
+- `PATCH /api/v1/listing/terms/{id}/`
+- `DELETE /api/v1/listing/terms/{id}/`
+- `POST /api/v1/listing/terms/{id}/publish/`
+- `POST /api/v1/listing/terms/{id}/archive/`
+Auth required: yes
+
+`PATCH` request body:
+- `title`: string - optional
+- `content`: string - optional
+- `effective_date`: date - optional
+- `notes`: string - optional
+
+Success response for `PATCH`, `publish`, and `archive` (200):
+- same management fields as create/history items
+
+Success response for `DELETE`:
+- `204 No Content`
+
+Error responses:
+- `403`: front desk, regular user, or unrelated company
+- `404`: terms record not found
 
 ## Section 7: Guesthouse Listings and Booking
 

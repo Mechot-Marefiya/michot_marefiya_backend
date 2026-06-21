@@ -727,23 +727,146 @@ class ListingService:
 
 
 class TermsService:
+    SCOPE_TYPE_BY_MODEL = {
+        HotelProfile: "hotel",
+        GuestHouseProfile: "guesthouse",
+        CompanyProfile: "company",
+    }
+
+    @classmethod
+    def get_scope_type(cls, content_object) -> str:
+        for model, scope_type in cls.SCOPE_TYPE_BY_MODEL.items():
+            if isinstance(content_object, model):
+                return scope_type
+        return getattr(getattr(content_object, "_meta", None), "model_name", "")
+
+    @staticmethod
+    def get_scope_terms_queryset(content_object):
+        ct = ContentType.objects.get_for_model(content_object)
+        return TermsAndConditions.objects.filter(
+            content_type=ct,
+            object_id=content_object.id,
+        )
+
+    @classmethod
+    def get_scope_terms_history(cls, content_object):
+        return cls.get_scope_terms_queryset(content_object).order_by(
+            "-created_at",
+            "-effective_date",
+        )
+
+    @classmethod
+    def _next_numeric_version(cls, versions: list[str]) -> str:
+        numeric_versions = []
+        for version in versions:
+            try:
+                numeric_versions.append(int(str(version).split(".", 1)[0]))
+            except (TypeError, ValueError):
+                continue
+
+        if numeric_versions:
+            return f"{max(numeric_versions) + 1}.0"
+        return str(len(versions) + 1)
+
+    @classmethod
+    def get_next_version(cls, content_object) -> str:
+        versions = list(
+            cls.get_scope_terms_queryset(content_object).values_list("version", flat=True)
+        )
+        return cls._next_numeric_version(versions)
+
+    @classmethod
+    def create_draft_terms(
+        cls,
+        *,
+        content_object,
+        title: str,
+        content: str,
+        effective_date=None,
+        notes: str = "",
+        created_by=None,
+    ):
+        ct = ContentType.objects.get_for_model(content_object)
+        return TermsAndConditions.objects.create(
+            content_type=ct,
+            object_id=content_object.id,
+            version=cls.get_next_version(content_object),
+            title=title,
+            content=content,
+            effective_date=effective_date or timezone.localdate(),
+            notes=notes or "",
+            status=TermsAndConditions.Status.DRAFT,
+            is_active=False,
+            created_by=created_by,
+        )
+
+    @staticmethod
+    def update_draft_terms(term, **changes):
+        if term.status != TermsAndConditions.Status.DRAFT:
+            raise DjangoValidationError("Only draft terms can be edited.")
+
+        for field in ("title", "content", "effective_date", "notes"):
+            if field in changes:
+                setattr(term, field, changes[field])
+
+        term.save()
+        return term
+
+    @staticmethod
+    def delete_draft_terms(term):
+        if term.status != TermsAndConditions.Status.DRAFT:
+            raise DjangoValidationError("Only draft terms can be deleted.")
+        term.delete()
+
+    @staticmethod
+    @transaction.atomic
+    def publish_terms(term):
+        if term.status == TermsAndConditions.Status.ACTIVE:
+            return term
+
+        if term.status != TermsAndConditions.Status.DRAFT:
+            raise DjangoValidationError("Only draft terms can be published.")
+
+        timestamp = timezone.now()
+        TermsAndConditions.objects.select_for_update().filter(
+            content_type=term.content_type,
+            object_id=term.object_id,
+            status=TermsAndConditions.Status.ACTIVE,
+        ).exclude(id=term.id).update(
+            status=TermsAndConditions.Status.ARCHIVED,
+            is_active=False,
+            archived_at=timestamp,
+            updated_at=timestamp,
+        )
+
+        term.status = TermsAndConditions.Status.ACTIVE
+        term.is_active = True
+        term.published_at = timestamp
+        term.archived_at = None
+        term.save(update_fields=["status", "is_active", "published_at", "archived_at", "updated_at"])
+        return term
+
+    @staticmethod
+    def archive_terms(term):
+        if term.status == TermsAndConditions.Status.ARCHIVED:
+            return term
+
+        if term.status == TermsAndConditions.Status.DRAFT:
+            raise DjangoValidationError("Draft terms can be deleted instead of archived.")
+
+        term.status = TermsAndConditions.Status.ARCHIVED
+        term.is_active = False
+        term.archived_at = timezone.now()
+        term.save(update_fields=["status", "is_active", "archived_at", "updated_at"])
+        return term
     
     @staticmethod
     def get_active_terms(content_object):
         # Get active T&C for a hotel/guesthouse/event space/company.
-        
-        from django.contrib.contenttypes.models import ContentType
-        from apps.listing.models import TermsAndConditions
-        
-        ct = ContentType.objects.get_for_model(content_object)
-        
-        terms = TermsAndConditions.objects.filter(
-            content_type=ct,
-            object_id=content_object.id,
+
+        return TermsService.get_scope_terms_queryset(content_object).filter(
             is_active=True
-        ).order_by('-effective_date').first()
-        
-        return terms
+        ).order_by("-effective_date", "-published_at", "-created_at").first()
     
     @staticmethod
     def validate_and_snapshot_terms(

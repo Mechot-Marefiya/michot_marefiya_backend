@@ -10,7 +10,7 @@ info:
 paths:
   /api/v1/account/companies/:
     get:
-      operationId: v1_account_companies_list
+      operationId: api_v1_account_companies_list
       parameters:
       - name: page
         required: false
@@ -37,7 +37,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedCompanyProfileResponseList'
           description: ''
     post:
-      operationId: v1_account_companies_create
+      operationId: api_v1_account_companies_create
       tags:
       - Identity & Auth
       requestBody:
@@ -64,7 +64,7 @@ paths:
           description: ''
   /api/v1/account/companies/{id}/:
     get:
-      operationId: v1_account_companies_retrieve
+      operationId: api_v1_account_companies_retrieve
       parameters:
       - in: path
         name: id
@@ -86,7 +86,7 @@ paths:
                 $ref: '#/components/schemas/CompanyProfileResponse'
           description: ''
     patch:
-      operationId: v1_account_companies_partial_update
+      operationId: api_v1_account_companies_partial_update
       parameters:
       - in: path
         name: id
@@ -118,7 +118,7 @@ paths:
                 $ref: '#/components/schemas/CompanyProfileResponse'
           description: ''
     delete:
-      operationId: v1_account_companies_destroy
+      operationId: api_v1_account_companies_destroy
       parameters:
       - in: path
         name: id
@@ -136,7 +136,7 @@ paths:
           description: No response body
   /api/v1/account/companies/{id}/approve/:
     post:
-      operationId: v1_account_companies_approve_create
+      operationId: api_v1_account_companies_approve_create
       parameters:
       - in: path
         name: id
@@ -170,7 +170,7 @@ paths:
           description: ''
   /api/v1/account/companies/{id}/reject/:
     post:
-      operationId: v1_account_companies_reject_create
+      operationId: api_v1_account_companies_reject_create
       parameters:
       - in: path
         name: id
@@ -204,7 +204,7 @@ paths:
           description: ''
   /api/v1/account/companies/apply/:
     post:
-      operationId: v1_account_companies_apply_create
+      operationId: api_v1_account_companies_apply_create
       description: Authenticated users apply to create a company profile (status=PENDING).
       tags:
       - Identity & Auth
@@ -231,7 +231,7 @@ paths:
           description: ''
   /api/v1/account/hotels/:
     get:
-      operationId: v1_account_hotels_list
+      operationId: api_v1_account_hotels_list
       parameters:
       - in: query
         name: category
@@ -262,7 +262,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedHotelProfileDocList'
           description: ''
     post:
-      operationId: v1_account_hotels_create
+      operationId: api_v1_account_hotels_create
       tags:
       - Accommodations
       requestBody:
@@ -288,7 +288,7 @@ paths:
           description: ''
   /api/v1/account/hotels/{id}/:
     get:
-      operationId: v1_account_hotels_retrieve
+      operationId: api_v1_account_hotels_retrieve
       parameters:
       - in: path
         name: id
@@ -310,7 +310,7 @@ paths:
                 $ref: '#/components/schemas/HotelProfileDoc'
           description: ''
     patch:
-      operationId: v1_account_hotels_partial_update
+      operationId: api_v1_account_hotels_partial_update
       parameters:
       - in: path
         name: id
@@ -342,7 +342,7 @@ paths:
                 $ref: '#/components/schemas/HotelProfileDoc'
           description: ''
     delete:
-      operationId: v1_account_hotels_destroy
+      operationId: api_v1_account_hotels_destroy
       parameters:
       - in: path
         name: id
@@ -360,7 +360,7 @@ paths:
           description: No response body
   /api/v1/account/hotels/{id}/activate/:
     post:
-      operationId: v1_account_hotels_activate_create
+      operationId: api_v1_account_hotels_activate_create
       parameters:
       - in: path
         name: id
@@ -394,7 +394,7 @@ paths:
           description: ''
   /api/v1/account/hotels/{id}/addons/:
     get:
-      operationId: v1_account_hotels_addons_list
+      operationId: api_v1_account_hotels_addons_list
       description: Returns all active addon offerings provided by this hotel.
       summary: List addons for this hotel
       parameters:
@@ -434,7 +434,7 @@ paths:
           description: ''
   /api/v1/account/hotels/{id}/check_availability/:
     get:
-      operationId: v1_account_hotels_check_availability_list
+      operationId: api_v1_account_hotels_check_availability_list
       description: |-
         Check room availability for a hotel between check-in and check-out dates.
         Expects check_in_date and check_out_date in the request params.
@@ -486,7 +486,7 @@ paths:
           description: ''
   /api/v1/account/hotels/{id}/deactivate/:
     post:
-      operationId: v1_account_hotels_deactivate_create
+      operationId: api_v1_account_hotels_deactivate_create
       parameters:
       - in: path
         name: id
@@ -520,7 +520,7 @@ paths:
           description: ''
   /api/v1/account/hotels/{id}/unverify/:
     post:
-      operationId: v1_account_hotels_unverify_create
+      operationId: api_v1_account_hotels_unverify_create
       parameters:
       - in: path
         name: id
@@ -553,7 +553,7 @@ paths:
           description: ''
   /api/v1/account/hotels/{id}/verify/:
     post:
-      operationId: v1_account_hotels_verify_create
+      operationId: api_v1_account_hotels_verify_create
       parameters:
       - in: path
         name: id
@@ -586,7 +586,7 @@ paths:
           description: ''
   /api/v1/account/hotels/featured/:
     get:
-      operationId: v1_account_hotels_featured_retrieve
+      operationId: api_v1_account_hotels_featured_retrieve
       tags:
       - Accommodations
       security:
@@ -601,7 +601,7 @@ paths:
           description: ''
   /api/v1/account/individual-owners/:
     get:
-      operationId: v1_account_individual_owners_list
+      operationId: api_v1_account_individual_owners_list
       parameters:
       - name: page
         required: false
@@ -628,7 +628,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedIndividualOwnerProfileResponseList'
           description: ''
     post:
-      operationId: v1_account_individual_owners_create
+      operationId: api_v1_account_individual_owners_create
       tags:
       - Identity & Auth
       requestBody:
@@ -654,7 +654,7 @@ paths:
           description: ''
   /api/v1/account/individual-owners/{id}/:
     get:
-      operationId: v1_account_individual_owners_retrieve
+      operationId: api_v1_account_individual_owners_retrieve
       parameters:
       - in: path
         name: id
@@ -676,7 +676,7 @@ paths:
                 $ref: '#/components/schemas/IndividualOwnerProfileResponse'
           description: ''
     patch:
-      operationId: v1_account_individual_owners_partial_update
+      operationId: api_v1_account_individual_owners_partial_update
       parameters:
       - in: path
         name: id
@@ -708,7 +708,7 @@ paths:
                 $ref: '#/components/schemas/IndividualOwnerProfileResponse'
           description: ''
     delete:
-      operationId: v1_account_individual_owners_destroy
+      operationId: api_v1_account_individual_owners_destroy
       parameters:
       - in: path
         name: id
@@ -726,7 +726,7 @@ paths:
           description: No response body
   /api/v1/account/individual-owners/{id}/agreement/:
     get:
-      operationId: v1_account_individual_owners_agreement_retrieve
+      operationId: api_v1_account_individual_owners_agreement_retrieve
       parameters:
       - in: path
         name: id
@@ -753,7 +753,7 @@ paths:
                 $ref: '#/components/schemas/OwnerComplianceAgreement'
           description: ''
     post:
-      operationId: v1_account_individual_owners_agreement_create
+      operationId: api_v1_account_individual_owners_agreement_create
       parameters:
       - in: path
         name: id
@@ -792,7 +792,7 @@ paths:
                 $ref: '#/components/schemas/OwnerComplianceAgreement'
           description: ''
     patch:
-      operationId: v1_account_individual_owners_agreement_partial_update
+      operationId: api_v1_account_individual_owners_agreement_partial_update
       parameters:
       - in: path
         name: id
@@ -831,7 +831,7 @@ paths:
           description: ''
   /api/v1/account/individual-owners/{id}/agreement/revoke/:
     post:
-      operationId: v1_account_individual_owners_agreement_revoke_create
+      operationId: api_v1_account_individual_owners_agreement_revoke_create
       parameters:
       - in: path
         name: id
@@ -864,7 +864,7 @@ paths:
           description: ''
   /api/v1/account/individual-owners/{id}/agreement/sign/:
     post:
-      operationId: v1_account_individual_owners_agreement_sign_create
+      operationId: api_v1_account_individual_owners_agreement_sign_create
       parameters:
       - in: path
         name: id
@@ -898,7 +898,7 @@ paths:
           description: ''
   /api/v1/account/location/:
     post:
-      operationId: v1_account_location_create
+      operationId: api_v1_account_location_create
       description: Persist the latest client-reported location for proximity-aware
         experiences.
       summary: Store user location
@@ -941,7 +941,7 @@ paths:
           description: ''
   /api/v1/account/password-reset/:
     post:
-      operationId: v1_account_password_reset_create
+      operationId: api_v1_account_password_reset_create
       description: Send a password reset OTP to the provided phone number.
       summary: Request Password Reset
       tags:
@@ -971,7 +971,7 @@ paths:
           description: ''
   /api/v1/account/password-reset/confirm/:
     post:
-      operationId: v1_account_password_reset_confirm_create
+      operationId: api_v1_account_password_reset_confirm_create
       description: Reset password using the OTP received by phone.
       summary: Confirm Password Reset
       tags:
@@ -1001,7 +1001,7 @@ paths:
           description: ''
   /api/v1/account/profile/agreement/:
     get:
-      operationId: v1_account_profile_agreement_retrieve
+      operationId: api_v1_account_profile_agreement_retrieve
       tags:
       - Identity & Auth
       security:
@@ -1022,7 +1022,7 @@ paths:
           description: ''
   /api/v1/account/roles/:
     get:
-      operationId: v1_account_roles_list
+      operationId: api_v1_account_roles_list
       parameters:
       - name: page
         required: false
@@ -1048,7 +1048,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedRoleList'
           description: ''
     post:
-      operationId: v1_account_roles_create
+      operationId: api_v1_account_roles_create
       tags:
       - Account Management
       requestBody:
@@ -1074,7 +1074,7 @@ paths:
           description: ''
   /api/v1/account/roles/{id}/:
     get:
-      operationId: v1_account_roles_retrieve
+      operationId: api_v1_account_roles_retrieve
       parameters:
       - in: path
         name: id
@@ -1095,7 +1095,7 @@ paths:
                 $ref: '#/components/schemas/Role'
           description: ''
     patch:
-      operationId: v1_account_roles_partial_update
+      operationId: api_v1_account_roles_partial_update
       parameters:
       - in: path
         name: id
@@ -1127,7 +1127,7 @@ paths:
                 $ref: '#/components/schemas/Role'
           description: ''
     delete:
-      operationId: v1_account_roles_destroy
+      operationId: api_v1_account_roles_destroy
       parameters:
       - in: path
         name: id
@@ -1145,7 +1145,7 @@ paths:
           description: No response body
   /api/v1/account/staff/:
     get:
-      operationId: v1_account_staff_list
+      operationId: api_v1_account_staff_list
       parameters:
       - name: page
         required: false
@@ -1171,7 +1171,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedStaffResponseList'
           description: ''
     post:
-      operationId: v1_account_staff_create
+      operationId: api_v1_account_staff_create
       tags:
       - Account Management
       requestBody:
@@ -1197,7 +1197,7 @@ paths:
           description: ''
   /api/v1/account/staff/{id}/:
     get:
-      operationId: v1_account_staff_retrieve
+      operationId: api_v1_account_staff_retrieve
       parameters:
       - in: path
         name: id
@@ -1218,7 +1218,7 @@ paths:
                 $ref: '#/components/schemas/StaffResponse'
           description: ''
     delete:
-      operationId: v1_account_staff_destroy
+      operationId: api_v1_account_staff_destroy
       parameters:
       - in: path
         name: id
@@ -1236,7 +1236,7 @@ paths:
           description: No response body
   /api/v1/account/staff/available-workspaces/:
     get:
-      operationId: v1_account_staff_available_workspaces_retrieve
+      operationId: api_v1_account_staff_available_workspaces_retrieve
       tags:
       - Account Management
       security:
@@ -1250,7 +1250,7 @@ paths:
           description: ''
   /api/v1/account/users/:
     get:
-      operationId: v1_account_users_list
+      operationId: api_v1_account_users_list
       parameters:
       - name: page
         required: false
@@ -1276,7 +1276,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedUserResponseList'
           description: ''
     post:
-      operationId: v1_account_users_create
+      operationId: api_v1_account_users_create
       tags:
       - Identity & Auth
       requestBody:
@@ -1303,7 +1303,7 @@ paths:
           description: ''
   /api/v1/account/users/{id}/:
     get:
-      operationId: v1_account_users_retrieve
+      operationId: api_v1_account_users_retrieve
       parameters:
       - in: path
         name: id
@@ -1324,7 +1324,7 @@ paths:
                 $ref: '#/components/schemas/UserResponse'
           description: ''
     patch:
-      operationId: v1_account_users_partial_update
+      operationId: api_v1_account_users_partial_update
       parameters:
       - in: path
         name: id
@@ -1356,7 +1356,7 @@ paths:
                 $ref: '#/components/schemas/UserUpdate'
           description: ''
     delete:
-      operationId: v1_account_users_destroy
+      operationId: api_v1_account_users_destroy
       parameters:
       - in: path
         name: id
@@ -1374,7 +1374,7 @@ paths:
           description: No response body
   /api/v1/account/users/{id}/change-password/:
     post:
-      operationId: v1_account_users_change_password_create
+      operationId: api_v1_account_users_change_password_create
       parameters:
       - in: path
         name: id
@@ -1408,7 +1408,7 @@ paths:
           description: ''
   /api/v1/account/users/me/:
     get:
-      operationId: v1_account_users_me_retrieve
+      operationId: api_v1_account_users_me_retrieve
       description: Retrieve or update the authenticated user's profile. Phone updates
         are rate-limited to three total changes with a seven-day cooldown between
         changes.
@@ -1445,7 +1445,7 @@ paths:
                   summary: Phone limit error
           description: ''
     patch:
-      operationId: v1_account_users_me_partial_update
+      operationId: api_v1_account_users_me_partial_update
       description: Retrieve or update the authenticated user's profile. Phone updates
         are rate-limited to three total changes with a seven-day cooldown between
         changes.
@@ -1506,7 +1506,7 @@ paths:
                   summary: Phone limit error
           description: ''
     delete:
-      operationId: v1_account_users_me_destroy
+      operationId: api_v1_account_users_me_destroy
       description: Retrieve or update the authenticated user's profile. Phone updates
         are rate-limited to three total changes with a seven-day cooldown between
         changes.
@@ -1544,7 +1544,7 @@ paths:
           description: ''
   /api/v1/account/users/me/change-password/:
     post:
-      operationId: v1_account_users_me_change_password_create
+      operationId: api_v1_account_users_me_change_password_create
       tags:
       - Identity & Auth
       requestBody:
@@ -1566,7 +1566,7 @@ paths:
           description: No response body
   /api/v1/account/users/me/convert-guest-bookings/:
     post:
-      operationId: v1_account_users_me_convert_guest_bookings_create
+      operationId: api_v1_account_users_me_convert_guest_bookings_create
       description: Link historical guest bookings that match the authenticated user's
         phone number. If the user's phone is already verified, no OTP payload is required.
         Legacy accounts can provide a login OTP challenge and code to prove phone
@@ -1604,7 +1604,7 @@ paths:
           description: ''
   /api/v1/account/verify-email/:
     post:
-      operationId: v1_account_verify_email_create
+      operationId: api_v1_account_verify_email_create
       description: Activate user account using the token received in email.
       summary: Verify Email Address
       tags:
@@ -1634,7 +1634,7 @@ paths:
           description: ''
   /api/v1/account/verify-email-change/:
     post:
-      operationId: v1_account_verify_email_change_create
+      operationId: api_v1_account_verify_email_change_create
       description: Confirm email change request using signed token.
       summary: Verify Email Change
       tags:
@@ -1664,7 +1664,7 @@ paths:
           description: ''
   /api/v1/analytics/admin/overview/:
     get:
-      operationId: v1_analytics_admin_overview_retrieve
+      operationId: api_v1_analytics_admin_overview_retrieve
       parameters:
       - in: query
         name: date_from
@@ -1689,7 +1689,7 @@ paths:
           description: ''
   /api/v1/analytics/admin/payout-failures/:
     get:
-      operationId: v1_analytics_admin_payout_failures_retrieve
+      operationId: api_v1_analytics_admin_payout_failures_retrieve
       parameters:
       - in: query
         name: date_from
@@ -1714,7 +1714,7 @@ paths:
           description: ''
   /api/v1/analytics/admin/revenue/:
     get:
-      operationId: v1_analytics_admin_revenue_retrieve
+      operationId: api_v1_analytics_admin_revenue_retrieve
       parameters:
       - in: query
         name: date_from
@@ -1739,7 +1739,7 @@ paths:
           description: ''
   /api/v1/analytics/company/activity/:
     get:
-      operationId: v1_analytics_company_activity_list
+      operationId: api_v1_analytics_company_activity_list
       tags:
       - Analytics
       security:
@@ -1755,7 +1755,7 @@ paths:
           description: ''
   /api/v1/analytics/company/overview/:
     get:
-      operationId: v1_analytics_company_overview_retrieve
+      operationId: api_v1_analytics_company_overview_retrieve
       tags:
       - Analytics
       security:
@@ -1769,7 +1769,7 @@ paths:
           description: ''
   /api/v1/analytics/company/revenue/:
     get:
-      operationId: v1_analytics_company_revenue_list
+      operationId: api_v1_analytics_company_revenue_list
       tags:
       - Analytics
       security:
@@ -1785,7 +1785,7 @@ paths:
           description: ''
   /api/v1/analytics/frontdesk/availability/:
     get:
-      operationId: v1_analytics_frontdesk_availability_list
+      operationId: api_v1_analytics_frontdesk_availability_list
       parameters:
       - in: query
         name: end_date
@@ -1824,7 +1824,7 @@ paths:
           description: ''
   /api/v1/analytics/frontdesk/stats/:
     get:
-      operationId: v1_analytics_frontdesk_stats_retrieve
+      operationId: api_v1_analytics_frontdesk_stats_retrieve
       tags:
       - Analytics
       security:
@@ -1838,7 +1838,7 @@ paths:
           description: ''
   /api/v1/auth/logout/:
     post:
-      operationId: v1_auth_logout_create
+      operationId: api_v1_auth_logout_create
       description: Blacklist a refresh token to end the session.
       summary: Logout (Blacklist token)
       tags:
@@ -1870,7 +1870,7 @@ paths:
           description: ''
   /api/v1/auth/me/:
     get:
-      operationId: v1_auth_me_retrieve
+      operationId: api_v1_auth_me_retrieve
       description: Retrieve the profile of the currently authenticated user.
       summary: Current user profile (legacy)
       tags:
@@ -1886,7 +1886,7 @@ paths:
           description: ''
   /api/v1/auth/otp/request/:
     post:
-      operationId: v1_auth_otp_request_create
+      operationId: api_v1_auth_otp_request_create
       description: Send a phone OTP for login or password-change verification.
       summary: Request phone OTP
       tags:
@@ -1922,7 +1922,7 @@ paths:
           description: ''
   /api/v1/auth/otp/verify/:
     post:
-      operationId: v1_auth_otp_verify_create
+      operationId: api_v1_auth_otp_verify_create
       description: Verify a phone OTP. Login challenges return JWT access and refresh
         tokens.
       summary: Verify phone OTP
@@ -1959,7 +1959,7 @@ paths:
           description: ''
   /api/v1/auth/token/:
     post:
-      operationId: v1_auth_token_create
+      operationId: api_v1_auth_token_create
       description: Obtain JWT tokens with phone and password.
       summary: Obtain JWT Token
       tags:
@@ -1994,7 +1994,7 @@ paths:
           description: ''
   /api/v1/auth/token/refresh/:
     post:
-      operationId: v1_auth_token_refresh_create
+      operationId: api_v1_auth_token_refresh_create
       description: |-
         Takes a refresh type JSON web token and returns an access type JSON web
         token if the refresh token is valid.
@@ -2023,7 +2023,7 @@ paths:
           description: ''
   /api/v1/core/currencies/:
     get:
-      operationId: v1_core_currencies_list
+      operationId: api_v1_core_currencies_list
       tags:
       - Debug & Utils
       security:
@@ -2040,7 +2040,7 @@ paths:
           description: ''
   /api/v1/core/currencies/rates/:
     get:
-      operationId: v1_core_currencies_rates_retrieve
+      operationId: api_v1_core_currencies_rates_retrieve
       description: Returns the latest exchange rates for all currencies against USD.
       tags:
       - Debug & Utils
@@ -2064,7 +2064,7 @@ paths:
           description: ''
   /api/v1/core/currency/convert/:
     post:
-      operationId: v1_core_currency_convert_create
+      operationId: api_v1_core_currency_convert_create
       description: API endpoint for performing currency conversion based on stored
         rates.
       tags:
@@ -2114,7 +2114,7 @@ paths:
           description: ''
   /api/v1/core/facilities/:
     get:
-      operationId: v1_core_facilities_list
+      operationId: api_v1_core_facilities_list
       parameters:
       - name: page
         required: false
@@ -2141,7 +2141,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedFacilityResponseList'
           description: ''
     post:
-      operationId: v1_core_facilities_create
+      operationId: api_v1_core_facilities_create
       tags:
       - Accommodations
       requestBody:
@@ -2167,7 +2167,7 @@ paths:
           description: ''
   /api/v1/core/facilities/{id}/:
     get:
-      operationId: v1_core_facilities_retrieve
+      operationId: api_v1_core_facilities_retrieve
       parameters:
       - in: path
         name: id
@@ -2189,7 +2189,7 @@ paths:
                 $ref: '#/components/schemas/FacilityResponse'
           description: ''
     patch:
-      operationId: v1_core_facilities_partial_update
+      operationId: api_v1_core_facilities_partial_update
       parameters:
       - in: path
         name: id
@@ -2221,7 +2221,7 @@ paths:
                 $ref: '#/components/schemas/Facility'
           description: ''
     delete:
-      operationId: v1_core_facilities_destroy
+      operationId: api_v1_core_facilities_destroy
       parameters:
       - in: path
         name: id
@@ -2239,7 +2239,7 @@ paths:
           description: No response body
   /api/v1/favorites/:
     get:
-      operationId: v1_favorites_list
+      operationId: api_v1_favorites_list
       parameters:
       - name: page
         required: false
@@ -2265,7 +2265,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedFavoriteList'
           description: ''
     post:
-      operationId: v1_favorites_create
+      operationId: api_v1_favorites_create
       tags:
       - Favorites
       requestBody:
@@ -2291,7 +2291,7 @@ paths:
           description: ''
   /api/v1/favorites/{id}/:
     get:
-      operationId: v1_favorites_retrieve
+      operationId: api_v1_favorites_retrieve
       parameters:
       - in: path
         name: id
@@ -2312,7 +2312,7 @@ paths:
                 $ref: '#/components/schemas/Favorite'
           description: ''
     put:
-      operationId: v1_favorites_update
+      operationId: api_v1_favorites_update
       parameters:
       - in: path
         name: id
@@ -2345,7 +2345,7 @@ paths:
                 $ref: '#/components/schemas/Favorite'
           description: ''
     patch:
-      operationId: v1_favorites_partial_update
+      operationId: api_v1_favorites_partial_update
       parameters:
       - in: path
         name: id
@@ -2377,7 +2377,7 @@ paths:
                 $ref: '#/components/schemas/Favorite'
           description: ''
     delete:
-      operationId: v1_favorites_destroy
+      operationId: api_v1_favorites_destroy
       parameters:
       - in: path
         name: id
@@ -2395,7 +2395,7 @@ paths:
           description: No response body
   /api/v1/favorites/guest/:
     get:
-      operationId: v1_favorites_guest_list
+      operationId: api_v1_favorites_guest_list
       summary: List guest favorites by phone
       tags:
       - Favorites
@@ -2412,7 +2412,7 @@ paths:
                   $ref: '#/components/schemas/GuestFavorite'
           description: ''
     post:
-      operationId: v1_favorites_guest_create
+      operationId: api_v1_favorites_guest_create
       summary: Create a guest favorite by phone
       tags:
       - Favorites
@@ -2440,7 +2440,7 @@ paths:
           description: ''
   /api/v1/favorites/guest/toggle/:
     post:
-      operationId: v1_favorites_guest_toggle_create
+      operationId: api_v1_favorites_guest_toggle_create
       summary: Toggle a guest favorite by phone
       tags:
       - Favorites
@@ -2474,7 +2474,7 @@ paths:
           description: ''
   /api/v1/favorites/toggle/:
     post:
-      operationId: v1_favorites_toggle_create
+      operationId: api_v1_favorites_toggle_create
       description: Toggle favorite by providing content_type (app_label.model or id)
         and object_id
       tags:
@@ -2502,7 +2502,7 @@ paths:
           description: ''
   /api/v1/listing/addon-offerings/:
     get:
-      operationId: v1_listing_addon_offerings_list
+      operationId: api_v1_listing_addon_offerings_list
       description: Filter offerings by hotel ID. Returns public-facing addon details.
       summary: List addons for a specific hotel
       parameters:
@@ -2558,7 +2558,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedAddonOfferingListList'
           description: ''
     post:
-      operationId: v1_listing_addon_offerings_create
+      operationId: api_v1_listing_addon_offerings_create
       tags:
       - Accommodations
       requestBody:
@@ -2584,7 +2584,7 @@ paths:
           description: ''
   /api/v1/listing/addon-offerings/{id}/:
     get:
-      operationId: v1_listing_addon_offerings_retrieve
+      operationId: api_v1_listing_addon_offerings_retrieve
       parameters:
       - in: path
         name: id
@@ -2606,7 +2606,7 @@ paths:
                 $ref: '#/components/schemas/AddonOfferingList'
           description: ''
     patch:
-      operationId: v1_listing_addon_offerings_partial_update
+      operationId: api_v1_listing_addon_offerings_partial_update
       parameters:
       - in: path
         name: id
@@ -2638,7 +2638,7 @@ paths:
                 $ref: '#/components/schemas/AddonOffering'
           description: ''
     delete:
-      operationId: v1_listing_addon_offerings_destroy
+      operationId: api_v1_listing_addon_offerings_destroy
       parameters:
       - in: path
         name: id
@@ -2656,7 +2656,7 @@ paths:
           description: No response body
   /api/v1/listing/amenities/:
     get:
-      operationId: v1_listing_amenities_list
+      operationId: api_v1_listing_amenities_list
       parameters:
       - name: page
         required: false
@@ -2671,7 +2671,7 @@ paths:
         schema:
           type: integer
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -2683,9 +2683,9 @@ paths:
                 $ref: '#/components/schemas/PaginatedAmenityResponseSList'
           description: ''
     post:
-      operationId: v1_listing_amenities_create
+      operationId: api_v1_listing_amenities_create
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -2709,7 +2709,7 @@ paths:
           description: ''
   /api/v1/listing/amenities/{id}/:
     get:
-      operationId: v1_listing_amenities_retrieve
+      operationId: api_v1_listing_amenities_retrieve
       parameters:
       - in: path
         name: id
@@ -2719,7 +2719,7 @@ paths:
         description: A UUID string identifying this Amenity.
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -2731,7 +2731,7 @@ paths:
                 $ref: '#/components/schemas/AmenityResponseS'
           description: ''
     patch:
-      operationId: v1_listing_amenities_partial_update
+      operationId: api_v1_listing_amenities_partial_update
       parameters:
       - in: path
         name: id
@@ -2741,7 +2741,7 @@ paths:
         description: A UUID string identifying this Amenity.
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -2763,7 +2763,7 @@ paths:
                 $ref: '#/components/schemas/AmenityResponseS'
           description: ''
     delete:
-      operationId: v1_listing_amenities_destroy
+      operationId: api_v1_listing_amenities_destroy
       parameters:
       - in: path
         name: id
@@ -2773,7 +2773,7 @@ paths:
         description: A UUID string identifying this Amenity.
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       responses:
@@ -2781,7 +2781,7 @@ paths:
           description: No response body
   /api/v1/listing/bookings/:
     get:
-      operationId: v1_listing_bookings_list
+      operationId: api_v1_listing_bookings_list
       parameters:
       - in: query
         name: check_in_date_after
@@ -2826,7 +2826,7 @@ paths:
           * `cancelled` - Cancelled
           * `walk_in` - Walk-In
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       responses:
@@ -2837,7 +2837,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedBookingList'
           description: ''
     post:
-      operationId: v1_listing_bookings_create
+      operationId: api_v1_listing_bookings_create
       description: "\n        Initiates a booking for one or more hotel rooms. \n\
         \        - Supports both authenticated users and guest checkout.\n       \
         \ - If not logged in, `guest_email`, `guest_phone`, `guest_first_name`, and\
@@ -2849,7 +2849,7 @@ paths:
         \      "
       summary: Create a new room booking (supports guest checkout)
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -2874,7 +2874,7 @@ paths:
           description: ''
   /api/v1/listing/bookings-eventspaces/:
     get:
-      operationId: v1_listing_bookings_eventspaces_list
+      operationId: api_v1_listing_bookings_eventspaces_list
       description: ViewSet for viewing and managing Event Space Bookings (Create/List/Retrieve
         only).
       parameters:
@@ -2915,7 +2915,7 @@ paths:
           * `cancelled` - Cancelled
           * `walk_in` - Walk-In
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       responses:
@@ -2926,7 +2926,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedEventSpaceBookingResponseList'
           description: ''
     post:
-      operationId: v1_listing_bookings_eventspaces_create
+      operationId: api_v1_listing_bookings_eventspaces_create
       description: "\n    Initiates a booking for an event space.\n    - Supports\
         \ both authenticated users and guest checkout.\n    - If not logged in, guest\
         \ details must be provided.\n    - Guest checkout now requires a prior `guest-otp/request/`\
@@ -2935,7 +2935,7 @@ paths:
         \ a `booking_reference`.\n    "
       summary: Create a new event space booking (supports guest checkout)
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -2960,7 +2960,7 @@ paths:
           description: ''
   /api/v1/listing/bookings-eventspaces/{id}/:
     get:
-      operationId: v1_listing_bookings_eventspaces_retrieve
+      operationId: api_v1_listing_bookings_eventspaces_retrieve
       description: ViewSet for viewing and managing Event Space Bookings (Create/List/Retrieve
         only).
       parameters:
@@ -2972,7 +2972,7 @@ paths:
         description: A UUID string identifying this Event Space Booking.
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       responses:
@@ -2984,12 +2984,12 @@ paths:
           description: ''
   /api/v1/listing/bookings-eventspaces/guest-otp/request/:
     post:
-      operationId: v1_listing_bookings_eventspaces_guest_otp_request_create
+      operationId: api_v1_listing_bookings_eventspaces_guest_otp_request_create
       description: Issue a phone OTP challenge before creating an event-space booking
         as a guest.
       summary: Request event-space booking guest phone OTP
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -3022,7 +3022,7 @@ paths:
           description: ''
   /api/v1/listing/bookings-eventspaces/lookup/:
     get:
-      operationId: v1_listing_bookings_eventspaces_lookup_retrieve
+      operationId: api_v1_listing_bookings_eventspaces_lookup_retrieve
       description: Retrieve event space booking details using reference and guest
         email. No login required.
       summary: Lookup event space booking status (Guest)
@@ -3038,7 +3038,7 @@ paths:
           type: string
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -3058,7 +3058,7 @@ paths:
           description: ''
   /api/v1/listing/bookings-eventspaces/price-preview/:
     post:
-      operationId: v1_listing_bookings_eventspaces_price_preview_create
+      operationId: api_v1_listing_bookings_eventspaces_price_preview_create
       description: Get a consolidated price quote for a selection of event spaces
         before booking.
       summary: Price Preview for event space selection
@@ -3070,7 +3070,7 @@ paths:
         description: 'Optional: Request price preview in a specific currency (e.g.,
           USD) using triangulation.'
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -3102,7 +3102,7 @@ paths:
           description: ''
   /api/v1/listing/bookings-eventspaces/walk-in/:
     post:
-      operationId: v1_listing_bookings_eventspaces_walk_in_create
+      operationId: api_v1_listing_bookings_eventspaces_walk_in_create
       description: "\n    Initiates a booking for an event space.\n    - Supports\
         \ both authenticated users and guest checkout.\n    - If not logged in, guest\
         \ details must be provided.\n    - Guest checkout now requires a prior `guest-otp/request/`\
@@ -3111,7 +3111,7 @@ paths:
         \ a `booking_reference`.\n    "
       summary: Create a new event space booking (supports guest checkout)
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -3135,7 +3135,7 @@ paths:
           description: ''
   /api/v1/listing/bookings/{id}/:
     get:
-      operationId: v1_listing_bookings_retrieve
+      operationId: api_v1_listing_bookings_retrieve
       parameters:
       - in: path
         name: id
@@ -3145,7 +3145,7 @@ paths:
         description: A UUID string identifying this Booking.
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       responses:
@@ -3157,7 +3157,7 @@ paths:
           description: ''
   /api/v1/listing/bookings/{id}/cancel/:
     post:
-      operationId: v1_listing_bookings_cancel_create
+      operationId: api_v1_listing_bookings_cancel_create
       description: "\n        Cancel a booking.\n        - **Authenticated**: User\
         \ cancels their own booking.\n        - **Guest**: Must provide `guest_email`\
         \ matching the booking to verify ownership.\n        - Cancellation does not\
@@ -3172,7 +3172,7 @@ paths:
         description: A UUID string identifying this Booking.
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -3197,7 +3197,7 @@ paths:
           description: ''
   /api/v1/listing/bookings/{id}/partial-cancel/:
     post:
-      operationId: v1_listing_bookings_partial_cancel_create
+      operationId: api_v1_listing_bookings_partial_cancel_create
       parameters:
       - in: path
         name: id
@@ -3207,7 +3207,7 @@ paths:
         description: A UUID string identifying this Booking.
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -3231,12 +3231,12 @@ paths:
           description: ''
   /api/v1/listing/bookings/guest-otp/request/:
     post:
-      operationId: v1_listing_bookings_guest_otp_request_create
+      operationId: api_v1_listing_bookings_guest_otp_request_create
       description: Issue a phone OTP challenge before creating a hotel room booking
         as a guest.
       summary: Request hotel booking guest phone OTP
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -3269,7 +3269,7 @@ paths:
           description: ''
   /api/v1/listing/bookings/lookup/:
     get:
-      operationId: v1_listing_bookings_lookup_retrieve
+      operationId: api_v1_listing_bookings_lookup_retrieve
       description: Retrieve booking details using reference and guest email. No login
         required.
       summary: Lookup room booking status (Guest)
@@ -3285,7 +3285,7 @@ paths:
           type: string
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -3305,7 +3305,7 @@ paths:
           description: ''
   /api/v1/listing/bookings/price-preview/:
     post:
-      operationId: v1_listing_bookings_price_preview_create
+      operationId: api_v1_listing_bookings_price_preview_create
       description: Get a consolidated price quote for a selection of hotel rooms before
         booking.
       summary: Price Preview for room selection
@@ -3317,7 +3317,7 @@ paths:
         description: 'Optional: Request price preview in a specific currency (e.g.,
           USD) using triangulation.'
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -3349,13 +3349,13 @@ paths:
           description: ''
   /api/v1/listing/bookings/walk-in/:
     post:
-      operationId: v1_listing_bookings_walk_in_create
+      operationId: api_v1_listing_bookings_walk_in_create
       description: |-
         Create a walk-in booking.
         Passes is_walk_in=True via context to trigger staff privileges check.
         Requires authentication.
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -3379,9 +3379,9 @@ paths:
           description: ''
   /api/v1/listing/bookings/workspace-bookings/:
     get:
-      operationId: v1_listing_bookings_workspace_bookings_retrieve
+      operationId: api_v1_listing_bookings_workspace_bookings_retrieve
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       responses:
@@ -3393,7 +3393,7 @@ paths:
           description: ''
   /api/v1/listing/car-availabilities/{id}/update/:
     patch:
-      operationId: v1_listing_car_availabilities_update_partial_update
+      operationId: api_v1_listing_car_availabilities_update_partial_update
       description: Update a CarAvailability instance (partial update).
       parameters:
       - in: path
@@ -3403,7 +3403,7 @@ paths:
           format: uuid
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -3447,10 +3447,10 @@ paths:
           description: ''
   /api/v1/listing/car-availabilities/by-car-and-date/:
     get:
-      operationId: v1_listing_car_availabilities_by_car_and_date_retrieve
+      operationId: api_v1_listing_car_availabilities_by_car_and_date_retrieve
       summary: Get availability for a specific car listing within a date range
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -3463,10 +3463,10 @@ paths:
           description: ''
   /api/v1/listing/car-availabilities/by-dates/:
     get:
-      operationId: v1_listing_car_availabilities_by_dates_retrieve
+      operationId: api_v1_listing_car_availabilities_by_dates_retrieve
       summary: Search all available cars in a date range
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -3479,7 +3479,7 @@ paths:
           description: ''
   /api/v1/listing/car-rentals/:
     get:
-      operationId: v1_listing_car_rentals_list
+      operationId: api_v1_listing_car_rentals_list
       parameters:
       - name: ordering
         required: false
@@ -3523,7 +3523,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedCarRentalList'
           description: ''
     post:
-      operationId: v1_listing_car_rentals_create
+      operationId: api_v1_listing_car_rentals_create
       description: "\n        Initiates a rental booking for one or more vehicles.\n\
         \        - Supports both authenticated users and guest checkout.\n       \
         \ - If guest, provide renter details in `guest_*` fields.\n        - Guest\
@@ -3558,7 +3558,7 @@ paths:
           description: ''
   /api/v1/listing/car-rentals/{id}/:
     get:
-      operationId: v1_listing_car_rentals_retrieve
+      operationId: api_v1_listing_car_rentals_retrieve
       parameters:
       - in: path
         name: id
@@ -3579,7 +3579,7 @@ paths:
                 $ref: '#/components/schemas/CarRental'
           description: ''
     patch:
-      operationId: v1_listing_car_rentals_partial_update
+      operationId: api_v1_listing_car_rentals_partial_update
       parameters:
       - in: path
         name: id
@@ -3611,7 +3611,7 @@ paths:
                 $ref: '#/components/schemas/CarRental'
           description: ''
     delete:
-      operationId: v1_listing_car_rentals_destroy
+      operationId: api_v1_listing_car_rentals_destroy
       parameters:
       - in: path
         name: id
@@ -3629,7 +3629,7 @@ paths:
           description: No response body
   /api/v1/listing/car-rentals/{id}/cancel/:
     post:
-      operationId: v1_listing_car_rentals_cancel_create
+      operationId: api_v1_listing_car_rentals_cancel_create
       description: Cancel a car rental and restore availability. Authenticated owners
         keep the existing flow, while guest rentals can be cancelled with a verified
         guest phone session. Booking cancellation does not create a refund because
@@ -3682,7 +3682,7 @@ paths:
           description: ''
   /api/v1/listing/car-rentals/{id}/confirm/:
     post:
-      operationId: v1_listing_car_rentals_confirm_create
+      operationId: api_v1_listing_car_rentals_confirm_create
       parameters:
       - in: path
         name: id
@@ -3716,7 +3716,7 @@ paths:
           description: ''
   /api/v1/listing/car-rentals/{id}/extension-price-preview/:
     post:
-      operationId: v1_listing_car_rentals_extension_price_preview_create
+      operationId: api_v1_listing_car_rentals_extension_price_preview_create
       description: Validate extra-day availability and calculate the extension payment
         before initiating payment.
       summary: Preview car rental extension price
@@ -3768,7 +3768,7 @@ paths:
           description: ''
   /api/v1/listing/car-rentals/{id}/request-extension/:
     post:
-      operationId: v1_listing_car_rentals_request_extension_create
+      operationId: api_v1_listing_car_rentals_request_extension_create
       description: Hold the requested extra days, create an extension request, and
         initialize a dedicated Chapa payment.
       summary: Initiate a car rental extension payment
@@ -3820,7 +3820,7 @@ paths:
           description: ''
   /api/v1/listing/car-rentals/{id}/reschedule/:
     post:
-      operationId: v1_listing_car_rentals_reschedule_create
+      operationId: api_v1_listing_car_rentals_reschedule_create
       description: Change the start and end dates for an existing car rental when
         the target inventory is available. Preserves the existing booking and recalculates
         totals.
@@ -3872,7 +3872,7 @@ paths:
           description: ''
   /api/v1/listing/car-rentals/guest-otp/request/:
     post:
-      operationId: v1_listing_car_rentals_guest_otp_request_create
+      operationId: api_v1_listing_car_rentals_guest_otp_request_create
       description: Issue a phone OTP challenge before creating a car rental as a guest.
       summary: Request car rental guest phone OTP
       tags:
@@ -3909,7 +3909,7 @@ paths:
           description: ''
   /api/v1/listing/car-rentals/guest-rentals/:
     get:
-      operationId: v1_listing_car_rentals_guest_rentals_list
+      operationId: api_v1_listing_car_rentals_guest_rentals_list
       description: Retrieve guest-created car rentals tied to a verified phone number.
         Registered-user rentals are excluded from this guest self-service view.
       summary: List guest car rentals by verified phone
@@ -3988,7 +3988,7 @@ paths:
           description: ''
   /api/v1/listing/car-rentals/lookup/:
     get:
-      operationId: v1_listing_car_rentals_lookup_retrieve
+      operationId: api_v1_listing_car_rentals_lookup_retrieve
       description: Retrieve guest car rental details using a verified guest phone
         session. A legacy email compatibility bridge remains available temporarily.
       summary: Lookup car rental status (Guest)
@@ -4050,7 +4050,7 @@ paths:
           description: ''
   /api/v1/listing/car-rentals/my_rentals/:
     get:
-      operationId: v1_listing_car_rentals_my_rentals_retrieve
+      operationId: api_v1_listing_car_rentals_my_rentals_retrieve
       tags:
       - Car Rentals
       security:
@@ -4064,7 +4064,7 @@ paths:
           description: ''
   /api/v1/listing/car-rentals/price-preview/:
     post:
-      operationId: v1_listing_car_rentals_price_preview_create
+      operationId: api_v1_listing_car_rentals_price_preview_create
       description: Get a consolidated price quote for one or more cars before creating
         the rental or starting payment.
       summary: Price preview for car rental selection
@@ -4115,7 +4115,7 @@ paths:
           description: ''
   /api/v1/listing/car-rentals/rental_stats/:
     get:
-      operationId: v1_listing_car_rentals_rental_stats_retrieve
+      operationId: api_v1_listing_car_rentals_rental_stats_retrieve
       tags:
       - Car Rentals
       security:
@@ -4129,7 +4129,7 @@ paths:
           description: ''
   /api/v1/listing/car-sales/:
     get:
-      operationId: v1_listing_car_sales_list
+      operationId: api_v1_listing_car_sales_list
       parameters:
       - in: query
         name: brand
@@ -4264,7 +4264,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedCarSaleListingResponseList'
           description: ''
     post:
-      operationId: v1_listing_car_sales_create
+      operationId: api_v1_listing_car_sales_create
       tags:
       - Car Sales
       requestBody:
@@ -4290,7 +4290,7 @@ paths:
           description: ''
   /api/v1/listing/car-sales/{id}/:
     get:
-      operationId: v1_listing_car_sales_retrieve
+      operationId: api_v1_listing_car_sales_retrieve
       parameters:
       - in: path
         name: id
@@ -4312,7 +4312,7 @@ paths:
                 $ref: '#/components/schemas/CarSaleListingResponse'
           description: ''
     patch:
-      operationId: v1_listing_car_sales_partial_update
+      operationId: api_v1_listing_car_sales_partial_update
       parameters:
       - in: path
         name: id
@@ -4344,7 +4344,7 @@ paths:
                 $ref: '#/components/schemas/CarSaleListing'
           description: ''
     delete:
-      operationId: v1_listing_car_sales_destroy
+      operationId: api_v1_listing_car_sales_destroy
       parameters:
       - in: path
         name: id
@@ -4362,7 +4362,7 @@ paths:
           description: No response body
   /api/v1/listing/car-sales/{id}/contact/:
     get:
-      operationId: v1_listing_car_sales_contact_retrieve
+      operationId: api_v1_listing_car_sales_contact_retrieve
       parameters:
       - in: path
         name: id
@@ -4392,7 +4392,7 @@ paths:
           description: ''
   /api/v1/listing/car-sales/{id}/request-contact/:
     post:
-      operationId: v1_listing_car_sales_request_contact_create
+      operationId: api_v1_listing_car_sales_request_contact_create
       parameters:
       - in: path
         name: id
@@ -4448,7 +4448,7 @@ paths:
           description: ''
   /api/v1/listing/car-sales/{id}/unverify/:
     post:
-      operationId: v1_listing_car_sales_unverify_create
+      operationId: api_v1_listing_car_sales_unverify_create
       parameters:
       - in: path
         name: id
@@ -4481,7 +4481,7 @@ paths:
           description: ''
   /api/v1/listing/car-sales/{id}/verify/:
     post:
-      operationId: v1_listing_car_sales_verify_create
+      operationId: api_v1_listing_car_sales_verify_create
       parameters:
       - in: path
         name: id
@@ -4514,7 +4514,7 @@ paths:
           description: ''
   /api/v1/listing/car-sales/guest-otp/:
     post:
-      operationId: v1_listing_car_sales_guest_otp_create
+      operationId: api_v1_listing_car_sales_guest_otp_create
       summary: Request guest car-sale contact reveal phone OTP
       tags:
       - Car Sales
@@ -4543,7 +4543,7 @@ paths:
           description: ''
   /api/v1/listing/cars/:
     get:
-      operationId: v1_listing_cars_list
+      operationId: api_v1_listing_cars_list
       description: |-
         Handles GET /api/v1/listing/cars/ - the default endpoint.
         Applies queryset logic (active/all) and then filters/paginates.
@@ -4695,7 +4695,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedCarListingResponseList'
           description: ''
     post:
-      operationId: v1_listing_cars_create
+      operationId: api_v1_listing_cars_create
       tags:
       - Car Rentals
       requestBody:
@@ -4721,7 +4721,7 @@ paths:
           description: ''
   /api/v1/listing/cars/{id}/:
     get:
-      operationId: v1_listing_cars_retrieve
+      operationId: api_v1_listing_cars_retrieve
       parameters:
       - in: path
         name: id
@@ -4743,7 +4743,7 @@ paths:
                 $ref: '#/components/schemas/CarListingResponse'
           description: ''
     patch:
-      operationId: v1_listing_cars_partial_update
+      operationId: api_v1_listing_cars_partial_update
       parameters:
       - in: path
         name: id
@@ -4775,7 +4775,7 @@ paths:
                 $ref: '#/components/schemas/CarListing'
           description: ''
     delete:
-      operationId: v1_listing_cars_destroy
+      operationId: api_v1_listing_cars_destroy
       parameters:
       - in: path
         name: id
@@ -4793,7 +4793,7 @@ paths:
           description: No response body
   /api/v1/listing/cars/{id}/check_availability/:
     post:
-      operationId: v1_listing_cars_check_availability_create
+      operationId: api_v1_listing_cars_check_availability_create
       parameters:
       - in: path
         name: id
@@ -4828,7 +4828,7 @@ paths:
           description: ''
   /api/v1/listing/cars/{id}/unverify/:
     post:
-      operationId: v1_listing_cars_unverify_create
+      operationId: api_v1_listing_cars_unverify_create
       parameters:
       - in: path
         name: id
@@ -4861,7 +4861,7 @@ paths:
           description: ''
   /api/v1/listing/cars/{id}/verify/:
     post:
-      operationId: v1_listing_cars_verify_create
+      operationId: api_v1_listing_cars_verify_create
       parameters:
       - in: path
         name: id
@@ -4894,7 +4894,7 @@ paths:
           description: ''
   /api/v1/listing/cars/available_for_rent/:
     get:
-      operationId: v1_listing_cars_available_for_rent_retrieve
+      operationId: api_v1_listing_cars_available_for_rent_retrieve
       parameters:
       - in: query
         name: brand
@@ -4933,7 +4933,7 @@ paths:
           description: ''
   /api/v1/listing/cars/my_listings/:
     get:
-      operationId: v1_listing_cars_my_listings_retrieve
+      operationId: api_v1_listing_cars_my_listings_retrieve
       tags:
       - Car Rentals
       security:
@@ -4947,7 +4947,7 @@ paths:
           description: ''
   /api/v1/listing/event-spaces/:
     get:
-      operationId: v1_listing_event_spaces_list
+      operationId: api_v1_listing_event_spaces_list
       description: |-
         List event spaces; computes display_price and preview fields for each
         listing if date params are provided.
@@ -4981,7 +4981,7 @@ paths:
         schema:
           type: string
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -4993,12 +4993,12 @@ paths:
                 $ref: '#/components/schemas/PaginatedEventSpaceListingResponseList'
           description: ''
     post:
-      operationId: v1_listing_event_spaces_create
+      operationId: api_v1_listing_event_spaces_create
       description: |-
         ViewSet for viewing and managing Event Space Listings, including
         handling seasonal pricing display.
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -5022,7 +5022,7 @@ paths:
           description: ''
   /api/v1/listing/event-spaces/{id}/:
     get:
-      operationId: v1_listing_event_spaces_retrieve
+      operationId: api_v1_listing_event_spaces_retrieve
       description: |-
         Return event space detail with optional seasonal display price
         when date query params are provided.
@@ -5035,7 +5035,7 @@ paths:
         description: A UUID string identifying this Event space.
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -5047,7 +5047,7 @@ paths:
                 $ref: '#/components/schemas/EventSpaceListingResponse'
           description: ''
     patch:
-      operationId: v1_listing_event_spaces_partial_update
+      operationId: api_v1_listing_event_spaces_partial_update
       description: |-
         ViewSet for viewing and managing Event Space Listings, including
         handling seasonal pricing display.
@@ -5060,7 +5060,7 @@ paths:
         description: A UUID string identifying this Event space.
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -5082,7 +5082,7 @@ paths:
                 $ref: '#/components/schemas/EventSpaceListingResponse'
           description: ''
     delete:
-      operationId: v1_listing_event_spaces_destroy
+      operationId: api_v1_listing_event_spaces_destroy
       description: |-
         ViewSet for viewing and managing Event Space Listings, including
         handling seasonal pricing display.
@@ -5095,7 +5095,7 @@ paths:
         description: A UUID string identifying this Event space.
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       responses:
@@ -5103,7 +5103,7 @@ paths:
           description: No response body
   /api/v1/listing/event-spaces/{id}/unverify/:
     post:
-      operationId: v1_listing_event_spaces_unverify_create
+      operationId: api_v1_listing_event_spaces_unverify_create
       description: |-
         ViewSet for viewing and managing Event Space Listings, including
         handling seasonal pricing display.
@@ -5116,7 +5116,7 @@ paths:
         description: A UUID string identifying this Event space.
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -5139,7 +5139,7 @@ paths:
           description: ''
   /api/v1/listing/event-spaces/{id}/verify/:
     post:
-      operationId: v1_listing_event_spaces_verify_create
+      operationId: api_v1_listing_event_spaces_verify_create
       description: |-
         ViewSet for viewing and managing Event Space Listings, including
         handling seasonal pricing display.
@@ -5152,7 +5152,7 @@ paths:
         description: A UUID string identifying this Event space.
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -5175,7 +5175,7 @@ paths:
           description: ''
   /api/v1/listing/event-spaces/search/:
     get:
-      operationId: v1_listing_event_spaces_search_list
+      operationId: api_v1_listing_event_spaces_search_list
       description: Searches available event spaces by date, quantity, and optional
         address.
       summary: Search available event spaces
@@ -5233,7 +5233,7 @@ paths:
         schema:
           type: string
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -5246,7 +5246,7 @@ paths:
           description: ''
   /api/v1/listing/feed/:
     get:
-      operationId: v1_listing_feed_retrieve
+      operationId: api_v1_listing_feed_retrieve
       summary: Get standard or proximity feed
       parameters:
       - in: query
@@ -5287,7 +5287,7 @@ paths:
           description: ''
   /api/v1/listing/guest-house-rooms/:
     get:
-      operationId: v1_listing_guest_house_rooms_list
+      operationId: api_v1_listing_guest_house_rooms_list
       parameters:
       - in: query
         name: guest_house
@@ -5327,7 +5327,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedGuestHouseRoomResponseList'
           description: ''
     post:
-      operationId: v1_listing_guest_house_rooms_create
+      operationId: api_v1_listing_guest_house_rooms_create
       tags:
       - Guest House Rooms
       requestBody:
@@ -5353,7 +5353,7 @@ paths:
           description: ''
   /api/v1/listing/guest-house-rooms/{id}/:
     get:
-      operationId: v1_listing_guest_house_rooms_retrieve
+      operationId: api_v1_listing_guest_house_rooms_retrieve
       summary: Retrieve room details with accurate pricing
       parameters:
       - in: query
@@ -5386,7 +5386,7 @@ paths:
                 $ref: '#/components/schemas/GuestHouseRoomResponse'
           description: ''
     patch:
-      operationId: v1_listing_guest_house_rooms_partial_update
+      operationId: api_v1_listing_guest_house_rooms_partial_update
       parameters:
       - in: path
         name: id
@@ -5418,7 +5418,7 @@ paths:
                 $ref: '#/components/schemas/GuestHouseRoom'
           description: ''
     delete:
-      operationId: v1_listing_guest_house_rooms_destroy
+      operationId: api_v1_listing_guest_house_rooms_destroy
       parameters:
       - in: path
         name: id
@@ -5436,7 +5436,7 @@ paths:
           description: No response body
   /api/v1/listing/guest-house-rooms/{id}/unverify/:
     post:
-      operationId: v1_listing_guest_house_rooms_unverify_create
+      operationId: api_v1_listing_guest_house_rooms_unverify_create
       parameters:
       - in: path
         name: id
@@ -5469,7 +5469,7 @@ paths:
           description: ''
   /api/v1/listing/guest-house-rooms/{id}/verify/:
     post:
-      operationId: v1_listing_guest_house_rooms_verify_create
+      operationId: api_v1_listing_guest_house_rooms_verify_create
       parameters:
       - in: path
         name: id
@@ -5502,7 +5502,7 @@ paths:
           description: ''
   /api/v1/listing/guest-house-rooms/availability-matrix/:
     get:
-      operationId: v1_listing_guest_house_rooms_availability_matrix_retrieve
+      operationId: api_v1_listing_guest_house_rooms_availability_matrix_retrieve
       tags:
       - Guest House Rooms
       security:
@@ -5516,7 +5516,7 @@ paths:
           description: ''
   /api/v1/listing/guest-houses/:
     get:
-      operationId: v1_listing_guest_houses_list
+      operationId: api_v1_listing_guest_houses_list
       parameters:
       - name: page
         required: false
@@ -5549,7 +5549,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedGuestHouseProfileResponseList'
           description: ''
     post:
-      operationId: v1_listing_guest_houses_create
+      operationId: api_v1_listing_guest_houses_create
       tags:
       - Accommodations
       requestBody:
@@ -5575,7 +5575,7 @@ paths:
           description: ''
   /api/v1/listing/guest-houses/{id}/:
     get:
-      operationId: v1_listing_guest_houses_retrieve
+      operationId: api_v1_listing_guest_houses_retrieve
       parameters:
       - in: path
         name: id
@@ -5597,7 +5597,7 @@ paths:
                 $ref: '#/components/schemas/GuestHouseProfileResponse'
           description: ''
     patch:
-      operationId: v1_listing_guest_houses_partial_update
+      operationId: api_v1_listing_guest_houses_partial_update
       parameters:
       - in: path
         name: id
@@ -5629,7 +5629,7 @@ paths:
                 $ref: '#/components/schemas/GuestHouseProfile'
           description: ''
     delete:
-      operationId: v1_listing_guest_houses_destroy
+      operationId: api_v1_listing_guest_houses_destroy
       parameters:
       - in: path
         name: id
@@ -5647,7 +5647,7 @@ paths:
           description: No response body
   /api/v1/listing/guest-houses/{id}/unverify/:
     post:
-      operationId: v1_listing_guest_houses_unverify_create
+      operationId: api_v1_listing_guest_houses_unverify_create
       parameters:
       - in: path
         name: id
@@ -5680,7 +5680,7 @@ paths:
           description: ''
   /api/v1/listing/guest-houses/{id}/verify/:
     post:
-      operationId: v1_listing_guest_houses_verify_create
+      operationId: api_v1_listing_guest_houses_verify_create
       parameters:
       - in: path
         name: id
@@ -5713,7 +5713,7 @@ paths:
           description: ''
   /api/v1/listing/guest-houses/check-availability/:
     get:
-      operationId: v1_listing_guest_houses_check_availability_list
+      operationId: api_v1_listing_guest_houses_check_availability_list
       description: |-
         Check availability across all guesthouses or a specific one.
         Returns PROFILES that have at least one room type meeting criteria.
@@ -5787,7 +5787,7 @@ paths:
           description: ''
   /api/v1/listing/guesthouse-bookings/:
     get:
-      operationId: v1_listing_guesthouse_bookings_list
+      operationId: api_v1_listing_guesthouse_bookings_list
       description: ViewSet for GuestHouse Bookings with full CRUD operations.
       parameters:
       - in: query
@@ -5860,7 +5860,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedGuestHouseBookingList'
           description: ''
     post:
-      operationId: v1_listing_guesthouse_bookings_create
+      operationId: api_v1_listing_guesthouse_bookings_create
       description: "\n        Initiates a booking for one or more rooms in a guest\
         \ house.\n        - Supports both authenticated users and guest checkout.\n\
         \        - Required guest fields: `guest_email`, `guest_phone`, `guest_first_name`,\
@@ -5895,7 +5895,7 @@ paths:
           description: ''
   /api/v1/listing/guesthouse-bookings/{id}/:
     get:
-      operationId: v1_listing_guesthouse_bookings_retrieve
+      operationId: api_v1_listing_guesthouse_bookings_retrieve
       description: ViewSet for GuestHouse Bookings with full CRUD operations.
       parameters:
       - in: path
@@ -5917,7 +5917,7 @@ paths:
                 $ref: '#/components/schemas/GuestHouseBooking'
           description: ''
     patch:
-      operationId: v1_listing_guesthouse_bookings_partial_update
+      operationId: api_v1_listing_guesthouse_bookings_partial_update
       description: ViewSet for GuestHouse Bookings with full CRUD operations.
       parameters:
       - in: path
@@ -5950,7 +5950,7 @@ paths:
                 $ref: '#/components/schemas/GuestHouseBooking'
           description: ''
     delete:
-      operationId: v1_listing_guesthouse_bookings_destroy
+      operationId: api_v1_listing_guesthouse_bookings_destroy
       description: ViewSet for GuestHouse Bookings with full CRUD operations.
       parameters:
       - in: path
@@ -5969,7 +5969,7 @@ paths:
           description: No response body
   /api/v1/listing/guesthouse-bookings/{id}/cancel/:
     post:
-      operationId: v1_listing_guesthouse_bookings_cancel_create
+      operationId: api_v1_listing_guesthouse_bookings_cancel_create
       description: Cancel a pending or confirmed booking and restore availability.
         Booking cancellation does not create a refund because the platform does not
         support refunds.
@@ -6007,7 +6007,7 @@ paths:
           description: ''
   /api/v1/listing/guesthouse-bookings/guest-otp/request/:
     post:
-      operationId: v1_listing_guesthouse_bookings_guest_otp_request_create
+      operationId: api_v1_listing_guesthouse_bookings_guest_otp_request_create
       description: Issue a phone OTP challenge before creating a guesthouse booking
         as a guest.
       summary: Request guesthouse booking phone OTP
@@ -6045,7 +6045,7 @@ paths:
           description: ''
   /api/v1/listing/guesthouse-bookings/lookup/:
     get:
-      operationId: v1_listing_guesthouse_bookings_lookup_retrieve
+      operationId: api_v1_listing_guesthouse_bookings_lookup_retrieve
       description: Retrieve booking details using reference and guest email. No login
         required.
       summary: Lookup guest house booking status (Guest)
@@ -6081,7 +6081,7 @@ paths:
           description: ''
   /api/v1/listing/guesthouse-bookings/my_bookings/:
     get:
-      operationId: v1_listing_guesthouse_bookings_my_bookings_list
+      operationId: api_v1_listing_guesthouse_bookings_my_bookings_list
       description: Retrieve all bookings made by the authenticated user.
       summary: Get my guesthouse bookings
       parameters:
@@ -6156,7 +6156,7 @@ paths:
           description: ''
   /api/v1/listing/guesthouse-bookings/price-preview/:
     post:
-      operationId: v1_listing_guesthouse_bookings_price_preview_create
+      operationId: api_v1_listing_guesthouse_bookings_price_preview_create
       description: Get a consolidated price quote for a selection of guesthouses/rooms
         before booking.
       summary: Price Preview for guesthouse selection
@@ -6200,7 +6200,7 @@ paths:
           description: ''
   /api/v1/listing/guesthouse-bookings/walk-in/:
     post:
-      operationId: v1_listing_guesthouse_bookings_walk_in_create
+      operationId: api_v1_listing_guesthouse_bookings_walk_in_create
       description: |-
         Create a walk-in booking.
         Passes is_walk_in=True via context to trigger staff privileges check.
@@ -6230,7 +6230,7 @@ paths:
           description: ''
   /api/v1/listing/guesthouse-bookings/workspace-bookings/:
     get:
-      operationId: v1_listing_guesthouse_bookings_workspace_bookings_retrieve
+      operationId: api_v1_listing_guesthouse_bookings_workspace_bookings_retrieve
       description: ViewSet for GuestHouse Bookings with full CRUD operations.
       tags:
       - Accommodations
@@ -6245,7 +6245,7 @@ paths:
           description: ''
   /api/v1/listing/inventory/grid/:
     get:
-      operationId: v1_listing_inventory_grid_retrieve
+      operationId: api_v1_listing_inventory_grid_retrieve
       description: |-
         Unified endpoint for the Owner Dashboard availability grid.
         Returns 30 days of availability and pricing for all units in a property.
@@ -6305,7 +6305,7 @@ paths:
           description: ''
   /api/v1/listing/map-pins/:
     get:
-      operationId: v1_listing_map_pins_list
+      operationId: api_v1_listing_map_pins_list
       summary: Get lightweight map pins
       parameters:
       - in: query
@@ -6372,7 +6372,7 @@ paths:
           description: ''
   /api/v1/listing/nearby/:
     get:
-      operationId: v1_listing_nearby_retrieve
+      operationId: api_v1_listing_nearby_retrieve
       summary: Find listings nearby
       parameters:
       - in: query
@@ -6427,7 +6427,7 @@ paths:
           description: ''
   /api/v1/listing/properties/:
     get:
-      operationId: v1_listing_properties_list
+      operationId: api_v1_listing_properties_list
       parameters:
       - in: query
         name: company
@@ -6470,7 +6470,7 @@ paths:
         schema:
           type: string
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -6482,9 +6482,9 @@ paths:
                 $ref: '#/components/schemas/PaginatedPropertyListingResponseList'
           description: ''
     post:
-      operationId: v1_listing_properties_create
+      operationId: api_v1_listing_properties_create
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -6508,7 +6508,7 @@ paths:
           description: ''
   /api/v1/listing/properties/{id}/:
     get:
-      operationId: v1_listing_properties_retrieve
+      operationId: api_v1_listing_properties_retrieve
       parameters:
       - in: path
         name: id
@@ -6518,7 +6518,7 @@ paths:
         description: A UUID string identifying this Property Listing.
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -6530,7 +6530,7 @@ paths:
                 $ref: '#/components/schemas/PropertyListingResponse'
           description: ''
     patch:
-      operationId: v1_listing_properties_partial_update
+      operationId: api_v1_listing_properties_partial_update
       parameters:
       - in: path
         name: id
@@ -6540,7 +6540,7 @@ paths:
         description: A UUID string identifying this Property Listing.
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -6562,7 +6562,7 @@ paths:
                 $ref: '#/components/schemas/PropertyListingResponse'
           description: ''
     delete:
-      operationId: v1_listing_properties_destroy
+      operationId: api_v1_listing_properties_destroy
       parameters:
       - in: path
         name: id
@@ -6572,7 +6572,7 @@ paths:
         description: A UUID string identifying this Property Listing.
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       responses:
@@ -6580,7 +6580,7 @@ paths:
           description: No response body
   /api/v1/listing/properties/{id}/unverify/:
     post:
-      operationId: v1_listing_properties_unverify_create
+      operationId: api_v1_listing_properties_unverify_create
       parameters:
       - in: path
         name: id
@@ -6590,7 +6590,7 @@ paths:
         description: A UUID string identifying this Property Listing.
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -6613,7 +6613,7 @@ paths:
           description: ''
   /api/v1/listing/properties/{id}/verify/:
     post:
-      operationId: v1_listing_properties_verify_create
+      operationId: api_v1_listing_properties_verify_create
       parameters:
       - in: path
         name: id
@@ -6623,7 +6623,7 @@ paths:
         description: A UUID string identifying this Property Listing.
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -6646,7 +6646,7 @@ paths:
           description: ''
   /api/v1/listing/property-rentals/bookings/:
     post:
-      operationId: v1_listing_property_rentals_bookings_create
+      operationId: api_v1_listing_property_rentals_bookings_create
       tags:
       - Property Rental Bookings
       requestBody:
@@ -6687,7 +6687,7 @@ paths:
           description: ''
   /api/v1/listing/property-rentals/bookings/{id}/:
     get:
-      operationId: v1_listing_property_rentals_bookings_retrieve
+      operationId: api_v1_listing_property_rentals_bookings_retrieve
       parameters:
       - in: path
         name: id
@@ -6716,7 +6716,7 @@ paths:
           description: ''
   /api/v1/listing/property-rentals/bookings/{id}/cancel/:
     post:
-      operationId: v1_listing_property_rentals_bookings_cancel_create
+      operationId: api_v1_listing_property_rentals_bookings_cancel_create
       parameters:
       - in: path
         name: id
@@ -6752,7 +6752,7 @@ paths:
           description: ''
   /api/v1/listing/property-rentals/bookings/guest-otp/request/:
     post:
-      operationId: v1_listing_property_rentals_bookings_guest_otp_request_create
+      operationId: api_v1_listing_property_rentals_bookings_guest_otp_request_create
       description: Issue a phone OTP challenge before creating a property rental booking
         as a guest.
       summary: Request property rental booking guest phone OTP
@@ -6790,7 +6790,7 @@ paths:
           description: ''
   /api/v1/listing/property-rentals/bookings/price-preview/:
     post:
-      operationId: v1_listing_property_rentals_bookings_price_preview_create
+      operationId: api_v1_listing_property_rentals_bookings_price_preview_create
       tags:
       - Property Rental Bookings
       requestBody:
@@ -6824,7 +6824,7 @@ paths:
           description: ''
   /api/v1/listing/property-sales/:
     get:
-      operationId: v1_listing_property_sales_list
+      operationId: api_v1_listing_property_sales_list
       parameters:
       - in: query
         name: is_active
@@ -6891,7 +6891,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedPropertySaleListingResponseList'
           description: ''
     post:
-      operationId: v1_listing_property_sales_create
+      operationId: api_v1_listing_property_sales_create
       tags:
       - Property Sales
       requestBody:
@@ -6917,7 +6917,7 @@ paths:
           description: ''
   /api/v1/listing/property-sales/{id}/:
     get:
-      operationId: v1_listing_property_sales_retrieve
+      operationId: api_v1_listing_property_sales_retrieve
       parameters:
       - in: path
         name: id
@@ -6940,7 +6940,7 @@ paths:
           description: ''
   /api/v1/listing/property-sales/{id}/contact/:
     get:
-      operationId: v1_listing_property_sales_contact_retrieve
+      operationId: api_v1_listing_property_sales_contact_retrieve
       parameters:
       - in: path
         name: id
@@ -6970,7 +6970,7 @@ paths:
           description: ''
   /api/v1/listing/property-sales/{id}/request-contact/:
     post:
-      operationId: v1_listing_property_sales_request_contact_create
+      operationId: api_v1_listing_property_sales_request_contact_create
       parameters:
       - in: path
         name: id
@@ -7026,7 +7026,7 @@ paths:
           description: ''
   /api/v1/listing/property-sales/{id}/unverify/:
     post:
-      operationId: v1_listing_property_sales_unverify_create
+      operationId: api_v1_listing_property_sales_unverify_create
       parameters:
       - in: path
         name: id
@@ -7059,7 +7059,7 @@ paths:
           description: ''
   /api/v1/listing/property-sales/{id}/verify/:
     post:
-      operationId: v1_listing_property_sales_verify_create
+      operationId: api_v1_listing_property_sales_verify_create
       parameters:
       - in: path
         name: id
@@ -7092,7 +7092,7 @@ paths:
           description: ''
   /api/v1/listing/property-sales/guest-otp/:
     post:
-      operationId: v1_listing_property_sales_guest_otp_create
+      operationId: api_v1_listing_property_sales_guest_otp_create
       summary: Request guest property-sale contact reveal phone OTP
       tags:
       - Property Sales
@@ -7121,7 +7121,7 @@ paths:
           description: ''
   /api/v1/listing/rooms/:
     get:
-      operationId: v1_listing_rooms_list
+      operationId: api_v1_listing_rooms_list
       description: "\n        Returns a list of room listings. Provides `price_quote`\
         \ and seasonal details \n        if `check_in` and `check_out` parameters\
         \ are supplied.\n        "
@@ -7169,7 +7169,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedRoomListingList'
           description: ''
     post:
-      operationId: v1_listing_rooms_create
+      operationId: api_v1_listing_rooms_create
       tags:
       - Accommodations
       requestBody:
@@ -7195,7 +7195,7 @@ paths:
           description: ''
   /api/v1/listing/rooms/{id}/:
     get:
-      operationId: v1_listing_rooms_retrieve
+      operationId: api_v1_listing_rooms_retrieve
       description: "\n        Returns detailed information about a room listing. \n\
         \        Highly recommended: Provide `check_in` and `check_out` query parameters\
         \ to receive a \n        comprehensive `price_quote` object including platform\
@@ -7234,7 +7234,7 @@ paths:
                 $ref: '#/components/schemas/RoomListing'
           description: ''
     patch:
-      operationId: v1_listing_rooms_partial_update
+      operationId: api_v1_listing_rooms_partial_update
       parameters:
       - in: path
         name: id
@@ -7266,7 +7266,7 @@ paths:
                 $ref: '#/components/schemas/RoomListing'
           description: ''
     delete:
-      operationId: v1_listing_rooms_destroy
+      operationId: api_v1_listing_rooms_destroy
       parameters:
       - in: path
         name: id
@@ -7284,7 +7284,7 @@ paths:
           description: No response body
   /api/v1/listing/rooms/{id}/price-preview/:
     get:
-      operationId: v1_listing_rooms_price_preview_retrieve
+      operationId: api_v1_listing_rooms_price_preview_retrieve
       description: '**DEPRECATED**: This endpoint is deprecated and will be removed
         in a future version. Use the main room detail endpoint with check_in/check_out
         query parameters instead: `GET /rooms/{id}/?check_in=YYYY-MM-DD&check_out=YYYY-MM-DD`.
@@ -7336,7 +7336,7 @@ paths:
           description: ''
   /api/v1/listing/rooms/{id}/unverify/:
     post:
-      operationId: v1_listing_rooms_unverify_create
+      operationId: api_v1_listing_rooms_unverify_create
       parameters:
       - in: path
         name: id
@@ -7369,7 +7369,7 @@ paths:
           description: ''
   /api/v1/listing/rooms/{id}/verify/:
     post:
-      operationId: v1_listing_rooms_verify_create
+      operationId: api_v1_listing_rooms_verify_create
       parameters:
       - in: path
         name: id
@@ -7402,7 +7402,7 @@ paths:
           description: ''
   /api/v1/listing/rooms/availability-matrix/:
     get:
-      operationId: v1_listing_rooms_availability_matrix_retrieve
+      operationId: api_v1_listing_rooms_availability_matrix_retrieve
       tags:
       - Accommodations
       security:
@@ -7416,7 +7416,7 @@ paths:
           description: ''
   /api/v1/listing/search/:
     get:
-      operationId: v1_listing_search_retrieve
+      operationId: api_v1_listing_search_retrieve
       summary: Search listings with optional radius context
       parameters:
       - in: query
@@ -7483,7 +7483,7 @@ paths:
           description: ''
   /api/v1/listing/search/suggestions/:
     get:
-      operationId: v1_listing_search_suggestions_list
+      operationId: api_v1_listing_search_suggestions_list
       summary: Search suggestions for listing discovery
       parameters:
       - in: query
@@ -7539,7 +7539,7 @@ paths:
           description: ''
   /api/v1/listing/seasonal-rates/:
     get:
-      operationId: v1_listing_seasonal_rates_list
+      operationId: api_v1_listing_seasonal_rates_list
       description: API for Owners to manage Rates associated with Seasons.
       parameters:
       - name: page
@@ -7566,7 +7566,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedSeasonalRateList'
           description: ''
     post:
-      operationId: v1_listing_seasonal_rates_create
+      operationId: api_v1_listing_seasonal_rates_create
       description: API for Owners to manage Rates associated with Seasons.
       tags:
       - Season Management
@@ -7593,7 +7593,7 @@ paths:
           description: ''
   /api/v1/listing/seasonal-rates/{id}/:
     get:
-      operationId: v1_listing_seasonal_rates_retrieve
+      operationId: api_v1_listing_seasonal_rates_retrieve
       description: API for Owners to manage Rates associated with Seasons.
       parameters:
       - in: path
@@ -7615,7 +7615,7 @@ paths:
                 $ref: '#/components/schemas/SeasonalRate'
           description: ''
     put:
-      operationId: v1_listing_seasonal_rates_update
+      operationId: api_v1_listing_seasonal_rates_update
       description: API for Owners to manage Rates associated with Seasons.
       parameters:
       - in: path
@@ -7649,7 +7649,7 @@ paths:
                 $ref: '#/components/schemas/SeasonalRate'
           description: ''
     patch:
-      operationId: v1_listing_seasonal_rates_partial_update
+      operationId: api_v1_listing_seasonal_rates_partial_update
       description: API for Owners to manage Rates associated with Seasons.
       parameters:
       - in: path
@@ -7682,7 +7682,7 @@ paths:
                 $ref: '#/components/schemas/SeasonalRate'
           description: ''
     delete:
-      operationId: v1_listing_seasonal_rates_destroy
+      operationId: api_v1_listing_seasonal_rates_destroy
       description: API for Owners to manage Rates associated with Seasons.
       parameters:
       - in: path
@@ -7701,7 +7701,7 @@ paths:
           description: No response body
   /api/v1/listing/seasons/:
     get:
-      operationId: v1_listing_seasons_list
+      operationId: api_v1_listing_seasons_list
       description: API for Owners to manage Seasons (e.g., Summer, Christmas).
       parameters:
       - name: page
@@ -7728,7 +7728,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedSeasonList'
           description: ''
     post:
-      operationId: v1_listing_seasons_create
+      operationId: api_v1_listing_seasons_create
       description: API for Owners to manage Seasons (e.g., Summer, Christmas).
       tags:
       - Season Management
@@ -7755,7 +7755,7 @@ paths:
           description: ''
   /api/v1/listing/seasons/{id}/:
     get:
-      operationId: v1_listing_seasons_retrieve
+      operationId: api_v1_listing_seasons_retrieve
       description: API for Owners to manage Seasons (e.g., Summer, Christmas).
       parameters:
       - in: path
@@ -7777,7 +7777,7 @@ paths:
                 $ref: '#/components/schemas/Season'
           description: ''
     put:
-      operationId: v1_listing_seasons_update
+      operationId: api_v1_listing_seasons_update
       description: API for Owners to manage Seasons (e.g., Summer, Christmas).
       parameters:
       - in: path
@@ -7811,7 +7811,7 @@ paths:
                 $ref: '#/components/schemas/Season'
           description: ''
     patch:
-      operationId: v1_listing_seasons_partial_update
+      operationId: api_v1_listing_seasons_partial_update
       description: API for Owners to manage Seasons (e.g., Summer, Christmas).
       parameters:
       - in: path
@@ -7844,7 +7844,7 @@ paths:
                 $ref: '#/components/schemas/Season'
           description: ''
     delete:
-      operationId: v1_listing_seasons_destroy
+      operationId: api_v1_listing_seasons_destroy
       description: API for Owners to manage Seasons (e.g., Summer, Christmas).
       parameters:
       - in: path
@@ -7863,7 +7863,7 @@ paths:
           description: No response body
   /api/v1/listing/stays/availability/{id}/update/:
     put:
-      operationId: v1_listing_stays_availability_update_update
+      operationId: api_v1_listing_stays_availability_update_update
       description: |-
         Update a StayAvailability instance.
         Only the hotel owner (company) or admin can update.
@@ -7920,7 +7920,7 @@ paths:
           description: ''
   /api/v1/listing/stays/search/:
     get:
-      operationId: v1_listing_stays_search_retrieve
+      operationId: api_v1_listing_stays_search_retrieve
       description: Returns a list of hotels that have availability for the given date
         range and number of guests.
       summary: Search available stays
@@ -7952,7 +7952,7 @@ paths:
         description: Number of guests
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -7972,13 +7972,10 @@ paths:
           description: ''
   /api/v1/listing/terms/:
     get:
-      operationId: v1_listing_terms_list
+      operationId: api_v1_listing_terms_list
       description: |-
-        API endpoints for retrieving Terms & Conditions.
-
-        - list: Get all T&C (admin only)
-        - retrieve: Get specific T&C by ID
-        - hotel/{hotel_id}: Get active T&C for a hotel
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
       parameters:
       - name: page
         required: false
@@ -8006,13 +8003,11 @@ paths:
           description: ''
   /api/v1/listing/terms/{id}/:
     get:
-      operationId: v1_listing_terms_retrieve
+      operationId: api_v1_listing_terms_retrieve
       description: |-
-        API endpoints for retrieving Terms & Conditions.
-
-        - list: Get all T&C (admin only)
-        - retrieve: Get specific T&C by ID
-        - hotel/{hotel_id}: Get active T&C for a hotel
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: Get terms details by record ID
       parameters:
       - in: path
         name: id
@@ -8031,14 +8026,160 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TermsAndConditions'
+                $ref: '#/components/schemas/TermsAndConditionsManagement'
           description: ''
+        '404':
+          description: No response body
+    patch:
+      operationId: api_v1_listing_terms_partial_update
+      description: |-
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: Update a draft terms record
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Terms and Conditions.
+        required: true
+      tags:
+      - Terms & Conditions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedTermsAndConditionsPatchRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedTermsAndConditionsPatchRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedTermsAndConditionsPatchRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TermsAndConditionsManagement'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          description: No response body
+    delete:
+      operationId: api_v1_listing_terms_destroy
+      description: |-
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: Delete a draft terms record
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Terms and Conditions.
+        required: true
+      tags:
+      - Terms & Conditions
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          description: No response body
+  /api/v1/listing/terms/{id}/archive/:
+    post:
+      operationId: api_v1_listing_terms_archive_create
+      description: |-
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: Archive an active terms record
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Terms and Conditions.
+        required: true
+      tags:
+      - Terms & Conditions
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TermsAndConditionsManagement'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          description: No response body
+  /api/v1/listing/terms/{id}/publish/:
+    post:
+      operationId: api_v1_listing_terms_publish_create
+      description: |-
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: Publish a draft terms record
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Terms and Conditions.
+        required: true
+      tags:
+      - Terms & Conditions
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TermsAndConditionsManagement'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          description: No response body
   /api/v1/listing/terms/company/{company_id}/:
     get:
-      operationId: v1_listing_terms_company_retrieve
-      description: Retrieve the currently active T&C for a specific company (Car Rental,
-        etc.)
-      summary: Get active Terms & Conditions for a company (Car Rental)
+      operationId: api_v1_listing_terms_company_retrieve
+      description: Retrieve the currently active T&C for a specific company scope
+      summary: Get active Terms & Conditions for a company
       parameters:
       - in: path
         name: company_id
@@ -8060,9 +8201,100 @@ paths:
           description: ''
         '404':
           description: No response body
+    post:
+      operationId: api_v1_listing_terms_company_create
+      description: |-
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: Create draft Terms & Conditions for a company
+      parameters:
+      - in: path
+        name: company_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Terms & Conditions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TermsAndConditionsCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TermsAndConditionsCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TermsAndConditionsCreateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TermsAndConditionsManagement'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          description: No response body
+  /api/v1/listing/terms/company/{company_id}/history/:
+    get:
+      operationId: api_v1_listing_terms_company_history_list
+      description: |-
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: List terms history for a company
+      parameters:
+      - in: path
+        name: company_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - Terms & Conditions
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTermsAndConditionsManagementList'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          description: No response body
   /api/v1/listing/terms/guesthouse/{gh_id}/:
     get:
-      operationId: v1_listing_terms_guesthouse_retrieve
+      operationId: api_v1_listing_terms_guesthouse_retrieve
       description: Retrieve the currently active T&C for a specific guest house profile
       summary: Get active Terms & Conditions for a guest house
       parameters:
@@ -8086,9 +8318,100 @@ paths:
           description: ''
         '404':
           description: No response body
+    post:
+      operationId: api_v1_listing_terms_guesthouse_create
+      description: |-
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: Create draft Terms & Conditions for a guest house
+      parameters:
+      - in: path
+        name: gh_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Terms & Conditions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TermsAndConditionsCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TermsAndConditionsCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TermsAndConditionsCreateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TermsAndConditionsManagement'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          description: No response body
+  /api/v1/listing/terms/guesthouse/{gh_id}/history/:
+    get:
+      operationId: api_v1_listing_terms_guesthouse_history_list
+      description: |-
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: List terms history for a guest house
+      parameters:
+      - in: path
+        name: gh_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - Terms & Conditions
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTermsAndConditionsManagementList'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          description: No response body
   /api/v1/listing/terms/hotel/{hotel_id}/:
     get:
-      operationId: v1_listing_terms_hotel_retrieve
+      operationId: api_v1_listing_terms_hotel_retrieve
       description: Retrieve the currently active T&C for a specific hotel
       summary: Get active Terms & Conditions for a hotel
       parameters:
@@ -8112,9 +8435,100 @@ paths:
           description: ''
         '404':
           description: No response body
+    post:
+      operationId: api_v1_listing_terms_hotel_create
+      description: |-
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: Create draft Terms & Conditions for a hotel
+      parameters:
+      - in: path
+        name: hotel_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Terms & Conditions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TermsAndConditionsCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TermsAndConditionsCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TermsAndConditionsCreateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TermsAndConditionsManagement'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          description: No response body
+  /api/v1/listing/terms/hotel/{hotel_id}/history/:
+    get:
+      operationId: api_v1_listing_terms_hotel_history_list
+      description: |-
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: List terms history for a hotel
+      parameters:
+      - in: path
+        name: hotel_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - Terms & Conditions
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTermsAndConditionsManagementList'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          description: No response body
   /api/v1/listing/within-bounds/:
     get:
-      operationId: v1_listing_within_bounds_retrieve
+      operationId: api_v1_listing_within_bounds_retrieve
       summary: Find listings within viewport bounds
       parameters:
       - in: query
@@ -8175,7 +8589,7 @@ paths:
           description: ''
   /api/v1/maps/autocomplete/:
     get:
-      operationId: v1_maps_autocomplete_list
+      operationId: api_v1_maps_autocomplete_list
       summary: Address autocomplete
       parameters:
       - in: query
@@ -8219,7 +8633,7 @@ paths:
           description: ''
   /api/v1/maps/place-detail/:
     post:
-      operationId: v1_maps_place_detail_create
+      operationId: api_v1_maps_place_detail_create
       summary: Resolve place detail
       tags:
       - Maps
@@ -8260,7 +8674,7 @@ paths:
           description: ''
   /api/v1/maps/reverse-geocode/:
     get:
-      operationId: v1_maps_reverse_geocode_retrieve
+      operationId: api_v1_maps_reverse_geocode_retrieve
       summary: Reverse geocode coordinates
       parameters:
       - in: query
@@ -8304,7 +8718,7 @@ paths:
           description: ''
   /api/v1/notifications/:
     get:
-      operationId: v1_notifications_list
+      operationId: api_v1_notifications_list
       description: Retrieve a paginated list of notifications for the authenticated
         user. Supports filtering by read status, notification type, priority, and
         date range.
@@ -8366,7 +8780,7 @@ paths:
           description: ''
   /api/v1/notifications/{id}/:
     get:
-      operationId: v1_notifications_retrieve
+      operationId: api_v1_notifications_retrieve
       description: Get details of a specific notification. Users can only access their
         own notifications.
       summary: Retrieve a single notification
@@ -8390,7 +8804,7 @@ paths:
                 $ref: '#/components/schemas/Notification'
           description: ''
     delete:
-      operationId: v1_notifications_destroy
+      operationId: api_v1_notifications_destroy
       description: Permanently delete a specific notification. Users can only delete
         their own notifications.
       summary: Delete a notification
@@ -8411,7 +8825,7 @@ paths:
           description: No response body
   /api/v1/notifications/{id}/mark-read/:
     patch:
-      operationId: v1_notifications_mark_read_partial_update
+      operationId: api_v1_notifications_mark_read_partial_update
       description: Marks a single notification as read and returns the updated notification.
       summary: Mark notification as read
       parameters:
@@ -8453,7 +8867,7 @@ paths:
           description: ''
   /api/v1/notifications/bulk-delete/:
     delete:
-      operationId: v1_notifications_bulk_delete_destroy
+      operationId: api_v1_notifications_bulk_delete_destroy
       description: Delete multiple notifications by ID (max 100).
       summary: Bulk delete notifications
       tags:
@@ -8477,7 +8891,7 @@ paths:
           description: ''
   /api/v1/notifications/mark-all-read/:
     post:
-      operationId: v1_notifications_mark_all_read_create
+      operationId: api_v1_notifications_mark_all_read_create
       description: Marks all unread notifications for the current user as read.
       summary: Mark all notifications as read
       tags:
@@ -8506,7 +8920,7 @@ paths:
           description: ''
   /api/v1/notifications/mark-read-batch/:
     post:
-      operationId: v1_notifications_mark_read_batch_create
+      operationId: api_v1_notifications_mark_read_batch_create
       description: Mark multiple specific notifications as read by ID (max 100).
       summary: Batch mark notifications as read
       tags:
@@ -8535,7 +8949,7 @@ paths:
           description: ''
   /api/v1/notifications/preferences/:
     get:
-      operationId: v1_notifications_preferences_retrieve
+      operationId: api_v1_notifications_preferences_retrieve
       description: Retrieve the current user's notification preferences.
       summary: Get notification preferences
       tags:
@@ -8550,7 +8964,7 @@ paths:
                 $ref: '#/components/schemas/NotificationPreference'
           description: ''
     put:
-      operationId: v1_notifications_preferences_update
+      operationId: api_v1_notifications_preferences_update
       description: Update the current user's notification preferences.
       summary: Update notification preferences
       tags:
@@ -8584,7 +8998,7 @@ paths:
           description: ''
   /api/v1/notifications/summary/:
     get:
-      operationId: v1_notifications_summary_retrieve
+      operationId: api_v1_notifications_summary_retrieve
       description: Returns aggregated notification statistics by type and priority.
       summary: Get notification summary
       tags:
@@ -8601,7 +9015,7 @@ paths:
           description: ''
   /api/v1/notifications/templates/:
     get:
-      operationId: v1_notifications_templates_list
+      operationId: api_v1_notifications_templates_list
       parameters:
       - name: page
         required: false
@@ -8627,7 +9041,7 @@ paths:
                 $ref: '#/components/schemas/PaginatedNotificationTemplateList'
           description: ''
     post:
-      operationId: v1_notifications_templates_create
+      operationId: api_v1_notifications_templates_create
       tags:
       - Notifications
       requestBody:
@@ -8653,7 +9067,7 @@ paths:
           description: ''
   /api/v1/notifications/templates/{id}/:
     get:
-      operationId: v1_notifications_templates_retrieve
+      operationId: api_v1_notifications_templates_retrieve
       parameters:
       - in: path
         name: id
@@ -8674,7 +9088,7 @@ paths:
                 $ref: '#/components/schemas/NotificationTemplate'
           description: ''
     put:
-      operationId: v1_notifications_templates_update
+      operationId: api_v1_notifications_templates_update
       parameters:
       - in: path
         name: id
@@ -8707,7 +9121,7 @@ paths:
                 $ref: '#/components/schemas/NotificationTemplate'
           description: ''
     patch:
-      operationId: v1_notifications_templates_partial_update
+      operationId: api_v1_notifications_templates_partial_update
       parameters:
       - in: path
         name: id
@@ -8739,7 +9153,7 @@ paths:
                 $ref: '#/components/schemas/NotificationTemplate'
           description: ''
     delete:
-      operationId: v1_notifications_templates_destroy
+      operationId: api_v1_notifications_templates_destroy
       parameters:
       - in: path
         name: id
@@ -8757,7 +9171,7 @@ paths:
           description: No response body
   /api/v1/notifications/unread-count/:
     get:
-      operationId: v1_notifications_unread_count_retrieve
+      operationId: api_v1_notifications_unread_count_retrieve
       description: Returns the total number of unread notifications for the current
         user.
       summary: Get unread notification count
@@ -8775,7 +9189,7 @@ paths:
           description: ''
   /api/v1/payment/admin/transactions/:
     get:
-      operationId: v1_payment_admin_transactions_list
+      operationId: api_v1_payment_admin_transactions_list
       parameters:
       - name: page
         required: false
@@ -8802,7 +9216,7 @@ paths:
           description: ''
   /api/v1/payment/admin/transactions/{id}/:
     get:
-      operationId: v1_payment_admin_transactions_retrieve
+      operationId: api_v1_payment_admin_transactions_retrieve
       parameters:
       - in: path
         name: id
@@ -8824,7 +9238,7 @@ paths:
           description: ''
   /api/v1/payment/admin/transactions/{id}/dispute/:
     patch:
-      operationId: v1_payment_admin_transactions_dispute_partial_update
+      operationId: api_v1_payment_admin_transactions_dispute_partial_update
       summary: Update a payment transaction dispute
       parameters:
       - in: path
@@ -8865,7 +9279,7 @@ paths:
           description: ''
   /api/v1/payment/admin/transactions/{id}/dispute/open/:
     post:
-      operationId: v1_payment_admin_transactions_dispute_open_create
+      operationId: api_v1_payment_admin_transactions_dispute_open_create
       summary: Open a payment transaction dispute
       parameters:
       - in: path
@@ -8906,7 +9320,7 @@ paths:
           description: ''
   /api/v1/payment/admin/transactions/{id}/dispute/resolve/:
     post:
-      operationId: v1_payment_admin_transactions_dispute_resolve_create
+      operationId: api_v1_payment_admin_transactions_dispute_resolve_create
       summary: Resolve a payment transaction dispute
       parameters:
       - in: path
@@ -8947,7 +9361,7 @@ paths:
           description: ''
   /api/v1/payment/callback/chapa/:
     get:
-      operationId: v1_payment_callback_chapa_retrieve
+      operationId: api_v1_payment_callback_chapa_retrieve
       description: Handle GET callback from Chapa after user completes payment.
       summary: Chapa Payment Callback (Internal)
       parameters:
@@ -8983,7 +9397,7 @@ paths:
           description: ''
   /api/v1/payment/cancel/{tx_ref}/:
     put:
-      operationId: v1_payment_cancel_update
+      operationId: api_v1_payment_cancel_update
       description: Cancel a payment transaction that is still in PENDING status. This
         endpoint does not issue refunds because the platform does not support refunds.
       summary: Cancel a pending payment
@@ -9024,7 +9438,7 @@ paths:
           description: ''
   /api/v1/payment/initiate/:
     post:
-      operationId: v1_payment_initiate_create
+      operationId: api_v1_payment_initiate_create
       description: "\n        Initiates a payment transaction via Chapa for a specific\
         \ booking.\n        The server calculates and locks the exchange rate at the\
         \ moment of initiation \n        to ensure price consistency throughout the\
@@ -9106,7 +9520,7 @@ paths:
           description: ''
   /api/v1/payment/ledger/:
     get:
-      operationId: v1_payment_ledger_list
+      operationId: api_v1_payment_ledger_list
       description: |-
         API for Owners to view their financial ledger.
         Supports search by tx_ref, booking_reference, customer_name.
@@ -9174,7 +9588,7 @@ paths:
           description: ''
   /api/v1/payment/ledger/{id}/:
     get:
-      operationId: v1_payment_ledger_retrieve
+      operationId: api_v1_payment_ledger_retrieve
       description: |-
         API for Owners to view their financial ledger.
         Supports search by tx_ref, booking_reference, customer_name.
@@ -9200,7 +9614,7 @@ paths:
           description: ''
   /api/v1/payment/subaccounts/:
     post:
-      operationId: v1_payment_subaccounts_create
+      operationId: api_v1_payment_subaccounts_create
       description: Register or update the authenticated owner's Chapa subaccount.
         Admins may target any supported owner.
       summary: Register Chapa subaccount
@@ -9250,7 +9664,7 @@ paths:
           description: ''
   /api/v1/payment/subaccounts/me/:
     get:
-      operationId: v1_payment_subaccounts_me_retrieve
+      operationId: api_v1_payment_subaccounts_me_retrieve
       description: Return the authenticated owner's Chapa subaccount and split configuration.
       summary: Current owner Chapa subaccount
       tags:
@@ -9273,7 +9687,7 @@ paths:
           description: ''
   /api/v1/payment/verify-public/{tx_ref}/:
     get:
-      operationId: v1_payment_verify_public_retrieve
+      operationId: api_v1_payment_verify_public_retrieve
       description: Verify the status of a payment transaction without authentication.
       summary: Publicly verify payment status
       parameters:
@@ -9303,7 +9717,7 @@ paths:
           description: ''
   /api/v1/payment/verify/{tx_ref}/:
     get:
-      operationId: v1_payment_verify_retrieve
+      operationId: api_v1_payment_verify_retrieve
       description: "\n    Verify the status of a payment transaction using its reference.\n\
         \    Returns transaction details and Chapa verification result if found, \n\
         \    otherwise returns only the Chapa verification result.\n    "
@@ -9341,7 +9755,7 @@ paths:
           description: ''
   /api/v1/payment/webhook/chapa/:
     post:
-      operationId: v1_payment_webhook_chapa_create
+      operationId: api_v1_payment_webhook_chapa_create
       description: Handle POST webhook from Chapa for async payment status updates.
       summary: Chapa Payment Webhook (Internal)
       tags:
@@ -9377,7 +9791,7 @@ paths:
           description: ''
   /api/v1/promotions/campaigns/:
     get:
-      operationId: v1_promotions_campaigns_list
+      operationId: api_v1_promotions_campaigns_list
       parameters:
       - name: page
         required: false
@@ -9392,7 +9806,7 @@ paths:
         schema:
           type: integer
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       responses:
@@ -9403,9 +9817,9 @@ paths:
                 $ref: '#/components/schemas/PaginatedPromotionCampaignList'
           description: ''
     post:
-      operationId: v1_promotions_campaigns_create
+      operationId: api_v1_promotions_campaigns_create
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -9429,7 +9843,7 @@ paths:
           description: ''
   /api/v1/promotions/campaigns/{id}/:
     get:
-      operationId: v1_promotions_campaigns_retrieve
+      operationId: api_v1_promotions_campaigns_retrieve
       parameters:
       - in: path
         name: id
@@ -9439,7 +9853,7 @@ paths:
         description: A UUID string identifying this promotion campaign.
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       responses:
@@ -9450,7 +9864,7 @@ paths:
                 $ref: '#/components/schemas/PromotionCampaignDetail'
           description: ''
     put:
-      operationId: v1_promotions_campaigns_update
+      operationId: api_v1_promotions_campaigns_update
       parameters:
       - in: path
         name: id
@@ -9460,7 +9874,7 @@ paths:
         description: A UUID string identifying this promotion campaign.
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -9483,7 +9897,7 @@ paths:
                 $ref: '#/components/schemas/PromotionCampaign'
           description: ''
     patch:
-      operationId: v1_promotions_campaigns_partial_update
+      operationId: api_v1_promotions_campaigns_partial_update
       parameters:
       - in: path
         name: id
@@ -9493,7 +9907,7 @@ paths:
         description: A UUID string identifying this promotion campaign.
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -9515,7 +9929,7 @@ paths:
                 $ref: '#/components/schemas/PromotionCampaign'
           description: ''
     delete:
-      operationId: v1_promotions_campaigns_destroy
+      operationId: api_v1_promotions_campaigns_destroy
       parameters:
       - in: path
         name: id
@@ -9525,7 +9939,7 @@ paths:
         description: A UUID string identifying this promotion campaign.
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       responses:
@@ -9533,7 +9947,7 @@ paths:
           description: No response body
   /api/v1/promotions/campaigns/{id}/placements/:
     get:
-      operationId: v1_promotions_campaigns_placements_retrieve
+      operationId: api_v1_promotions_campaigns_placements_retrieve
       parameters:
       - in: path
         name: id
@@ -9543,7 +9957,7 @@ paths:
         description: A UUID string identifying this promotion campaign.
         required: true
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       responses:
@@ -9554,7 +9968,7 @@ paths:
                 $ref: '#/components/schemas/PromotionCampaign'
           description: ''
     post:
-      operationId: v1_promotions_campaigns_placements_create
+      operationId: api_v1_promotions_campaigns_placements_create
       parameters:
       - in: path
         name: id
@@ -9564,7 +9978,7 @@ paths:
         description: A UUID string identifying this promotion campaign.
         required: true
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -9588,9 +10002,9 @@ paths:
           description: ''
   /api/v1/promotions/placements/:
     get:
-      operationId: v1_promotions_placements_list
+      operationId: api_v1_promotions_placements_list
       tags:
-      - v1
+      - api
       security:
       - jwtAuth: []
       - {}
@@ -9605,9 +10019,9 @@ paths:
           description: ''
   /api/v1/promotions/track/:
     post:
-      operationId: v1_promotions_track_create
+      operationId: api_v1_promotions_track_create
       tags:
-      - v1
+      - api
       requestBody:
         content:
           application/json:
@@ -9696,8 +10110,9 @@ components:
           description: Whether this addon is currently available for booking
         max_quantity_per_booking:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
           description: Maximum number of units per booking (null = unlimited)
         requires_inventory:
@@ -9705,8 +10120,9 @@ components:
           description: Whether this addon has limited daily inventory
         daily_capacity:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
           description: Total available units per day (if inventory tracked)
         icon:
@@ -9715,8 +10131,9 @@ components:
           maxLength: 50
         display_order:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Order in which addon appears in lists (lower numbers first)
         created_at:
           type: string
@@ -9859,8 +10276,9 @@ components:
           description: Whether this addon is currently available for booking
         max_quantity_per_booking:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
           description: Maximum number of units per booking (null = unlimited)
         requires_inventory:
@@ -9868,8 +10286,9 @@ components:
           description: Whether this addon has limited daily inventory
         daily_capacity:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
           description: Total available units per day (if inventory tracked)
         icon:
@@ -9878,8 +10297,9 @@ components:
           maxLength: 50
         display_order:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Order in which addon appears in lists (lower numbers first)
       required:
       - hotel
@@ -10219,8 +10639,9 @@ components:
           $ref: '#/components/schemas/AddonCategoryEnum'
         quantity:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Number of units (e.g., 2 breakfasts)
         price_per_unit:
           type: string
@@ -10327,8 +10748,9 @@ components:
           description: Nested room identification
         units_booked:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         nights:
           type: integer
           readOnly: true
@@ -10682,8 +11104,9 @@ components:
           format: date
         available_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
       required:
       - date
       - id
@@ -10842,8 +11265,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         individual_owner:
           type: string
@@ -10887,13 +11311,15 @@ components:
           maxLength: 100
         year:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Manufacturing year of the car.
         mileage:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Mileage (km)
           description: Mileage of the car in kilometers.
         fuel_type:
@@ -10906,8 +11332,9 @@ components:
           $ref: '#/components/schemas/ConditionEnum'
         seats:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         listing_type:
           allOf:
           - $ref: '#/components/schemas/ListingTypeEnum'
@@ -10930,8 +11357,9 @@ components:
           title: Class Category
         quantity:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         requires_code_3:
           type: boolean
           description: Whether self-drive renters must provide a Code 3 license/permit.
@@ -10994,8 +11422,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         individual_owner:
           type: string
@@ -11040,13 +11469,15 @@ components:
           maxLength: 100
         year:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Manufacturing year of the car.
         mileage:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Mileage (km)
           description: Mileage of the car in kilometers.
         fuel_type:
@@ -11059,8 +11490,9 @@ components:
           $ref: '#/components/schemas/ConditionEnum'
         seats:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         listing_type:
           allOf:
           - $ref: '#/components/schemas/ListingTypeEnum'
@@ -11083,8 +11515,9 @@ components:
           title: Class Category
         quantity:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         requires_code_3:
           type: boolean
           description: Whether self-drive renters must provide a Code 3 license/permit.
@@ -11157,8 +11590,9 @@ components:
           description: Price of the service/product (if applicable).
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         is_active:
           type: boolean
@@ -11195,13 +11629,15 @@ components:
           maxLength: 100
         year:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Manufacturing year of the car.
         mileage:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Mileage (km)
           description: Mileage of the car in kilometers.
         fuel_type:
@@ -11234,8 +11670,9 @@ components:
           title: Class Category
         quantity:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         company:
           type: string
           format: uuid
@@ -11243,8 +11680,9 @@ components:
           description: The company that owns this listing.
         seats:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         individual_owner:
           type: string
           format: uuid
@@ -11641,8 +12079,9 @@ components:
           readOnly: true
         units_rent:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Quantity
           description: Number of cars being rented.
         price_per_unit:
@@ -11705,8 +12144,9 @@ components:
           format: uuid
         units_rent:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Quantity
           description: Number of cars being rented.
         price_per_unit:
@@ -11935,12 +12375,14 @@ components:
           maxLength: 100
         year:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         mileage:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Mileage (km)
         fuel_type:
           allOf:
@@ -11956,8 +12398,9 @@ components:
           title: Class Category
         seats:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         seller_contact_name:
           type: string
           maxLength: 150
@@ -12026,12 +12469,14 @@ components:
           maxLength: 100
         year:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         mileage:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Mileage (km)
         fuel_type:
           allOf:
@@ -12047,8 +12492,9 @@ components:
           title: Class Category
         seats:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         seller_contact_name:
           type: string
           maxLength: 150
@@ -12901,8 +13347,9 @@ components:
           readOnly: true
         units_booked:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         nightly_rate:
           type: string
           readOnly: true
@@ -13157,8 +13604,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         address:
           $ref: '#/components/schemas/AddressSchema'
@@ -13169,20 +13617,23 @@ components:
             format: uuid
         number_of_guests:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         total_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Total eventspace of This Type
           description: How many eventspace of this type exist in the property.
         space_type:
           $ref: '#/components/schemas/SpaceTypeEnum'
         floor_area_sqm:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
       required:
       - company_id
@@ -13223,8 +13674,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         address:
           $ref: '#/components/schemas/AddressSchemaRequest'
@@ -13241,20 +13693,23 @@ components:
           writeOnly: true
         number_of_guests:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         total_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Total eventspace of This Type
           description: How many eventspace of this type exist in the property.
         space_type:
           $ref: '#/components/schemas/SpaceTypeEnum'
         floor_area_sqm:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
       required:
       - company_id
@@ -13298,8 +13753,9 @@ components:
           description: Detailed description of the listing.
         number_of_guests:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         base_price:
           type: string
           format: decimal
@@ -13313,8 +13769,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         amenities:
           type: array
@@ -13322,16 +13779,18 @@ components:
             $ref: '#/components/schemas/AmenityResponseS'
         total_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Total eventspace of This Type
           description: How many eventspace of this type exist in the property.
         space_type:
           $ref: '#/components/schemas/SpaceTypeEnum'
         floor_area_sqm:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         conversion:
           allOf:
@@ -13813,8 +14272,9 @@ components:
           format: uuid
         units_booked:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         nightly_rate:
           type: string
           readOnly: true
@@ -13838,8 +14298,9 @@ components:
           format: uuid
         units_booked:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
       required:
       - room
     GuestHouseBookingPreviewRequest:
@@ -14233,8 +14694,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         amenities:
           type: array
@@ -14243,20 +14705,23 @@ components:
             format: uuid
         number_of_guests:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         total_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Total Rooms of This Type
           description: How many rooms of this type exist in the guest house.
         bed_type:
           $ref: '#/components/schemas/BedTypeEnum'
         room_size_sqm:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
       required:
       - guest_house_id
@@ -14292,8 +14757,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         amenities:
           type: array
@@ -14308,20 +14774,23 @@ components:
           writeOnly: true
         number_of_guests:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         total_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Total Rooms of This Type
           description: How many rooms of this type exist in the guest house.
         bed_type:
           $ref: '#/components/schemas/BedTypeEnum'
         room_size_sqm:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
       required:
       - guest_house_id
@@ -14372,8 +14841,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         amenities:
           type: array
@@ -14381,12 +14851,14 @@ components:
             $ref: '#/components/schemas/AmenityResponseS'
         number_of_guests:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         total_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Total Rooms of This Type
           description: How many rooms of this type exist in the guest house.
         available_units:
@@ -14396,8 +14868,9 @@ components:
           $ref: '#/components/schemas/BedTypeEnum'
         room_size_sqm:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         is_verified:
           type: boolean
@@ -14466,8 +14939,9 @@ components:
           format: uri
         stars:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         featured:
           type: boolean
@@ -14549,8 +15023,9 @@ components:
           format: binary
         stars:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         featured:
           type: boolean
@@ -16539,6 +17014,35 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TermsAndConditions'
+    PaginatedTermsAndConditionsManagementList:
+      type: object
+      properties:
+        count:
+          type: integer
+          example: 123
+        total_pages:
+          type: integer
+          example: 15
+        current_page:
+          type: integer
+          example: 1
+        page_size:
+          type: integer
+          example: 10
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=404
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?page=2
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/TermsAndConditionsManagement'
     PaginatedTransactionMonitorListList:
       type: object
       properties:
@@ -16696,8 +17200,9 @@ components:
           description: Whether this addon is currently available for booking
         max_quantity_per_booking:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
           description: Maximum number of units per booking (null = unlimited)
         requires_inventory:
@@ -16705,8 +17210,9 @@ components:
           description: Whether this addon has limited daily inventory
         daily_capacity:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
           description: Total available units per day (if inventory tracked)
         icon:
@@ -16715,8 +17221,9 @@ components:
           maxLength: 50
         display_order:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Order in which addon appears in lists (lower numbers first)
     PatchedAmenityResponseSRequest:
       type: object
@@ -16782,8 +17289,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         individual_owner:
           type: string
@@ -16828,13 +17336,15 @@ components:
           maxLength: 100
         year:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Manufacturing year of the car.
         mileage:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Mileage (km)
           description: Mileage of the car in kilometers.
         fuel_type:
@@ -16847,8 +17357,9 @@ components:
           $ref: '#/components/schemas/ConditionEnum'
         seats:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         listing_type:
           allOf:
           - $ref: '#/components/schemas/ListingTypeEnum'
@@ -16871,8 +17382,9 @@ components:
           title: Class Category
         quantity:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         requires_code_3:
           type: boolean
           description: Whether self-drive renters must provide a Code 3 license/permit.
@@ -17025,12 +17537,14 @@ components:
           maxLength: 100
         year:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         mileage:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Mileage (km)
         fuel_type:
           allOf:
@@ -17046,8 +17560,9 @@ components:
           title: Class Category
         seats:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         seller_contact_name:
           type: string
           maxLength: 150
@@ -17149,8 +17664,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         address:
           $ref: '#/components/schemas/AddressSchemaRequest'
@@ -17167,20 +17683,23 @@ components:
           writeOnly: true
         number_of_guests:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         total_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Total eventspace of This Type
           description: How many eventspace of this type exist in the property.
         space_type:
           $ref: '#/components/schemas/SpaceTypeEnum'
         floor_area_sqm:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
     PatchedFacilityRequest:
       type: object
@@ -17367,8 +17886,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         amenities:
           type: array
@@ -17383,20 +17903,23 @@ components:
           writeOnly: true
         number_of_guests:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         total_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Total Rooms of This Type
           description: How many rooms of this type exist in the guest house.
         bed_type:
           $ref: '#/components/schemas/BedTypeEnum'
         room_size_sqm:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
     PatchedHotelProfileRequest:
       type: object
@@ -17428,8 +17951,9 @@ components:
           format: binary
         stars:
           type: integer
-          maximum: 32767
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         featured:
           type: boolean
@@ -17596,12 +18120,14 @@ components:
           $ref: '#/components/schemas/PropertyListingTypeEnum'
         bedrooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         bathrooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         square_meters:
           type: string
           format: decimal
@@ -17658,8 +18184,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         address:
           $ref: '#/components/schemas/AddressRequest'
@@ -17676,20 +18203,23 @@ components:
           writeOnly: true
         number_of_guests:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         total_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Total Rooms of This Type
           description: How many rooms of this type exist in the property.
         bed_type:
           $ref: '#/components/schemas/BedTypeEnum'
         room_size_sqm:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         smoking_allowed:
           type: boolean
         children_allowed:
@@ -17738,16 +18268,35 @@ components:
           nullable: true
         priority:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
         active:
           type: boolean
         days_of_week: {}
         min_stay:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
+    PatchedTermsAndConditionsPatchRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Title of the terms document
+          maxLength: 255
+        content:
+          type: string
+          minLength: 1
+          description: Full T&C text in HTML or Markdown format
+        effective_date:
+          type: string
+          format: date
+        notes:
+          type: string
     PatchedUserUpdateRequest:
       type: object
       properties:
@@ -18462,8 +19011,9 @@ components:
           maxLength: 100
         display_order:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         is_active:
           type: boolean
         created_at:
@@ -18524,12 +19074,14 @@ components:
           $ref: '#/components/schemas/PropertyListingTypeEnum'
         bedrooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         bathrooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         square_meters:
           type: string
           format: decimal
@@ -18599,8 +19151,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         address:
           $ref: '#/components/schemas/Address'
@@ -18608,12 +19161,14 @@ components:
           $ref: '#/components/schemas/PropertyListingTypeEnum'
         bedrooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         bathrooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         square_meters:
           type: string
           format: decimal
@@ -18701,8 +19256,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         address:
           $ref: '#/components/schemas/AddressRequest'
@@ -18710,12 +19266,14 @@ components:
           $ref: '#/components/schemas/PropertyListingTypeEnum'
         bedrooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         bathrooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         square_meters:
           type: string
           format: decimal
@@ -18987,12 +19545,14 @@ components:
           $ref: '#/components/schemas/PropertySaleListingTypeEnum'
         bedrooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         bathrooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         square_meters:
           type: string
           format: decimal
@@ -19066,12 +19626,14 @@ components:
           $ref: '#/components/schemas/PropertySaleListingTypeEnum'
         bedrooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         bathrooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         square_meters:
           type: string
           format: decimal
@@ -19567,8 +20129,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         address:
           $ref: '#/components/schemas/Address'
@@ -19579,20 +20142,23 @@ components:
             format: uuid
         number_of_guests:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         total_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Total Rooms of This Type
           description: How many rooms of this type exist in the property.
         bed_type:
           $ref: '#/components/schemas/BedTypeEnum'
         room_size_sqm:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         smoking_allowed:
           type: boolean
         children_allowed:
@@ -19640,8 +20206,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         address:
           $ref: '#/components/schemas/AddressRequest'
@@ -19658,20 +20225,23 @@ components:
           writeOnly: true
         number_of_guests:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         total_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Total Rooms of This Type
           description: How many rooms of this type exist in the property.
         bed_type:
           $ref: '#/components/schemas/BedTypeEnum'
         room_size_sqm:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         smoking_allowed:
           type: boolean
         children_allowed:
@@ -19735,8 +20305,9 @@ components:
           maxLength: 3
         booking_forward_window_days:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           description: Maximum number of days ahead a booking can start for this listing.
         amenities:
           type: array
@@ -19744,20 +20315,23 @@ components:
             $ref: '#/components/schemas/AmenityResponseS'
         number_of_guests:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         total_units:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           title: Total Rooms of This Type
           description: How many rooms of this type exist in the property.
         bed_type:
           $ref: '#/components/schemas/BedTypeEnum'
         room_size_sqm:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
         smoking_allowed:
           type: boolean
         children_allowed:
@@ -20084,15 +20658,17 @@ components:
           nullable: true
         priority:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
         active:
           type: boolean
         days_of_week: {}
         min_stay:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
         target_name:
           type: string
@@ -20127,15 +20703,17 @@ components:
           nullable: true
         priority:
           type: integer
-          maximum: 2147483647
-          minimum: -2147483648
+          maximum: 9223372036854775807
+          minimum: -9223372036854775808
+          format: int64
         active:
           type: boolean
         days_of_week: {}
         min_stay:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
           nullable: true
       required:
       - season
@@ -20251,8 +20829,9 @@ components:
       properties:
         available_rooms:
           type: integer
-          maximum: 2147483647
+          maximum: 9223372036854775807
           minimum: 0
+          format: int64
     TaxLiabilityStatusEnum:
       enum:
       - applicable
@@ -20306,6 +20885,121 @@ components:
       - title
       - updated_at
       - version
+    TermsAndConditionsCreateRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Title of the terms document
+          maxLength: 255
+        content:
+          type: string
+          minLength: 1
+          description: Full T&C text in HTML or Markdown format
+        effective_date:
+          type: string
+          format: date
+        notes:
+          type: string
+      required:
+      - content
+      - title
+    TermsAndConditionsManagement:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
+        scope_type:
+          type: string
+          readOnly: true
+        scope_id:
+          type: string
+          format: uuid
+          readOnly: true
+        title:
+          type: string
+          readOnly: true
+          description: Title of the terms document
+        content:
+          type: string
+          readOnly: true
+          description: Full T&C text in HTML or Markdown format
+        version:
+          type: string
+          readOnly: true
+          description: Version identifier (e.g., '1.0', '2024-Q1', 'v2.5')
+        status:
+          allOf:
+          - $ref: '#/components/schemas/TermsAndConditionsManagementStatusEnum'
+          readOnly: true
+          description: |-
+            Lifecycle state for this version
+
+            * `draft` - Draft
+            * `active` - Active
+            * `archived` - Archived
+        is_active:
+          type: boolean
+          readOnly: true
+          description: Only one version should be active at a time per object
+        effective_date:
+          type: string
+          format: date
+          readOnly: true
+          description: Date when this version becomes active
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        published_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When this version was published
+        archived_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When this version was archived
+        created_by:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+      required:
+      - archived_at
+      - content
+      - created_at
+      - created_by
+      - effective_date
+      - id
+      - is_active
+      - published_at
+      - scope_id
+      - scope_type
+      - status
+      - title
+      - updated_at
+      - version
+    TermsAndConditionsManagementStatusEnum:
+      enum:
+      - draft
+      - active
+      - archived
+      type: string
+      description: |-
+        * `draft` - Draft
+        * `active` - Active
+        * `archived` - Archived
     TimeseriesItem:
       type: object
       properties:
@@ -20775,14 +21469,26 @@ components:
           - $ref: '#/components/schemas/Role'
           readOnly: true
           nullable: true
+        company:
+          allOf:
+          - $ref: '#/components/schemas/LoginProfileSummary'
+          nullable: true
+          readOnly: true
+        individual_owner:
+          allOf:
+          - $ref: '#/components/schemas/LoginProfileSummary'
+          nullable: true
+          readOnly: true
         workspace:
           allOf:
           - $ref: '#/components/schemas/WorkspaceInfo'
           nullable: true
           readOnly: true
       required:
+      - company
       - email
       - id
+      - individual_owner
       - phone_verified
       - role
       - workspace

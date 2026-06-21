@@ -1176,19 +1176,24 @@ class OwnerComplianceAgreementRevokeSerializer(serializers.Serializer):
 class HotelProfileResponseSerializer(serializers.ModelSerializer):
     company = CompanyProfileResponseSerializer()
     images = ListingImageSerializer(many=True)
+    address = AddressSerializer(allow_null=True)
     facilities = FacilityResponseSerializer(many=True)
     is_favorite = serializers.SerializerMethodField()
     verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
 
     class Meta:
         model = HotelProfile
-    class Meta:
-        model = HotelProfile
         fields = [
             "id",
+            "name",
+            "description",
+            "phone",
+            "website",
+            "address",
             "company",
             "images",
             "logo",
+            "license",
             "latitude",
             "longitude",
             "formatted_address",
@@ -1206,10 +1211,21 @@ class HotelProfileResponseSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         rep = super().to_representation(instance)
-        company_data = rep.pop("company", {})
-        # Avoiding the actual hotel id override by company id
-        company_data.pop("id")
-        return {**rep, **company_data}
+        company_data = rep.get("company", {}) or {}
+        flattened_company = {
+            key: value
+            for key, value in company_data.items()
+            if key not in {"id", "name", "phone", "description", "address"}
+        }
+        flattened_company.update(
+            {
+                "company_name": company_data.get("name"),
+                "company_phone": company_data.get("phone"),
+                "company_description": company_data.get("description"),
+                "company_address": company_data.get("address"),
+            }
+        )
+        return {**flattened_company, **rep}
 
     def get_is_favorite(self, instance):
         """

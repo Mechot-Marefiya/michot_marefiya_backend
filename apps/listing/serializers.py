@@ -1513,6 +1513,54 @@ class ContactRevealRequestResponseSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class TermsAndConditionsManagementSerializer(serializers.ModelSerializer):
+    scope_type = serializers.CharField(read_only=True)
+    scope_id = serializers.UUIDField(source="object_id", read_only=True)
+    created_by = serializers.UUIDField(source="created_by_id", read_only=True, allow_null=True)
+
+    class Meta:
+        model = TermsAndConditions
+        fields = [
+            "id",
+            "scope_type",
+            "scope_id",
+            "title",
+            "content",
+            "version",
+            "status",
+            "is_active",
+            "effective_date",
+            "created_at",
+            "updated_at",
+            "published_at",
+            "archived_at",
+            "created_by",
+        ]
+        read_only_fields = fields
+
+
+class TermsAndConditionsCreateSerializer(serializers.ModelSerializer):
+    effective_date = serializers.DateField(required=False)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+    class Meta:
+        model = TermsAndConditions
+        fields = ["title", "content", "effective_date", "notes"]
+        extra_kwargs = {
+            "title": {"required": True},
+            "content": {"required": True},
+        }
+
+
+class TermsAndConditionsPatchSerializer(serializers.ModelSerializer):
+    effective_date = serializers.DateField(required=False)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+    class Meta:
+        model = TermsAndConditions
+        fields = ["title", "content", "effective_date", "notes"]
+
+
 class CarSaleListingResponseSerializer(CurrencyConversionMixin, serializers.ModelSerializer):
     images = ListingImageSerializer(many=True, read_only=True)
     verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
