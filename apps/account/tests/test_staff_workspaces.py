@@ -130,6 +130,39 @@ def test_company_available_workspaces_include_supported_workspace_types(api_clie
 
 
 @patch("apps.account.serializers.send_sms", return_value=True)
+def test_company_profile_fallback_can_still_assign_staff(mock_send_sms, api_client):
+    user, company = create_company_user()
+    user.company = None
+    user.save(update_fields=["company"])
+    hotel = HotelProfile.objects.create(company=company, name="Fallback Hotel", stars=4)
+
+    api_client.force_authenticate(user=user)
+
+    response = api_client.get(reverse("staff-available-workspaces"))
+    assert response.status_code == 200
+    assert response.data[0]["type"] == "hotel"
+    assert response.data[0]["name"] == "Fallback Hotel"
+
+    create_response = api_client.post(
+        reverse("staff-list"),
+        {
+            "first_name": "Front",
+            "last_name": "Desk",
+            "phone": "+251911000014",
+            "workspace_id": str(hotel.id),
+            "workspace_type": "hotel",
+        },
+        format="json",
+    )
+
+    assert create_response.status_code == 201
+    created_staff = User.objects.get(phone="0911000014")
+    assert created_staff.company_id == company.id
+    assert created_staff.workspace_object_id == hotel.id
+    assert mock_send_sms.called
+
+
+@patch("apps.account.serializers.send_sms", return_value=True)
 def test_individual_owner_can_view_workspaces_and_create_staff(mock_send_sms, api_client):
     user, owner = create_individual_owner_user()
     create_guesthouse(individual_owner=owner, title="Owner Guesthouse")

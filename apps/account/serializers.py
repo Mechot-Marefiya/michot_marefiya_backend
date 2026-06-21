@@ -31,7 +31,12 @@ from apps.notifications.models import Notification
 from apps.listing.services import ListingService
 from apps.core.services.email_service import EmailService
 from django.utils import timezone
-from apps.account.utils import generate_password, get_workspace_summary
+from apps.account.utils import (
+    generate_password,
+    get_company_scope,
+    get_individual_owner_scope,
+    get_workspace_summary,
+)
 from rest_framework import serializers
 from django.contrib.auth.tokens import default_token_generator
 from django.utils.encoding import force_bytes, force_str
@@ -237,8 +242,8 @@ class StaffCreateSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         user = request.user
         
-        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
-        individual_owner = getattr(user, 'individual_owner', None) or getattr(user, 'individual_owner_profile', None)
+        company = get_company_scope(user)
+        individual_owner = get_individual_owner_scope(user)
 
         if not (company or individual_owner):
              raise serializers.ValidationError("Only company or individual owners can create staff.")
@@ -315,8 +320,8 @@ class StaffCreateSerializer(serializers.ModelSerializer):
         user = User(
             role=role,
             is_active=True,
-            company=self.context["request"].user.company,
-            individual_owner=self.context["request"].user.individual_owner,
+            company=get_company_scope(self.context["request"].user),
+            individual_owner=get_individual_owner_scope(self.context["request"].user),
             workspace=workspace,
             **validated_data
         )

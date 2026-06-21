@@ -643,6 +643,8 @@ class Command(BaseCommand):
                     "business_license_number": f"BLN-CO-{index:04d}",
                 },
             )
+            owner_user.company = company
+            owner_user.save(update_fields=["company"])
             companies.append(company)
             company_users.append(owner_user)
 
@@ -684,6 +686,8 @@ class Command(BaseCommand):
                     "chapa_subaccount_id": f"demo-subaccount-owner-{index}",
                 },
             )
+            owner_user.individual_owner = owner
+            owner_user.save(update_fields=["individual_owner"])
             owner_users.append(owner_user)
             owners.append(owner)
 

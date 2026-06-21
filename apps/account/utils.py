@@ -83,3 +83,15 @@ def get_workspace_catalog_entry(workspace):
         "name": summary["name"],
         "category": WORKSPACE_CATEGORY_LABELS.get(workspace_type, "Workspace"),
     }
+
+
+def get_company_scope(user):
+    if not user:
+        return None
+    return getattr(user, "company", None) or getattr(user, "profile", None)
+
+
+def get_individual_owner_scope(user):
+    if not user:
+        return None
+    return getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)

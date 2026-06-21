@@ -76,7 +76,7 @@ from apps.account.serializers import (
     OwnerComplianceAgreementSerializer,
     RoleSerializer,
 )
-from apps.account.utils import get_workspace_catalog_entry
+from apps.account.utils import get_company_scope, get_workspace_catalog_entry
 from apps.listing.serializers import AddonOfferingListSerializer, VerifyActionSerializer
 from apps.account.enums import RoleCode
 from rest_framework.decorators import api_view, permission_classes
@@ -313,24 +313,25 @@ class StaffViewSet(viewsets.ModelViewSet):
         user = request.user
         workspaces = []
         from apps.listing.models import CarListing, EventSpaceListing, GuestHouseProfile
+        company = get_company_scope(user)
         
-        if user.company:
-            hotels = HotelProfile.objects.filter(company=user.company)
+        if company:
+            hotels = HotelProfile.objects.filter(company=company)
             for hotel in hotels:
                 workspaces.append(get_workspace_catalog_entry(hotel))
 
-            guesthouses = GuestHouseProfile.objects.filter(company=user.company)
+            guesthouses = GuestHouseProfile.objects.filter(company=company)
             for gh in guesthouses:
                 workspaces.append(get_workspace_catalog_entry(gh))
 
             cars = CarListing.objects.filter(
-                company=user.company,
+                company=company,
                 listing_type=CarListing.ListingTypeChoices.RENT,
             )
             for car in cars:
                 workspaces.append(get_workspace_catalog_entry(car))
 
-            event_spaces = EventSpaceListing.objects.filter(hotel__company=user.company)
+            event_spaces = EventSpaceListing.objects.filter(hotel__company=company)
             for event_space in event_spaces:
                 workspaces.append(get_workspace_catalog_entry(event_space))
         

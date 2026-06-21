@@ -1,7 +1,7 @@
 # React API Guide
 # Platform: Michot Marefiya
 # Backend: Django REST Framework
-# Last updated: 2026-06-16
+# Last updated: 2026-06-21
 
 This document is the React-facing API reference built from `schema.yaml` as the primary source.
 

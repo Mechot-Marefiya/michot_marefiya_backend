@@ -14425,6 +14425,9 @@ components:
         logo:
           type: string
           format: uri
+        is_active:
+          type: boolean
+          description: Whether the listing is active and visible.
       required:
       - address
       - amenities
@@ -14492,7 +14495,7 @@ components:
           format: binary
         is_active:
           type: boolean
-          description: Whether the guest house is active and visible to public discovery endpoints.
+          description: Whether the listing is active and visible.
         place_id:
           type: string
           writeOnly: true
@@ -14592,7 +14595,7 @@ components:
           nullable: true
         is_active:
           type: boolean
-          description: Whether the guest house is active and visible to public discovery endpoints.
+          description: Whether the listing is active and visible.
         is_verified:
           type: boolean
           description: Whether the listing has been verified by an administrator.
@@ -17782,7 +17785,7 @@ components:
           format: binary
         is_active:
           type: boolean
-          description: Whether the guest house is active and visible to public discovery endpoints.
+          description: Whether the listing is active and visible.
         place_id:
           type: string
           writeOnly: true
