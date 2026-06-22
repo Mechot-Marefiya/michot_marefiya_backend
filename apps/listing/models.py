@@ -2499,6 +2499,7 @@ class TermsAndConditions(AbstractBaseModel):
             "hotelprofile": "hotel",
             "guesthouseprofile": "guesthouse",
             "companyprofile": "company",
+            "eventspacelisting": "event_space",
         }.get(model_name, model_name)
 
     @property

@@ -1010,6 +1010,7 @@ URLs:
 - `/api/v1/listing/terms/hotel/{hotel_id}/`
 - `/api/v1/listing/terms/guesthouse/{gh_id}/`
 - `/api/v1/listing/terms/company/{company_id}/`
+- `/api/v1/listing/terms/event-space/{event_space_id}/`
 Auth required: no
 
 Success response (200):
@@ -1021,9 +1022,16 @@ Success response (200):
 - `is_active`
 - `created_at`
 - `updated_at`
+- `scope_type`
+- `scope_id`
+- `terms_url`
 
 Error responses:
 - `404`: no active scoped terms
+
+Flutter notes:
+- event-space terms can fall back to hotel terms, then company terms, when the event space itself has no active published terms
+- use `scope_type` and `scope_id` to label the real source of the returned terms
 
 #### Provider Terms Create
 Method: POST
@@ -1031,6 +1039,7 @@ URLs:
 - `/api/v1/listing/terms/hotel/{hotel_id}/`
 - `/api/v1/listing/terms/guesthouse/{gh_id}/`
 - `/api/v1/listing/terms/company/{company_id}/`
+- `/api/v1/listing/terms/event-space/{event_space_id}/`
 Auth required: yes
 
 Request body:
@@ -1041,7 +1050,7 @@ Request body:
 
 Success response (201):
 - `id`
-- `scope_type`: `hotel` | `guesthouse` | `company`
+- `scope_type`: `hotel` | `guesthouse` | `company` | `event_space`
 - `scope_id`
 - `title`
 - `content`
@@ -1065,6 +1074,7 @@ URLs:
 - `/api/v1/listing/terms/hotel/{hotel_id}/history/`
 - `/api/v1/listing/terms/guesthouse/{gh_id}/history/`
 - `/api/v1/listing/terms/company/{company_id}/history/`
+- `/api/v1/listing/terms/event-space/{event_space_id}/history/`
 Auth required: yes
 
 Success response (200):
@@ -1661,6 +1671,12 @@ Query params:
 
 Success response (200):
 - paginated event space listing response list
+- each item now includes:
+  - `hotel_id`
+  - `hotel`
+  - `active_terms`
+  - `terms_url`
+  - `is_active`
 
 ### Event Space Detail
 Workflow reference: FLUTTER_WORKFLOW.md Section 1 and 3
@@ -1670,6 +1686,8 @@ Auth required: no
 
 Success response (200):
 - `id`
+- `hotel_id`
+- `hotel`
 - `images`
 - `latitude`
 - `longitude`
@@ -1687,10 +1705,17 @@ Success response (200):
 - `floor_area_sqm`
 - `conversion`
 - `price_quote`
+- `active_terms`
+- `terms_url`
+- `is_active`
 - `is_verified`
 - `verified_at`
 - `verified_by`
 - `verification_note`
+
+Flutter notes:
+- `active_terms` can come from the event space itself or fall back to hotel/company terms
+- `terms_url` is always the canonical event-space terms fetch route: `/api/v1/listing/terms/event-space/{event_space_id}/`
 
 ## Section 9: Car Sales
 

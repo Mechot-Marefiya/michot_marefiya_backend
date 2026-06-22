@@ -851,12 +851,13 @@ Success response (HTTP 200):
 - paginated `EventSpaceListingResponse` records
 
 Core response fields:
-- `id`, `images`, `title`, `description`
+- `id`, `hotel_id`, `hotel`, `images`, `title`, `description`
 - `latitude`, `longitude`, `formatted_address`, `place_id`
 - `number_of_guests`, `base_price`, `currency`
 - `booking_forward_window_days`
 - `amenities`, `total_units`, `space_type`, `floor_area_sqm`
-- `conversion`, `price_quote`
+- `conversion`, `price_quote`, `active_terms`, `terms_url`
+- `is_active`
 - `is_verified`, `verified_at`, `verified_by`, `verification_note`
 
 Error responses:
@@ -864,6 +865,8 @@ Error responses:
 
 React notes:
 - event-space price rendering should rely on backend `price_quote` when date context exists
+- `hotel_id` is now the explicit provider scope for multi-hotel event-space management
+- `active_terms` can resolve from the event space itself or fall back to hotel/company terms; use `active_terms.scope_type` and `active_terms.scope_id` instead of assuming the source
 
 ### Event Space Listing Detail
 Workflow reference: `REACT_WORKFLOW.md` Section 3
@@ -881,11 +884,19 @@ Query params:
 Success response (HTTP 200):
 - `EventSpaceListingResponse`
 
+Important event-space terms fields:
+- `active_terms`: object|null - current effective terms for this event space resolution chain
+- `terms_url`: string|null - canonical React fetch route, always `/api/v1/listing/terms/event-space/{event_space_id}/`
+- `hotel_id`, `hotel`: selected owning hotel summary
+- `is_active`: boolean - public visibility state after verification/activation flow
+
 Error responses:
 - `404`: event space not found
 
 React notes:
 - use this for event-space booking entry points
+- if `active_terms` is null, do not let React claim booking-ready terms are available yet
+- TASK-108/TASK-109 flow: fetch `terms_url` or `/api/v1/listing/terms/event-space/{event_space_id}/` before the final booking submit so the acceptance UI is bound to the live resolved terms record
 
 ## Section 4: Regular User - Booking
 
@@ -1163,13 +1174,18 @@ Query params:
 - none
 
 Success response (HTTP 200):
-- `PricePreviewResponse`
+- `EventSpacePricePreviewResponse`
+- includes standard preview totals plus:
+  - `active_terms`: object|null - resolved current terms
+  - `terms_url`: string|null - event-space terms fetch route
 
 Error responses:
 - `400`: invalid event-space preview request
 
 React notes:
 - same preview rendering model as hotel and guesthouse
+- use `active_terms` from preview when the booking CTA needs the current accepted terms payload
+- if preview returns `active_terms.id`, keep that record and prefer sending it as `terms_id` on booking create
 
 ### Create / View Event Space Booking
 Workflow reference: `REACT_WORKFLOW.md` Section 3
@@ -1179,19 +1195,34 @@ Auth: yes (Bearer) / no
 Roles: all
 
 Request body:
-- event-space booking request with items, dates, terms fields, guest fields, and guest OTP proof when unauthenticated
+- event-space booking request with items, dates, guest fields, and guest OTP proof when unauthenticated
+- `terms_accepted`: boolean - required
+- `terms_id`: uuid - optional but preferred when React uses the fetched terms record directly
+- `terms_version`: string - required when `terms_id` is not sent
+- accepted terms can resolve from event-space terms first, then hotel terms, then company terms
 
 Query params:
 - none
 
 Success response (HTTP 201 or 200):
 - `EventSpaceBookingResponse`
+- includes:
+  - `terms_accepted`, `terms_version`, `terms_accepted_at`, `terms_content_snapshot`
+  - `accepted_terms`: object|null with `id`, `scope_type`, `scope_id`, `version`, `terms_url`
+  - `terms_url`: string|null - current event-space terms route for refresh/review
 
 Error responses:
 - `400`, `403`, `404` according to booking validity and ownership
 
 React notes:
 - event-space bookings use the same pending-before-payment lifecycle
+- do not assume accepted terms always come from the event space itself; read `accepted_terms.scope_type`
+- preferred submit contract for TASK-109:
+  - fetch current terms from `/api/v1/listing/terms/event-space/{event_space_id}/`
+  - store returned `id`, `version`, `scope_type`, and `terms_url`
+  - send `terms_id` when that `id` exists
+  - send `terms_version` only as a fallback when React does not hold a fetched record id
+- after create, use `accepted_terms.scope_type` for receipt/detail labeling instead of assuming the accepted terms belonged to the event space itself
 
 ### Initiate Payment
 Workflow reference: `REACT_WORKFLOW.md` Section 7
@@ -1723,6 +1754,50 @@ Error responses:
 
 React notes:
 - use these for front-desk and staff operational dashboards
+
+### Event Space Terms Management
+Workflow reference: `REACT_WORKFLOW.md` Section 4
+Method: `GET` / `POST` / `PATCH` / `DELETE`
+URL:
+- `GET/POST /api/v1/listing/terms/event-space/{event_space_id}/`
+- `GET /api/v1/listing/terms/event-space/{event_space_id}/history/`
+- `PATCH /api/v1/listing/terms/{id}/`
+- `DELETE /api/v1/listing/terms/{id}/`
+- `POST /api/v1/listing/terms/{id}/publish/`
+- `POST /api/v1/listing/terms/{id}/archive/`
+Auth: mixed
+Roles: company_staff
+
+Request body:
+- create draft: `title`, `content`, optional `effective_date`, optional `notes`
+- patch draft: same fields, all optional
+
+Success response:
+- public current-terms `GET` returns active `TermsAndConditions` for the event space resolution chain
+- provider `POST` and lifecycle actions return management records with:
+  - `id`, `scope_type`, `scope_id`
+  - `title`, `content`, `version`
+  - `status`, `is_active`
+  - `effective_date`, `created_at`, `updated_at`, `published_at`, `archived_at`
+  - `created_by`
+- history `GET` returns paginated management records
+
+Error responses:
+- `403`: unrelated company, front desk, or regular user cannot manage this scope
+- `404`: no active terms for public read, or missing scope/record for management flows
+
+React notes:
+- `/terms/event-space/{id}/` can fall back to hotel terms, then company terms, if the event space has no active published terms
+- use `scope_type` and `scope_id` from the returned record to label the real source of the terms in UI
+- draft/history/publish/archive remain exact event-space management operations and do not mutate hotel/company terms directly
+- QA label expectations:
+  - `scope_type=event_space` -> `Event Space Terms`
+  - `scope_type=hotel` -> `Hotel Terms`
+  - `scope_type=company` -> `Company Terms`
+- QA fallback expectations:
+  - before an event-space draft is published, public current-terms can still resolve to hotel/company fallback
+  - after archiving an active event-space record, current-terms can fall back again to hotel/company
+  - React should always render the label from the latest response, not from the provider management screen state
 
 ## Section 8: Individual Owner - Listing Management
 

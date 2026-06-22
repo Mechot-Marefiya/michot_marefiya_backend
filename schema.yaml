@@ -6189,7 +6189,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PricePreviewResponse'
+                $ref: '#/components/schemas/EventSpacePricePreviewResponse'
           description: ''
         '400':
           content:
@@ -8292,6 +8292,125 @@ paths:
           description: ''
         '404':
           description: No response body
+  /api/v1/listing/terms/event-space/{event_space_id}/:
+    get:
+      operationId: v1_listing_terms_event_space_retrieve
+      description: Retrieve the currently effective T&C for a specific event space.
+        Falls back to hotel terms, then company terms, when the event space has no
+        active published terms.
+      summary: Get current Terms & Conditions for an event space
+      parameters:
+      - in: path
+        name: event_space_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Terms & Conditions
+      security:
+      - jwtAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TermsAndConditions'
+          description: ''
+        '404':
+          description: No response body
+    post:
+      operationId: v1_listing_terms_event_space_create
+      description: |-
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: Create draft Terms & Conditions for an event space
+      parameters:
+      - in: path
+        name: event_space_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      tags:
+      - Terms & Conditions
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TermsAndConditionsCreateRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TermsAndConditionsCreateRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/TermsAndConditionsCreateRequest'
+        required: true
+      security:
+      - jwtAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TermsAndConditionsManagement'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          description: No response body
+  /api/v1/listing/terms/event-space/{event_space_id}/history/:
+    get:
+      operationId: v1_listing_terms_event_space_history_list
+      description: |-
+        Public read endpoints remain available for active terms, while provider users
+        can manage draft/history/lifecycle operations on company-owned scopes.
+      summary: List terms history for an event space
+      parameters:
+      - in: path
+        name: event_space_id
+        schema:
+          type: string
+          format: uuid
+        required: true
+      - name: page
+        required: false
+        in: query
+        description: A page number within the paginated result set.
+        schema:
+          type: integer
+      - name: page_size
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      tags:
+      - Terms & Conditions
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedTermsAndConditionsManagementList'
+          description: ''
+        '403':
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: {}
+          description: ''
+        '404':
+          description: No response body
   /api/v1/listing/terms/guesthouse/{gh_id}/:
     get:
       operationId: v1_listing_terms_guesthouse_retrieve
@@ -10042,6 +10161,27 @@ paths:
           description: No response body
 components:
   schemas:
+    AcceptedTermsSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          nullable: true
+        scope_type:
+          type: string
+          nullable: true
+        scope_id:
+          type: string
+          format: uuid
+          nullable: true
+        version:
+          type: string
+        terms_url:
+          type: string
+          nullable: true
+      required:
+      - version
     ActiveListingMetric:
       type: object
       properties:
@@ -13381,7 +13521,10 @@ components:
         terms_version:
           type: string
           writeOnly: true
-          minLength: 1
+        terms_id:
+          type: string
+          format: uuid
+          writeOnly: true
         guest_first_name:
           type: string
           minLength: 1
@@ -13432,7 +13575,6 @@ components:
       - guest_phone
       - items
       - terms_accepted
-      - terms_version
     EventSpaceBookingResponse:
       type: object
       description: Serializer for reading/outputting a complete Event Space Booking.
@@ -13495,10 +13637,15 @@ components:
           type: string
           readOnly: true
           description: Full text of the T&C at the time of booking
+        accepted_terms:
+          allOf:
+          - $ref: '#/components/schemas/AcceptedTermsSummary'
+          nullable: true
+          readOnly: true
         terms_url:
           type: string
           readOnly: true
-          description: Link to view the latest terms for the hotel
+          description: Link to view the current terms route for this event space
         is_legacy:
           type: boolean
           readOnly: true
@@ -13525,6 +13672,7 @@ components:
         special_requests:
           type: string
       required:
+      - accepted_terms
       - booking_reference
       - check_in_date
       - check_out_date
@@ -13720,6 +13868,14 @@ components:
           readOnly: true
           description: Complete pricing breakdown including platform fees. Populated
             only when check_in/check_out dates are provided.
+        active_terms:
+          allOf:
+          - $ref: '#/components/schemas/TermsAndConditions'
+          nullable: true
+          readOnly: true
+        terms_url:
+          type: string
+          readOnly: true
         is_active:
           type: boolean
           description: Whether the listing is active and visible.
@@ -13742,6 +13898,7 @@ components:
           description: Optional note recorded by an administrator during verification.
           maxLength: 500
       required:
+      - active_terms
       - amenities
       - conversion
       - hotel
@@ -13750,8 +13907,38 @@ components:
       - images
       - price_quote
       - space_type
+      - terms_url
       - title
       - verified_by
+    EventSpacePricePreviewResponse:
+      type: object
+      properties:
+        nights:
+          type: integer
+          description: Total number of nights for the stay
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PricePreviewItem'
+          description: Breakdown of individual items in the selection
+        totals:
+          allOf:
+          - $ref: '#/components/schemas/PricePreviewTotals'
+          description: Consolidated cost summary in the base booking currency
+        conversion:
+          nullable: true
+          description: Metadata and converted totals in the requested display currency
+        active_terms:
+          allOf:
+          - $ref: '#/components/schemas/TermsAndConditions'
+          nullable: true
+        terms_url:
+          type: string
+          nullable: true
+      required:
+      - items
+      - nights
+      - totals
     EventTypeEnum:
       enum:
       - walk_in
@@ -20765,12 +20952,25 @@ components:
           type: string
           format: date-time
           readOnly: true
+        scope_type:
+          type: string
+          readOnly: true
+        scope_id:
+          type: string
+          format: uuid
+          readOnly: true
+        terms_url:
+          type: string
+          readOnly: true
       required:
       - content
       - created_at
       - effective_date
       - id
       - is_active
+      - scope_id
+      - scope_type
+      - terms_url
       - title
       - updated_at
       - version

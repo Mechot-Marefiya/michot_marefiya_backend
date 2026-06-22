@@ -403,6 +403,7 @@ class InitiatePaymentView(APIView):
         from apps.listing.services import TermsService
         
         content_object = None
+        allow_fallback_terms = False
         if hasattr(booking, 'items') and booking.items.exists():
             first_item = booking.items.first()
             if hasattr(first_item, 'room') and first_item.room:
@@ -412,7 +413,8 @@ class InitiatePaymentView(APIView):
                 elif hasattr(room, '__class__') and room.__class__.__name__ == 'GuestHouseListing':
                     content_object = room
             elif hasattr(first_item, 'event_space') and first_item.event_space:
-                content_object = first_item.event_space.hotel
+                content_object = first_item.event_space
+                allow_fallback_terms = True
         elif hasattr(booking, 'rental_items') and booking.rental_items.exists():
             first_item = booking.rental_items.first()
             if hasattr(first_item, 'car_listing') and first_item.car_listing:
@@ -421,7 +423,10 @@ class InitiatePaymentView(APIView):
             content_object = booking.property_listing
         
         if content_object:
-            active_tc = TermsService.get_active_terms(content_object)
+            active_tc = TermsService.resolve_active_terms(
+                content_object,
+                allow_fallback=allow_fallback_terms,
+            )
             if active_tc and booking.terms_version != active_tc.version:
                 return Response(
                     {

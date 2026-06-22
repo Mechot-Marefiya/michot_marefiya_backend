@@ -47,6 +47,7 @@ from apps.account.permissions import (
     IsCompanyOrFrontDesk,
 )
 from apps.account.enums import RoleCode
+from apps.account.utils import get_company_scope
 from apps.listing.models import (
     Amenity,
     CarListing,
@@ -119,6 +120,7 @@ from apps.listing.serializers import (
     CarRentalRescheduleSerializer,
     EventSpaceBookingResponseSerializer,
     EventSpaceBookingSerializer,
+    EventSpacePricePreviewResponseSerializer,
     GuestHouseBookingSerializer,
     TermsAndConditionsSerializer,
     TermsAndConditionsManagementSerializer,
@@ -1797,7 +1799,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
             )
         ],
         responses={
-            200: PricePreviewResponseSerializer,
+            200: EventSpacePricePreviewResponseSerializer,
             400: OpenApiTypes.OBJECT
         }
     )
@@ -4307,6 +4309,42 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
             return [ScopedRateThrottle()]
         return super().get_throttles()
 
+    def _get_requested_hotel_id(self):
+        hotel = self.request.query_params.get("hotel")
+        hotel_id = self.request.query_params.get("hotel_id")
+
+        if hotel and hotel_id and hotel != hotel_id:
+            raise DRFValidationError({"hotel": "hotel and hotel_id must match when both are provided."})
+
+        raw_hotel_id = hotel_id or hotel
+        if not raw_hotel_id:
+            return None
+
+        field = serializers.UUIDField()
+        try:
+            return field.to_internal_value(raw_hotel_id)
+        except serializers.ValidationError as exc:
+            raise DRFValidationError({"hotel": exc.detail}) from exc
+
+    def _get_company_event_space_bookings(self, queryset, *, strict_scope=False):
+        company = get_company_scope(self.request.user)
+        if not company:
+            raise DRFValidationError({"detail": "Company host scope is unavailable for this account."})
+
+        company_hotels = HotelProfile.objects.filter(company=company)
+        if strict_scope and not company_hotels.exists():
+            raise DRFValidationError({"detail": "No hotels are assigned to this company."})
+
+        requested_hotel_id = self._get_requested_hotel_id()
+        if requested_hotel_id:
+            if not company_hotels.filter(id=requested_hotel_id).exists():
+                raise PermissionDenied("You do not have access to the selected hotel.")
+            company_hotels = company_hotels.filter(id=requested_hotel_id)
+
+        return queryset.filter(
+            items__event_space__hotel_id__in=company_hotels.values("id")
+        ).distinct().order_by("-created_at")
+
     # --- Queryset Filtering ---
     def get_queryset(self):
         """
@@ -4330,40 +4368,29 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
         
         # Check for mode parameter (Feature branch logic)
         mode = self.request.query_params.get('mode')
+        is_company_user = hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value
+        requested_hotel_id = self._get_requested_hotel_id()
+
         if mode == 'host':
-            if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
-                if hasattr(user, 'profile') and user.profile:
-                    company = user.profile
-                    try:
-                        hotel = HotelProfile.objects.get(company=company)
-                        
-                        return queryset.filter(
-                            items__event_space__hotel=hotel
-                        ).distinct()
-                    except HotelProfile.DoesNotExist:
-                        return queryset.none()
+            if is_company_user:
+                return self._get_company_event_space_bookings(queryset, strict_scope=True)
             return queryset.none()
 
         # Users see only their own bookings
-        user_bookings = queryset.filter(user=user).distinct()
+        user_bookings = queryset.filter(user=user).distinct().order_by("-created_at")
         
         if self.request.query_params.get('as_guest') == 'true':
             return user_bookings
         
-        # Company sees bookings for their hotels (Development branch logic)
-        if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
-            if hasattr(user, 'profile') and user.profile:
-                company = user.profile
-                try:
-                    hotel = HotelProfile.objects.get(company=company)
-                    
-                    hotel_bookings = queryset.filter(
-                        items__event_space__hotel=hotel
-                    ).distinct()
-                    
-                    return (user_bookings | hotel_bookings).distinct()
-                except HotelProfile.DoesNotExist:
-                    pass
+        # Company retrieve stays inventory-scoped and list can optionally narrow by hotel.
+        if is_company_user:
+            company_bookings = self._get_company_event_space_bookings(queryset)
+            if self.action == "retrieve" or requested_hotel_id:
+                return company_bookings
+
+            return queryset.filter(
+                Q(user=user) | Q(items__event_space__hotel__company=get_company_scope(user))
+            ).distinct().order_by("-created_at")
         
         # Default: Return only the user's own bookings
         return user_bookings
@@ -4492,7 +4519,10 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
                 "subtotal": f"{item_base_total:.2f}",
                 "breakdown": price_details
             })
-            
+
+        first_space = items[0]["event_space"] if items else None
+        active_terms = TermsService.resolve_active_terms(first_space, allow_fallback=True) if first_space else None
+
         return Response({
             "nights": nights,
             "items": total_items,
@@ -4502,7 +4532,13 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
                 display_currency,
                 items=total_items,
                 fee_rate=get_effective_platform_fee_rate(phone=preview_phone),
-            )
+            ),
+            "active_terms": (
+                TermsAndConditionsSerializer(active_terms, context=self.get_serializer_context()).data
+                if active_terms
+                else None
+            ),
+            "terms_url": TermsService.build_terms_url(first_space) if first_space else None,
         })
 
 
@@ -4524,12 +4560,12 @@ class TermsAndConditionsViewSet(AbstractModelViewSet):
         return queryset
 
     def get_permissions(self):
-        if self.action in ["list", "retrieve", "hotel_terms", "guesthouse_terms", "company_terms"]:
+        if self.action in ["list", "retrieve", "hotel_terms", "guesthouse_terms", "company_terms", "event_space_terms"]:
             return [AllowAny()]
         return [IsAuthenticated()]
 
     def get_serializer_class(self):
-        if self.action in ["create_hotel_terms", "create_guesthouse_terms", "create_company_terms"]:
+        if self.action in ["create_hotel_terms", "create_guesthouse_terms", "create_company_terms", "create_event_space_terms"]:
             return TermsAndConditionsCreateSerializer
         if self.action == "partial_update":
             return TermsAndConditionsPatchSerializer
@@ -4538,6 +4574,7 @@ class TermsAndConditionsViewSet(AbstractModelViewSet):
             "hotel_history",
             "guesthouse_history",
             "company_history",
+            "event_space_history",
             "publish",
             "archive",
         ]:
@@ -4583,6 +4620,9 @@ class TermsAndConditionsViewSet(AbstractModelViewSet):
             return self._company_owned_by_user(user, getattr(scope_object, "company", None))
         if isinstance(scope_object, GuestHouseProfile):
             return self._company_owned_by_user(user, getattr(scope_object, "company", None))
+        if isinstance(scope_object, EventSpaceListing):
+            hotel = getattr(scope_object, "hotel", None)
+            return self._company_owned_by_user(user, getattr(hotel, "company", None))
         return False
 
     def _assert_can_manage_scope(self, user, scope_object):
@@ -4598,6 +4638,7 @@ class TermsAndConditionsViewSet(AbstractModelViewSet):
             "hotel": HotelProfile,
             "guesthouse": GuestHouseProfile,
             "company": CompanyProfile,
+            "event_space": EventSpaceListing,
         }
         return get_object_or_404(model_map[scope_type], id=scope_id)
 
@@ -4639,8 +4680,8 @@ class TermsAndConditionsViewSet(AbstractModelViewSet):
         )
         return Response(self._serialize_management(term), status=status.HTTP_201_CREATED)
 
-    def _active_scope_response(self, scope_object, detail_message: str):
-        terms = TermsService.get_active_terms(content_object=scope_object)
+    def _active_scope_response(self, scope_object, detail_message: str, *, allow_fallback: bool = False):
+        terms = TermsService.resolve_active_terms(scope_object, allow_fallback=allow_fallback)
         if not terms:
             return Response({"detail": detail_message}, status=status.HTTP_404_NOT_FOUND)
         serializer = TermsAndConditionsSerializer(terms, context=self.get_serializer_context())
@@ -4819,6 +4860,48 @@ class TermsAndConditionsViewSet(AbstractModelViewSet):
         company = self._get_scope_object("company", company_id)
         self._assert_can_manage_scope(request.user, company)
         return self._build_history_response(TermsService.get_scope_terms_history(company))
+
+    @extend_schema(
+        summary="Get current Terms & Conditions for an event space",
+        description="Retrieve the currently effective T&C for a specific event space. Falls back to hotel terms, then company terms, when the event space has no active published terms.",
+        parameters=[
+            OpenApiParameter("event_space_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
+        ],
+        responses={200: TermsAndConditionsSerializer, 404: None},
+    )
+    @action(detail=False, methods=["get"], url_path="event-space/(?P<event_space_id>[^/.]+)")
+    def event_space_terms(self, request, event_space_id=None):
+        event_space = self._get_scope_object("event_space", event_space_id)
+        return self._active_scope_response(
+            event_space,
+            "No terms and conditions available for this event space or its parent scopes.",
+            allow_fallback=True,
+        )
+
+    @event_space_terms.mapping.post
+    @extend_schema(
+        summary="Create draft Terms & Conditions for an event space",
+        parameters=[
+            OpenApiParameter("event_space_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
+        ],
+        request=TermsAndConditionsCreateSerializer,
+        responses={201: TermsAndConditionsManagementSerializer, 403: OpenApiTypes.OBJECT, 404: None},
+    )
+    def create_event_space_terms(self, request, event_space_id=None):
+        return self._create_scoped_terms(request, "event_space", event_space_id)
+
+    @extend_schema(
+        summary="List terms history for an event space",
+        parameters=[
+            OpenApiParameter("event_space_id", OpenApiTypes.UUID, location=OpenApiParameter.PATH),
+        ],
+        responses={200: TermsAndConditionsManagementSerializer(many=True), 403: OpenApiTypes.OBJECT, 404: None},
+    )
+    @action(detail=False, methods=["get"], url_path="event-space/(?P<event_space_id>[^/.]+)/history")
+    def event_space_history(self, request, event_space_id=None):
+        event_space = self._get_scope_object("event_space", event_space_id)
+        self._assert_can_manage_scope(request.user, event_space)
+        return self._build_history_response(TermsService.get_scope_terms_history(event_space))
 
     @extend_schema(
         summary="Publish a draft terms record",

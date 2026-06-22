@@ -747,6 +747,7 @@ class TermsService:
         HotelProfile: "hotel",
         GuestHouseProfile: "guesthouse",
         CompanyProfile: "company",
+        EventSpaceListing: "event_space",
     }
 
     @classmethod
@@ -763,6 +764,78 @@ class TermsService:
             content_type=ct,
             object_id=content_object.id,
         )
+
+    @classmethod
+    def get_scope_resolution_chain(cls, content_object, *, allow_fallback: bool = False):
+        if not allow_fallback:
+            return [content_object]
+
+        chain = [content_object]
+        if isinstance(content_object, EventSpaceListing):
+            hotel = getattr(content_object, "hotel", None)
+            company = getattr(hotel, "company", None) if hotel else None
+            if hotel is not None:
+                chain.append(hotel)
+            if company is not None:
+                chain.append(company)
+        return chain
+
+    @classmethod
+    def build_terms_url(cls, content_object) -> str | None:
+        scope_type = cls.get_scope_type(content_object)
+        scope_id = getattr(content_object, "id", None)
+        if not scope_id:
+            return None
+        route_map = {
+            "hotel": "hotel",
+            "guesthouse": "guesthouse",
+            "company": "company",
+            "event_space": "event-space",
+        }
+        route_scope = route_map.get(scope_type)
+        if not route_scope:
+            return None
+        return f"/api/v1/listing/terms/{route_scope}/{scope_id}/"
+
+    @classmethod
+    def resolve_terms_record(
+        cls,
+        content_object,
+        *,
+        terms_id=None,
+        terms_version: str | None = None,
+        allow_fallback: bool = False,
+        active_only: bool = True,
+    ):
+        if not terms_id and not terms_version:
+            return None
+
+        for scope_object in cls.get_scope_resolution_chain(content_object, allow_fallback=allow_fallback):
+            queryset = cls.get_scope_terms_queryset(scope_object)
+            if active_only:
+                queryset = queryset.filter(is_active=True)
+
+            term = None
+            if terms_id:
+                term = queryset.filter(id=terms_id).first()
+            if term is None and terms_version:
+                term = queryset.filter(version=terms_version).order_by(
+                    "-is_active", "-effective_date", "-published_at", "-created_at"
+                ).first()
+
+            if term is not None:
+                if terms_id and terms_version and str(term.version) != str(terms_version):
+                    raise DjangoValidationError("Provided terms_id does not match the provided terms_version.")
+                return term
+        return None
+
+    @classmethod
+    def resolve_active_terms(cls, content_object, *, allow_fallback: bool = False):
+        for scope_object in cls.get_scope_resolution_chain(content_object, allow_fallback=allow_fallback):
+            active = cls.get_active_terms(scope_object)
+            if active:
+                return active
+        return None
 
     @classmethod
     def get_scope_terms_history(cls, content_object):
@@ -889,7 +962,9 @@ class TermsService:
         content_object,
         terms_version: str,
         terms_accepted: bool,
-        allow_missing: bool = False
+        allow_missing: bool = False,
+        terms_id=None,
+        allow_fallback: bool = False,
     ) -> dict:
         
         if not terms_accepted:
@@ -897,27 +972,35 @@ class TermsService:
                 return {
                     'version': terms_version or "WALK-IN",
                     'content_snapshot': "Terms accepted in person (Walk-in)",
-                    'accepted_at': timezone.now()
+                    'accepted_at': timezone.now(),
+                    'terms_id': None,
+                    'scope_type': None,
+                    'scope_id': None,
+                    'terms_url': None,
                 }
             raise DjangoValidationError("Terms and conditions must be accepted.")
-        
-        ct = ContentType.objects.get_for_model(content_object)
-        terms = TermsAndConditions.objects.filter(
-            content_type=ct,
-            object_id=content_object.id,
-            version=terms_version,
-            is_active=True
-        ).first()
+
+        terms = TermsService.resolve_terms_record(
+            content_object,
+            terms_id=terms_id,
+            terms_version=terms_version,
+            allow_fallback=allow_fallback,
+            active_only=True,
+        )
         
         if not terms:
             raise DjangoValidationError(
-                f"Terms and conditions version '{terms_version}' not found or inactive."
+                f"Terms and conditions version '{terms_version or terms_id}' not found or inactive."
             )
         
         return {
             'version': terms.version,
             'content_snapshot': terms.content,
-            'accepted_at': timezone.now()
+            'accepted_at': timezone.now(),
+            'terms_id': str(terms.id),
+            'scope_type': TermsService.get_scope_type(terms.content_object),
+            'scope_id': str(terms.object_id),
+            'terms_url': TermsService.build_terms_url(terms.content_object),
         }
 
 
@@ -2153,6 +2236,7 @@ class EventSpaceBookingService:
         
         terms_accepted = validated_data.pop("terms_accepted", False)
         terms_version = validated_data.pop("terms_version", "")
+        terms_id = validated_data.pop("terms_id", None)
         
         if user:
             validated_data["user"] = user
@@ -2185,10 +2269,12 @@ class EventSpaceBookingService:
 
         try:
             snapshot_data = TermsService.validate_and_snapshot_terms(
-                 content_object=hotel,
+                 content_object=first_space,
                  terms_version=terms_version,
                  terms_accepted=terms_accepted,
-                 allow_missing=is_privileged
+                 allow_missing=is_privileged,
+                 terms_id=terms_id,
+                 allow_fallback=True,
             )
         except Exception as e:
             logger.error(f"T&C validation failed: {e}")
@@ -2271,6 +2357,13 @@ class EventSpaceBookingService:
                 "check_in_date": booking.check_in_date.isoformat(),
                 "check_out_date": booking.check_out_date.isoformat(),
                 "currency": booking.currency,
+                "accepted_terms": {
+                    "id": snapshot_data.get("terms_id"),
+                    "scope_type": snapshot_data.get("scope_type"),
+                    "scope_id": snapshot_data.get("scope_id"),
+                    "version": snapshot_data.get("version"),
+                    "terms_url": snapshot_data.get("terms_url"),
+                },
                 "billing": {
                     "subtotal_items": f"{raw_base_subtotal:.2f}",
                     "platform_fee": f"{platform_fee:.2f}",

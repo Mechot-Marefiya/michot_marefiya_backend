@@ -33,6 +33,7 @@ from apps.listing.services import (
     EventSpaceAvailabilityService,
     GuestHouseAvailabilityService,
     StayAvailabilityService,
+    TermsService,
 )
 from apps.payment.services import get_effective_contact_reveal_fee
 
@@ -607,14 +608,30 @@ class GuestContactRevealOtpRequestSerializer(serializers.Serializer):
 
 class TermsAndConditionsSerializer(serializers.ModelSerializer):
     # Read-only serializer for displaying Terms & Conditions"
+    scope_type = serializers.CharField(read_only=True)
+    scope_id = serializers.UUIDField(source="object_id", read_only=True)
+    terms_url = serializers.SerializerMethodField()
     
     class Meta:
         model = TermsAndConditions
         fields = [
             'id', 'version', 'title', 'content',
-            'effective_date', 'is_active', 'created_at', 'updated_at'
+            'effective_date', 'is_active', 'created_at', 'updated_at',
+            'scope_type', 'scope_id', 'terms_url',
         ]
         read_only_fields = fields
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_terms_url(self, obj):
+        return TermsService.build_terms_url(obj.content_object)
+
+
+class AcceptedTermsSummarySerializer(serializers.Serializer):
+    id = serializers.UUIDField(required=False, allow_null=True)
+    scope_type = serializers.CharField(required=False, allow_null=True)
+    scope_id = serializers.UUIDField(required=False, allow_null=True)
+    version = serializers.CharField()
+    terms_url = serializers.CharField(required=False, allow_null=True)
 
 
 class AmenityResponseSSerializer(serializers.ModelSerializer):
@@ -3629,6 +3646,8 @@ class EventSpaceListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMix
     verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
     hotel_id = serializers.UUIDField(source="hotel.id", read_only=True)
     hotel = EventSpaceHotelSummarySerializer(read_only=True)
+    active_terms = serializers.SerializerMethodField()
+    terms_url = serializers.SerializerMethodField()
 
     class Meta:
         model = EventSpaceListing
@@ -3654,12 +3673,25 @@ class EventSpaceListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMix
             "floor_area_sqm",
             "conversion",
             "price_quote",
+            "active_terms",
+            "terms_url",
             "is_active",
             "is_verified",
             "verified_at",
             "verified_by",
             "verification_note",
         ]
+
+    @extend_schema_field(TermsAndConditionsSerializer(allow_null=True))
+    def get_active_terms(self, obj):
+        term = TermsService.resolve_active_terms(obj, allow_fallback=True)
+        if not term:
+            return None
+        return TermsAndConditionsSerializer(term, context=self.context).data
+
+    @extend_schema_field(OpenApiTypes.STR)
+    def get_terms_url(self, obj):
+        return TermsService.build_terms_url(obj)
 
 
 class EventSpaceListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
@@ -3873,6 +3905,7 @@ class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.M
     """Serializer for reading/outputting a complete Event Space Booking."""
     # Related_name is simply 'items' on EventSpaceBooking
     items = EventSpaceBookingItemResponseSerializer(many=True, read_only=True) 
+    accepted_terms = serializers.SerializerMethodField()
 
     class Meta:
         model = EventSpaceBooking
@@ -3892,6 +3925,7 @@ class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.M
             "terms_version",
             "terms_accepted_at",
             "terms_content_snapshot",
+            "accepted_terms",
             "terms_url",
             "is_legacy",
             "stay_total",
@@ -3901,7 +3935,7 @@ class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.M
     total_price = serializers.SerializerMethodField(help_text="Grand total in base currency")
     total_item_cost = serializers.SerializerMethodField(help_text="Total cost of all event space units")
     stay_total = serializers.SerializerMethodField(help_text="Alias for total_item_cost")
-    terms_url = serializers.SerializerMethodField(help_text="Link to view the latest terms for the hotel")
+    terms_url = serializers.SerializerMethodField(help_text="Link to view the current terms route for this event space")
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_stay_total(self, obj):
@@ -3914,10 +3948,48 @@ class EventSpaceBookingResponseSerializer(CurrencyConversionMixin, serializers.M
     @extend_schema_field(OpenApiTypes.STR)
     def get_terms_url(self, obj):
         try:
-            hotel_id = obj.items.first().event_space.hotel_id
-            return f"/api/v1/listing/terms/hotel/{hotel_id}/"
+            event_space_id = obj.items.first().event_space_id
+            return f"/api/v1/listing/terms/event-space/{event_space_id}/"
         except Exception:
             return None
+
+    @extend_schema_field(AcceptedTermsSummarySerializer(allow_null=True))
+    def get_accepted_terms(self, obj):
+        snapshot = obj.snapshot if isinstance(obj.snapshot, dict) else {}
+        accepted = snapshot.get("accepted_terms") if isinstance(snapshot, dict) else None
+        if isinstance(accepted, dict):
+            return accepted
+
+        try:
+            first_space = obj.items.first().event_space
+        except Exception:
+            first_space = None
+
+        if not first_space or not obj.terms_version:
+            return None
+
+        term = TermsService.resolve_terms_record(
+            first_space,
+            terms_version=obj.terms_version,
+            allow_fallback=True,
+            active_only=False,
+        )
+        if term:
+            return {
+                "id": str(term.id),
+                "scope_type": TermsService.get_scope_type(term.content_object),
+                "scope_id": str(term.object_id),
+                "version": term.version,
+                "terms_url": TermsService.build_terms_url(term.content_object),
+            }
+
+        return {
+            "id": None,
+            "scope_type": None,
+            "scope_id": None,
+            "version": obj.terms_version,
+            "terms_url": self.get_terms_url(obj),
+        }
 
     @extend_schema_field(OpenApiTypes.STR)
     def get_total_item_cost(self, obj):
@@ -3947,7 +4019,8 @@ class EventSpaceBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetail
     items = EventSpaceBookingItemSerializer(many=True) 
     
     terms_accepted = serializers.BooleanField(required=True, write_only=True)
-    terms_version = serializers.CharField(required=True, write_only=True)
+    terms_version = serializers.CharField(required=False, write_only=True, allow_blank=True)
+    terms_id = serializers.UUIDField(required=False, write_only=True)
 
     guest_first_name = serializers.CharField(max_length=100, required=False, help_text="First name of the guest (Required if not logged in)")
     guest_last_name = serializers.CharField(max_length=100, required=False, help_text="Last name of the guest (Required if not logged in)")
@@ -3969,7 +4042,7 @@ class EventSpaceBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetail
     class Meta:
         model = EventSpaceBooking # Mapped to the dedicated model
         fields = ["items", "check_in_date", "check_out_date", "currency", "event_type",
-                  "terms_accepted", "terms_version",
+                  "terms_accepted", "terms_version", "terms_id",
                   "guest_first_name", "guest_last_name", "guest_email", "guest_phone", "special_requests", "payment_currency",
                   "otp_challenge_id", "otp_code", "guest_verification_token"]
         read_only_fields = ["status", "currency"]
@@ -4010,25 +4083,28 @@ class EventSpaceBookingSerializer(ForwardBookingWindowMixin, SanitizeGuestDetail
         self.validate_guest_booking_otp(data)
         
         terms_version = data.get("terms_version")
-        if terms_version and items:
-            from django.contrib.contenttypes.models import ContentType
-            # Get hotel from first event space
+        terms_id = data.get("terms_id")
+        if not terms_id and not terms_version:
+            raise serializers.ValidationError(
+                {"terms_version": "Either terms_id or terms_version is required."}
+            )
+        if items:
             first_space = items[0]["event_space"]
-            hotel = first_space.hotel
-            
-            if hotel:
-                ct = ContentType.objects.get_for_model(hotel)
-                tc_exists = TermsAndConditions.objects.filter(
-                    content_type=ct,
-                    object_id=hotel.id,
-                    version=terms_version,
-                    is_active=True
-                ).exists()
-                
-                if not tc_exists:
-                    raise serializers.ValidationError(
-                        {"terms_version": f"Invalid or inactive T&C version: {terms_version}. Please refresh and accept the latest terms."}
-                    )
+            try:
+                resolved_terms = TermsService.resolve_terms_record(
+                    first_space,
+                    terms_id=terms_id,
+                    terms_version=terms_version,
+                    allow_fallback=True,
+                    active_only=True,
+                )
+            except Exception as exc:
+                raise serializers.ValidationError({"terms_version": str(exc)})
+
+            if resolved_terms is None:
+                raise serializers.ValidationError(
+                    {"terms_version": f"Invalid or inactive T&C reference. Please refresh and accept the latest terms for this event space."}
+                )
         
         # !To Do: You may want to add validation here to ensure all event spaces
         # belong to the same hotel, if that is a business rule.
@@ -4112,6 +4188,11 @@ class PricePreviewResponseSerializer(serializers.Serializer):
         allow_null=True, 
         help_text="Metadata and converted totals in the requested display currency"
     )
+
+
+class EventSpacePricePreviewResponseSerializer(PricePreviewResponseSerializer):
+    active_terms = TermsAndConditionsSerializer(required=False, allow_null=True)
+    terms_url = serializers.CharField(required=False, allow_null=True)
 
 
 class BookingPreviewSerializer(ForwardBookingWindowMixin, serializers.Serializer):

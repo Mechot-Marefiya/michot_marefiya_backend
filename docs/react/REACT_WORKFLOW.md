@@ -250,6 +250,16 @@ Property rental booking:
 5. create pending booking
 6. continue to payment
 
+Event-space booking:
+1. open the event-space detail or preview flow
+2. fetch current terms from `/api/v1/listing/terms/event-space/{event_space_id}/` before final submit
+3. show the real source label from returned `scope_type`
+4. preview pricing and capacity fit
+5. accept the fetched terms record
+6. create the pending booking with `terms_accepted=true` and prefer `terms_id`
+7. only fall back to `terms_version` when React does not hold a concrete fetched record
+8. continue to payment
+
 Business rules React must respect:
 
 - forward booking windows are enforced by the backend through listing-level controls such as `booking_forward_window_days`
@@ -263,6 +273,13 @@ Guest-sensitive flows:
 
 - some guest booking journeys require OTP verification before lookup or protected access
 - React should treat guest verification as part of the booking journey, not as a separate account requirement
+
+Terms fallback labeling for event spaces:
+
+- `scope_type=event_space`: label as event-space terms
+- `scope_type=hotel`: label as hotel terms inherited by this event space
+- `scope_type=company`: label as company terms inherited by this event space
+- publish/archive of event-space terms can change the visible source back to hotel or company, so React must always label from the current response instead of cached assumptions
 
 When endpoint wiring is needed:
 - see `REACT_API_GUIDE.md` Section 4 for hotels, guest houses, property rentals, event spaces, and car rentals
