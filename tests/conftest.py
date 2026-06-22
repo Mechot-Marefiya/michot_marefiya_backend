@@ -345,6 +345,8 @@ class CarListingFactory(factory.django.DjangoModelFactory):
     transmission = CarListing.TransmissionChoices.AUTOMATIC
     listing_type = CarListing.ListingTypeChoices.RENT
     rental_mode = CarListing.RentalModeChoices.WITH_DRIVER
+    with_driver_base_price = Decimal("1500.00")
+    without_driver_base_price = Decimal("1800.00")
     car_class = CarListing.CarClassChoices.NORMAL
     condition = CarListing.ConditionChoices.USED
     title = "Toyota Camry"

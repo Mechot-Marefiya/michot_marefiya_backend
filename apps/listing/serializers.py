@@ -1444,6 +1444,8 @@ class CarListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, ser
     images = ListingImageSerializer(many=True, read_only=True)
     availabilities = CarAvailabilitySerializer(many=True, read_only=True)
     current_availability = serializers.SerializerMethodField()
+    business_license_document = serializers.SerializerMethodField()
+    pricing_by_rental_mode = serializers.SerializerMethodField()
     verified_by = serializers.UUIDField(source="verified_by_id", read_only=True, allow_null=True)
     
     class Meta:
@@ -1469,6 +1471,9 @@ class CarListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, ser
             "condition",
             "listing_type",
             "rental_mode",
+            "with_driver_base_price",
+            "without_driver_base_price",
+            "pricing_by_rental_mode",
             "car_class",
             "quantity",
             "company",
@@ -1477,6 +1482,7 @@ class CarListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, ser
             "requires_code_3",
             "requires_business_license",
             "pre_rental_requirements",
+            "business_license_document",
             "availabilities",
             "current_availability",
             "created_at",
@@ -1511,6 +1517,43 @@ class CarListingResponseSerializer(PriceQuoteMixin, CurrencyConversionMixin, ser
         return {
             "date": availability.date,
             "available_units": availability.available_units
+        }
+
+    @extend_schema_field(OpenApiTypes.URI)
+    def get_business_license_document(self, obj) -> str | None:
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not user or not user.is_authenticated:
+            return None
+        if getattr(user, "is_superuser", False):
+            allowed = True
+        else:
+            user_company = getattr(user, "company", None) or getattr(user, "profile", None)
+            user_owner = getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)
+            allowed = bool(
+                (obj.company_id and user_company and obj.company_id == user_company.id)
+                or (obj.individual_owner_id and user_owner and obj.individual_owner_id == user_owner.id)
+            )
+        if not allowed or not obj.business_license_document:
+            return None
+        try:
+            return obj.business_license_document.url
+        except ValueError:
+            return None
+
+    @extend_schema_field(
+        inline_serializer(
+            name="CarListingPricingByRentalMode",
+            fields={
+                "with_driver": serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True),
+                "without_driver": serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True),
+            },
+        )
+    )
+    def get_pricing_by_rental_mode(self, obj):
+        return {
+            "with_driver": getattr(obj, "with_driver_base_price", None) or obj.base_price,
+            "without_driver": getattr(obj, "without_driver_base_price", None) or obj.base_price,
         }
 
 
@@ -2070,6 +2113,7 @@ class CarListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
         write_only=True,
         required=False
     )
+    business_license_document = serializers.FileField(required=False, allow_null=True)
     
     class Meta:
         model = CarListing
@@ -2092,11 +2136,14 @@ class CarListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
             "seats",
             "listing_type",
             "rental_mode",
+            "with_driver_base_price",
+            "without_driver_base_price",
             "car_class",
             "quantity",
             "requires_code_3",
             "requires_business_license",
             "pre_rental_requirements",
+            "business_license_document",
             "place_id",
             "session_token",
         ]
@@ -2141,6 +2188,14 @@ class CarListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
             "rental_mode",
             getattr(self.instance, "rental_mode", CarListing.RentalModeChoices.WITH_DRIVER),
         )
+        with_driver_base_price = data.get(
+            "with_driver_base_price",
+            getattr(self.instance, "with_driver_base_price", None),
+        )
+        without_driver_base_price = data.get(
+            "without_driver_base_price",
+            getattr(self.instance, "without_driver_base_price", None),
+        )
         requires_code_3 = data.get(
             "requires_code_3",
             getattr(self.instance, "requires_code_3", False),
@@ -2159,12 +2214,33 @@ class CarListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
                 "Rental compliance fields can only be configured for car listings available for rent."
             )
 
-        if rental_mode == CarListing.RentalModeChoices.WITH_DRIVER and (
-            requires_code_3 or requires_business_license
-        ):
+        business_license_document = data.get(
+            "business_license_document",
+            getattr(self.instance, "business_license_document", None),
+        )
+        if listing_type == CarListing.ListingTypeChoices.RENT and requires_business_license and not business_license_document:
             raise serializers.ValidationError({
-                "rental_mode": "Code 3 and business license requirements only apply to without-driver rentals."
+                "business_license_document": (
+                    "A provider business-license file is required when business-license validation is enabled for self-drive rentals."
+                )
             })
+
+        if listing_type == CarListing.ListingTypeChoices.RENT:
+            with_driver_base_price = with_driver_base_price or data.get("base_price") or getattr(self.instance, "base_price", None)
+            without_driver_base_price = without_driver_base_price or data.get("base_price") or getattr(self.instance, "base_price", None)
+
+            if with_driver_base_price is None or with_driver_base_price <= 0:
+                raise serializers.ValidationError({"with_driver_base_price": "With-driver price must be greater than 0."})
+            if without_driver_base_price is None or without_driver_base_price <= 0:
+                raise serializers.ValidationError({"without_driver_base_price": "Without-driver price must be greater than 0."})
+
+            data["with_driver_base_price"] = with_driver_base_price
+            data["without_driver_base_price"] = without_driver_base_price
+            data["base_price"] = (
+                with_driver_base_price
+                if rental_mode == CarListing.RentalModeChoices.WITH_DRIVER
+                else without_driver_base_price
+            )
         
         base_price = data.get("base_price", getattr(self.instance, "base_price", None))
         if base_price and base_price <= 0:
@@ -2212,7 +2288,15 @@ class CarListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     def to_representation(self, instance):
         return CarListingResponseSerializer(instance, context=self.context).data
 
+    def to_representation(self, instance):
+        return CarListingResponseSerializer(instance, context=self.context).data
+
 class CarRentalItemSerializer(serializers.ModelSerializer):
+    price_per_unit = serializers.DecimalField(max_digits=10, decimal_places=2, required=False)
+    selected_rental_mode = serializers.ChoiceField(
+        choices=CarListing.RentalModeChoices.choices,
+        required=False,
+    )
     car_listing_details = serializers.SerializerMethodField()
     stay_total = serializers.SerializerMethodField()
     nightly_rate = serializers.SerializerMethodField()
@@ -2222,7 +2306,7 @@ class CarRentalItemSerializer(serializers.ModelSerializer):
         model = CarRentalItem
         fields = [
             'id', 'car_listing', 'car_listing_details', 'units_rent', 'price_per_unit',
-            'nightly_rate', 'stay_total', 'subtotal', 'created_at'
+            'selected_rental_mode', 'nightly_rate', 'stay_total', 'subtotal', 'created_at'
         ]
         read_only_fields = ['id', 'stay_total', 'subtotal', 'created_at']
 
@@ -2248,6 +2332,8 @@ class CarRentalItemSerializer(serializers.ModelSerializer):
             'model': serializers.CharField(),
             'year': serializers.IntegerField(allow_null=True),
             'base_price': serializers.DecimalField(max_digits=10, decimal_places=2),
+            'with_driver_base_price': serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True),
+            'without_driver_base_price': serializers.DecimalField(max_digits=10, decimal_places=2, allow_null=True),
         }
     ))
     def get_car_listing_details(self, obj):
@@ -2257,7 +2343,9 @@ class CarRentalItemSerializer(serializers.ModelSerializer):
             'brand': obj.car_listing.brand,
             'model': obj.car_listing.model,
             'year': obj.car_listing.year,
-            'base_price': obj.car_listing.base_price
+            'base_price': obj.car_listing.base_price,
+            'with_driver_base_price': obj.car_listing.with_driver_base_price or obj.car_listing.base_price,
+            'without_driver_base_price': obj.car_listing.without_driver_base_price or obj.car_listing.base_price,
         }
 
 
@@ -2417,6 +2505,11 @@ class CarRentalSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, 
         for item in rental_items:
             listing = item["car_listing"]
             units = item["units_rent"]
+            selected_rental_mode = item.get(
+                "selected_rental_mode",
+                listing.rental_mode,
+            )
+            item["selected_rental_mode"] = selected_rental_mode
 
             result = CarAvailabilityService.check_daily_availability(
                 car_listing=listing,
@@ -2430,15 +2523,18 @@ class CarRentalSerializer(ForwardBookingWindowMixin, SanitizeGuestDetailsMixin, 
                     "rental_items": f"{listing.title} is not available: {result.get('reason', 'unavailable')}"
                 })
 
-            if item.get("price_per_unit", 0) <= 0:
+            selected_rental_mode = item.get("selected_rental_mode", listing.rental_mode)
+            resolved_price = CarRentalService.resolve_mode_price(listing, selected_rental_mode)
+
+            if resolved_price <= 0:
                 raise serializers.ValidationError({
-                    "rental_items": "Price per unit must be greater than 0."
+                    "rental_items": "Resolved price per unit must be greater than 0."
                 })
 
         without_driver_listings = [
             item["car_listing"]
             for item in rental_items
-            if item["car_listing"].rental_mode == CarListing.RentalModeChoices.WITHOUT_DRIVER
+            if item.get("selected_rental_mode") == CarListing.RentalModeChoices.WITHOUT_DRIVER
         ]
         if without_driver_listings:
             if not data.get("renter_driver_license_number"):
@@ -2544,6 +2640,10 @@ class CarRentalRescheduleSerializer(serializers.Serializer):
 class CarRentalPreviewItemSerializer(serializers.Serializer):
     car_listing = serializers.PrimaryKeyRelatedField(queryset=CarListing.objects.filter(is_active=True))
     units_rent = serializers.IntegerField(min_value=1)
+    selected_rental_mode = serializers.ChoiceField(
+        choices=CarListing.RentalModeChoices.choices,
+        required=False,
+    )
 
 
 class CarRentalPreviewSerializer(ForwardBookingWindowMixin, serializers.Serializer):
@@ -2551,6 +2651,9 @@ class CarRentalPreviewSerializer(ForwardBookingWindowMixin, serializers.Serializ
     end_date = serializers.DateField(help_text="Rental end date.")
     items = CarRentalPreviewItemSerializer(many=True, help_text="List of cars and quantities selected.")
     guest_phone = serializers.CharField(required=False, allow_blank=True, help_text="Optional phone number used to determine the first-booking fee waiver.")
+    renter_driver_license_number = serializers.CharField(required=False, allow_blank=True)
+    renter_code_3_license_number = serializers.CharField(required=False, allow_blank=True)
+    renter_business_license_number = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, data):
         start_date = data.get("start_date")
@@ -2574,7 +2677,94 @@ class CarRentalPreviewSerializer(ForwardBookingWindowMixin, serializers.Serializ
         if not items:
             raise serializers.ValidationError("At least one rental item is required.")
 
+        item_errors = []
+        without_driver_listings = []
+        nights = (end_date - start_date).days if start_date and end_date else 0
+
+        for item in items:
+            listing = item["car_listing"]
+            selected_rental_mode = item.get("selected_rental_mode") or listing.rental_mode
+            item["selected_rental_mode"] = selected_rental_mode
+            item_error = {}
+
+            if start_date and end_date and nights > 0:
+                availability_rows = list(
+                    CarAvailability.objects.filter(
+                        car_listing=listing,
+                        date__gte=start_date,
+                        date__lt=end_date,
+                    ).values_list("available_units", flat=True)
+                )
+
+                if len(availability_rows) < nights or not availability_rows or min(availability_rows) <= 0:
+                    item_error["car_listing"] = [
+                        "This car is unavailable for the selected dates."
+                    ]
+                else:
+                    min_available = min(availability_rows)
+                    requested_units = item["units_rent"]
+                    if min_available < requested_units:
+                        unit_label = "unit" if min_available == 1 else "units"
+                        verb = "is" if min_available == 1 else "are"
+                        item_error["units_rent"] = [
+                            f"Only {min_available} {unit_label} {verb} available."
+                        ]
+
+            if selected_rental_mode == CarListing.RentalModeChoices.WITHOUT_DRIVER:
+                without_driver_listings.append(listing)
+
+            item_errors.append(item_error)
+
+        if any(item_errors):
+            raise serializers.ValidationError({"items": item_errors})
+
+        compliance_errors = {}
+        if without_driver_listings:
+            if not data.get("renter_driver_license_number"):
+                compliance_errors["renter_driver_license_number"] = [
+                    "Driver license number is required for without-driver rentals."
+                ]
+
+            if any(listing.requires_code_3 for listing in without_driver_listings) and not data.get(
+                "renter_code_3_license_number"
+            ):
+                compliance_errors["renter_code_3_license_number"] = [
+                    "Code 3 license number is required for at least one selected without-driver car."
+                ]
+
+            if any(
+                listing.requires_business_license for listing in without_driver_listings
+            ) and not data.get("renter_business_license_number"):
+                compliance_errors["renter_business_license_number"] = [
+                    "Business license number is required for at least one selected without-driver car."
+                ]
+
+        if compliance_errors:
+            raise serializers.ValidationError(compliance_errors)
+
         return data
+
+
+class CarRentalPreviewItemErrorSerializer(serializers.Serializer):
+    car_listing = serializers.ListField(child=serializers.CharField(), required=False)
+    units_rent = serializers.ListField(child=serializers.CharField(), required=False)
+    selected_rental_mode = serializers.ListField(child=serializers.CharField(), required=False)
+
+
+class CarRentalPreviewValidationErrorsSerializer(serializers.Serializer):
+    items = CarRentalPreviewItemErrorSerializer(many=True, required=False)
+    start_date = serializers.ListField(child=serializers.CharField(), required=False)
+    end_date = serializers.ListField(child=serializers.CharField(), required=False)
+    guest_phone = serializers.ListField(child=serializers.CharField(), required=False)
+    renter_driver_license_number = serializers.ListField(child=serializers.CharField(), required=False)
+    renter_code_3_license_number = serializers.ListField(child=serializers.CharField(), required=False)
+    renter_business_license_number = serializers.ListField(child=serializers.CharField(), required=False)
+    non_field_errors = serializers.ListField(child=serializers.CharField(), required=False)
+
+
+class CarRentalPreviewValidationErrorResponseSerializer(serializers.Serializer):
+    detail = serializers.CharField()
+    errors = CarRentalPreviewValidationErrorsSerializer(required=False)
 
 
 class CarRentalExtensionBaseSerializer(SanitizeGuestDetailsMixin, serializers.Serializer):

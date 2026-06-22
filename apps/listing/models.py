@@ -255,6 +255,22 @@ class CarListing(BaseListing):
         verbose_name=_("Rental Mode"),
         help_text=_("Whether the vehicle is rented with a driver or as a self-drive booking."),
     )
+    with_driver_base_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name=_("With Driver Base Price"),
+        help_text=_("Per-day rental price when the renter chooses the with-driver option."),
+    )
+    without_driver_base_price = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name=_("Without Driver Base Price"),
+        help_text=_("Per-day rental price when the renter chooses the self-drive option."),
+    )
 
     car_class = models.CharField(
         max_length=200,
@@ -281,6 +297,13 @@ class CarListing(BaseListing):
         default="",
         verbose_name=_("Pre-rental Requirements"),
         help_text=_("Owner-defined instructions or compliance notes that renters must review before booking."),
+    )
+    business_license_document = models.FileField(
+        upload_to="car/business_licenses/",
+        blank=True,
+        null=True,
+        verbose_name=_("Business License Document"),
+        help_text=_("Provider-owned business license document required when self-drive rentals enforce business-license validation."),
     )
     images = GenericRelation(ListingImage, related_query_name="listings")
     quantity=models.PositiveSmallIntegerField(default=1,null=False)
@@ -618,6 +641,13 @@ class CarRentalItem(AbstractBaseModel):
         default=1,
         verbose_name=_("Quantity"),
         help_text=_("Number of cars being rented.")
+    )
+    selected_rental_mode = models.CharField(
+        max_length=32,
+        choices=CarListing.RentalModeChoices.choices,
+        default=CarListing.RentalModeChoices.WITH_DRIVER,
+        verbose_name=_("Selected Rental Mode"),
+        help_text=_("Renter-selected driver preference for this booked car."),
     )
     price_per_unit= models.DecimalField(max_digits=10, decimal_places=2)
     class Meta:

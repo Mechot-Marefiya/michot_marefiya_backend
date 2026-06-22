@@ -71,6 +71,8 @@ class CarRentalPricingTests(TestCase):
             currency="ETB",
             listing_type=CarListing.ListingTypeChoices.RENT,
             rental_mode=CarListing.RentalModeChoices.WITH_DRIVER,
+            with_driver_base_price=Decimal("1500.00"),
+            without_driver_base_price=Decimal("1800.00"),
             car_class=CarListing.CarClassChoices.NORMAL,
             condition=CarListing.ConditionChoices.USED,
             quantity=5,
@@ -90,6 +92,8 @@ class CarRentalPricingTests(TestCase):
             currency="USD",
             listing_type=CarListing.ListingTypeChoices.RENT,
             rental_mode=CarListing.RentalModeChoices.WITH_DRIVER,
+            with_driver_base_price=Decimal("100.00"),
+            without_driver_base_price=Decimal("120.00"),
             car_class=CarListing.CarClassChoices.LUXURY,
             condition=CarListing.ConditionChoices.USED,
             quantity=2,
@@ -229,13 +233,11 @@ class CarRentalPricingTests(TestCase):
 
     def test_without_driver_requires_code_3_and_business_license(self):
         """Verify self-drive rentals enforce Code 3 and business-license requirements when configured."""
-        self.car_etb.rental_mode = CarListing.RentalModeChoices.WITHOUT_DRIVER
         self.car_etb.requires_code_3 = True
         self.car_etb.requires_business_license = True
         self.car_etb.pre_rental_requirements = "Provide Code 3 and business license."
         self.car_etb.save(
             update_fields=[
-                "rental_mode",
                 "requires_code_3",
                 "requires_business_license",
                 "pre_rental_requirements",
@@ -255,7 +257,7 @@ class CarRentalPricingTests(TestCase):
                 {
                     "car_listing": self.car_etb.id,
                     "units_rent": 1,
-                    "price_per_unit": 1500.00,
+                    "selected_rental_mode": CarListing.RentalModeChoices.WITHOUT_DRIVER,
                 }
             ],
             "terms_accepted": True,
@@ -285,3 +287,38 @@ class CarRentalPricingTests(TestCase):
         self.assertEqual(rental.renter_driver_license_number, "DL-12345")
         self.assertEqual(rental.renter_code_3_license_number, "C3-12345")
         self.assertEqual(rental.renter_business_license_number, "BL-12345")
+        self.assertEqual(
+            rental.rental_items.first().selected_rental_mode,
+            CarListing.RentalModeChoices.WITHOUT_DRIVER,
+        )
+
+    def test_car_rental_preview_uses_selected_rental_mode_price(self):
+        url = reverse("carrental-price-preview")
+        start_date = date.today() + timedelta(days=2)
+        end_date = start_date + timedelta(days=3)
+
+        response = self.client.post(
+            url,
+            {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "items": [
+                    {
+                        "car_listing": self.car_etb.id,
+                        "units_rent": 1,
+                        "selected_rental_mode": CarListing.RentalModeChoices.WITHOUT_DRIVER,
+                    }
+                ],
+                "guest_phone": "0911555004",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK, response.data)
+        preview_item = response.data["items"][0]
+        self.assertEqual(
+            preview_item["selected_rental_mode"],
+            CarListing.RentalModeChoices.WITHOUT_DRIVER,
+        )
+        self.assertEqual(Decimal(preview_item["price_per_unit"]), Decimal("1800.00"))
+        self.assertEqual(Decimal(preview_item["subtotal"]), Decimal("5400.00"))

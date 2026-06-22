@@ -3449,6 +3449,34 @@ paths:
     get:
       operationId: v1_listing_car_availabilities_by_car_and_date_retrieve
       summary: Get availability for a specific car listing within a date range
+      parameters:
+      - in: query
+        name: car_listing
+        schema:
+          type: string
+          format: uuid
+        description: Target car listing UUID.
+        required: true
+      - in: query
+        name: end_date
+        schema:
+          type: string
+          format: date
+        description: Exclusive rental end date in YYYY-MM-DD format. Must be after
+          start_date.
+        required: true
+      - in: query
+        name: quantity
+        schema:
+          type: integer
+        description: Requested number of cars. Defaults to 1 when omitted.
+      - in: query
+        name: start_date
+        schema:
+          type: string
+          format: date
+        description: Inclusive rental start date in YYYY-MM-DD format.
+        required: true
       tags:
       - v1
       security:
@@ -3465,6 +3493,27 @@ paths:
     get:
       operationId: v1_listing_car_availabilities_by_dates_retrieve
       summary: Search all available cars in a date range
+      parameters:
+      - in: query
+        name: end_date
+        schema:
+          type: string
+          format: date
+        description: Exclusive rental end date in YYYY-MM-DD format. Must be after
+          start_date.
+        required: true
+      - in: query
+        name: quantity
+        schema:
+          type: integer
+        description: Requested number of cars. Defaults to 1 when omitted.
+      - in: query
+        name: start_date
+        schema:
+          type: string
+          format: date
+        description: Inclusive rental start date in YYYY-MM-DD format.
+        required: true
       tags:
       - v1
       security:
@@ -4103,8 +4152,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                additionalProperties: {}
+                $ref: '#/components/schemas/CarRentalPreviewValidationErrorResponse'
           description: ''
         '409':
           content:
@@ -11478,6 +11526,20 @@ components:
 
             * `with_driver` - With Driver
             * `without_driver` - Without Driver
+        with_driver_base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          description: Per-day rental price when the renter chooses the with-driver
+            option.
+        without_driver_base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          description: Per-day rental price when the renter chooses the self-drive
+            option.
         car_class:
           allOf:
           - $ref: '#/components/schemas/CarClassEnum'
@@ -11497,6 +11559,10 @@ components:
           type: string
           description: Owner-defined instructions or compliance notes that renters
             must review before booking.
+        business_license_document:
+          type: string
+          format: uri
+          nullable: true
       required:
       - brand
       - condition
@@ -11517,6 +11583,22 @@ components:
       required:
       - available_units
       - date
+    CarListingPricingByRentalMode:
+      type: object
+      properties:
+        with_driver:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        without_driver:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+      required:
+      - with_driver
+      - without_driver
     CarListingRequest:
       type: object
       properties:
@@ -11631,6 +11713,20 @@ components:
 
             * `with_driver` - With Driver
             * `without_driver` - Without Driver
+        with_driver_base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          description: Per-day rental price when the renter chooses the with-driver
+            option.
+        without_driver_base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          description: Per-day rental price when the renter chooses the self-drive
+            option.
         car_class:
           allOf:
           - $ref: '#/components/schemas/CarClassEnum'
@@ -11650,6 +11746,10 @@ components:
           type: string
           description: Owner-defined instructions or compliance notes that renters
             must review before booking.
+        business_license_document:
+          type: string
+          format: binary
+          nullable: true
         place_id:
           type: string
           writeOnly: true
@@ -11782,6 +11882,24 @@ components:
 
             * `with_driver` - With Driver
             * `without_driver` - Without Driver
+        with_driver_base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          description: Per-day rental price when the renter chooses the with-driver
+            option.
+        without_driver_base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          description: Per-day rental price when the renter chooses the self-drive
+            option.
+        pricing_by_rental_mode:
+          allOf:
+          - $ref: '#/components/schemas/CarListingPricingByRentalMode'
+          readOnly: true
         car_class:
           allOf:
           - $ref: '#/components/schemas/CarClassEnum'
@@ -11815,6 +11933,10 @@ components:
           type: string
           description: Owner-defined instructions or compliance notes that renters
             must review before booking.
+        business_license_document:
+          type: string
+          format: uri
+          readOnly: true
         availabilities:
           type: array
           items:
@@ -11864,6 +11986,7 @@ components:
       required:
       - availabilities
       - brand
+      - business_license_document
       - condition
       - conversion
       - created_at
@@ -11874,6 +11997,7 @@ components:
       - mileage
       - model
       - price_quote
+      - pricing_by_rental_mode
       - title
       - transmission
       - updated_at
@@ -12203,6 +12327,8 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        selected_rental_mode:
+          $ref: '#/components/schemas/SelectedRentalModeEnum'
         nightly_rate:
           type: string
           readOnly: true
@@ -12222,7 +12348,6 @@ components:
       - created_at
       - id
       - nightly_rate
-      - price_per_unit
       - stay_total
       - subtotal
     CarRentalItemCarListingDetails:
@@ -12244,12 +12369,24 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        with_driver_base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+        without_driver_base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
       required:
       - base_price
       - brand
       - id
       - model
       - title
+      - with_driver_base_price
+      - without_driver_base_price
       - year
     CarRentalItemRequest:
       type: object
@@ -12267,9 +12404,25 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        selected_rental_mode:
+          $ref: '#/components/schemas/SelectedRentalModeEnum'
       required:
       - car_listing
-      - price_per_unit
+    CarRentalPreviewItemError:
+      type: object
+      properties:
+        car_listing:
+          type: array
+          items:
+            type: string
+        units_rent:
+          type: array
+          items:
+            type: string
+        selected_rental_mode:
+          type: array
+          items:
+            type: string
     CarRentalPreviewItemRequest:
       type: object
       properties:
@@ -12279,6 +12432,8 @@ components:
         units_rent:
           type: integer
           minimum: 1
+        selected_rental_mode:
+          $ref: '#/components/schemas/SelectedRentalModeEnum'
       required:
       - car_listing
       - units_rent
@@ -12303,10 +12458,60 @@ components:
           type: string
           description: Optional phone number used to determine the first-booking fee
             waiver.
+        renter_driver_license_number:
+          type: string
+        renter_code_3_license_number:
+          type: string
+        renter_business_license_number:
+          type: string
       required:
       - end_date
       - items
       - start_date
+    CarRentalPreviewValidationErrorResponse:
+      type: object
+      properties:
+        detail:
+          type: string
+        errors:
+          $ref: '#/components/schemas/CarRentalPreviewValidationErrors'
+      required:
+      - detail
+    CarRentalPreviewValidationErrors:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CarRentalPreviewItemError'
+        start_date:
+          type: array
+          items:
+            type: string
+        end_date:
+          type: array
+          items:
+            type: string
+        guest_phone:
+          type: array
+          items:
+            type: string
+        renter_driver_license_number:
+          type: array
+          items:
+            type: string
+        renter_code_3_license_number:
+          type: array
+          items:
+            type: string
+        renter_business_license_number:
+          type: array
+          items:
+            type: string
+        non_field_errors:
+          type: array
+          items:
+            type: string
     CarRentalRequest:
       type: object
       properties:
@@ -17442,6 +17647,20 @@ components:
 
             * `with_driver` - With Driver
             * `without_driver` - Without Driver
+        with_driver_base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          description: Per-day rental price when the renter chooses the with-driver
+            option.
+        without_driver_base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          description: Per-day rental price when the renter chooses the self-drive
+            option.
         car_class:
           allOf:
           - $ref: '#/components/schemas/CarClassEnum'
@@ -17461,6 +17680,10 @@ components:
           type: string
           description: Owner-defined instructions or compliance notes that renters
             must review before booking.
+        business_license_document:
+          type: string
+          format: binary
+          nullable: true
         place_id:
           type: string
           writeOnly: true
@@ -20794,6 +21017,14 @@ components:
           nullable: true
       required:
       - season
+    SelectedRentalModeEnum:
+      enum:
+      - with_driver
+      - without_driver
+      type: string
+      description: |-
+        * `with_driver` - With Driver
+        * `without_driver` - Without Driver
     SlotTypeEnum:
       enum:
       - featured_listing

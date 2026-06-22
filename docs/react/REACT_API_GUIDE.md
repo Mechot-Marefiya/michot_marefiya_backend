@@ -642,7 +642,8 @@ Core response fields:
 - `base_price`, `currency`
 - `booking_forward_window_days`
 - car attributes such as `brand`, `model`, `year`, `fuel_type`, `transmission`, `condition`, `car_class`, `seats`
-- rental/compliance attributes including `rental_mode`, `requires_code_3`, `requires_business_license`, `pre_rental_requirements`
+- rental/compliance attributes including `rental_mode`, `with_driver_base_price`, `without_driver_base_price`, `pricing_by_rental_mode`, `requires_code_3`, `requires_business_license`, `pre_rental_requirements`
+- `business_license_document`: string|null - owner-scoped document URL; public responses may return `null`
 - `is_verified`, `verified_at`, `verified_by`, `verification_note`
 - `conversion`
 
@@ -1111,7 +1112,15 @@ Auth: no
 Roles: all
 
 Request body:
-- `CarRental` preview request with listing, date range, units, and guest/rental context
+- `CarRental` preview request with listing, date range, units, guest/rental context, and renter-selected mode per item
+- each item should send:
+  - `car_listing`
+  - `units_rent`
+  - `selected_rental_mode`: `with_driver` | `without_driver`
+- when any selected item uses `without_driver`, preview may also require:
+  - `renter_driver_license_number`
+  - `renter_code_3_license_number`
+  - `renter_business_license_number`
 
 Query params:
 - none
@@ -1120,11 +1129,27 @@ Success response (HTTP 200):
 - preview object for the rental flow
 
 Error responses:
-- `400`: unavailable dates or invalid rental request
+- `400`: normalized validation contract
+```json
+{
+  "detail": "Price preview could not be created.",
+  "errors": {
+    "items": [
+      {
+        "car_listing": ["This car is unavailable for the selected dates."],
+        "units_rent": ["Only 1 unit is available."]
+      }
+    ]
+  }
+}
+```
+- use `detail` for summary copy
+- use `errors.items[index]` plus top-level field arrays like `end_date` or `renter_driver_license_number` for field messages
 
 React notes:
 - use this to display car-rental totals before create
 - surface rental requirements from the listing before this step
+- compute preview using the renter-selected `selected_rental_mode`, not a single listing-wide price
 
 ### Create / View / Cancel Car Rental
 Workflow reference: `REACT_WORKFLOW.md` Section 3
@@ -1135,6 +1160,7 @@ Roles: all
 
 Request body:
 - create uses `CarRentalRequest`
+- each `rental_items[]` entry may include `selected_rental_mode`
 - guest create requires prior guest OTP request plus `otp_challenge_id` and `otp_code`
 - cancel guest path may use `guest_phone`, `guest_verification_token`, `otp_challenge_id`, `otp_code`, `reason`
 
@@ -1150,6 +1176,7 @@ Core response fields:
 - `total_price`, `currency`
 - `status`
 - guest and compliance fields
+- `items_details[].selected_rental_mode`
 - snapshot and terms fields
 
 Error responses:
@@ -1696,6 +1723,9 @@ Roles: company_staff
 
 Request body:
 - patch uses `PatchedCarListingRequest`
+- `business_license_document`: file|null - provider-owned business-license upload for self-drive cars that require business-license validation
+- `with_driver_base_price`: decimal - provider-configured renter price for `with_driver`
+- `without_driver_base_price`: decimal - provider-configured renter price for `without_driver`
 
 Query params:
 - none
@@ -1708,6 +1738,9 @@ Error responses:
 
 React notes:
 - expose compliance fields like `requires_code_3` and `requires_business_license`
+- when `rental_mode=without_driver` and `requires_business_license=true`, React must send `business_license_document` on create or before enabling that rule on edit
+- managed owner responses can include `business_license_document` as the uploaded file URL; do not assume the public listing detail will expose that provider document
+- renter-side price switching should read `with_driver_base_price` / `without_driver_base_price` or `pricing_by_rental_mode`
 
 ### Car Availability Update
 Workflow reference: `REACT_WORKFLOW.md` Section 4
@@ -1732,6 +1765,73 @@ Error responses:
 
 React notes:
 - this is for operational inventory updates, not customer browsing
+
+### Car Availability By Car And Date
+Workflow reference: `REACT_WORKFLOW.md` Section 4
+Method: `GET`
+URL: `/api/v1/listing/car-availabilities/by-car-and-date/`
+Auth: no
+Roles: all
+
+Request body:
+- none
+
+Query params:
+- `car_listing`: uuid - required - target car listing id
+- `start_date`: date - required - `YYYY-MM-DD`
+- `end_date`: date - required - `YYYY-MM-DD` and must be after `start_date`
+- `quantity`: integer - optional - requested units, defaults to `1`
+
+Success response (HTTP 200):
+- `CarAvailabilityByCarAndDateResponse`
+- includes:
+  - `car_listing`: object with `id`, `title`, `brand`, `model`, `base_price`
+  - `search_period`: object with `start_date`, `end_date`
+  - `quantity_requested`: integer
+  - `availability`: object|null - current availability result for the requested range
+
+Error responses:
+- `400`: missing `car_listing`, missing dates, invalid date format, or `end_date <= start_date`
+
+React notes:
+- use this when the provider is managing availability for one selected car
+- this is a read-only availability check; editing still happens through `/car-availabilities/{id}/update/`
+
+### Car Availability By Dates
+Workflow reference: `REACT_WORKFLOW.md` Section 4
+Method: `GET`
+URL: `/api/v1/listing/car-availabilities/by-dates/`
+Auth: no
+Roles: all
+
+Request body:
+- none
+
+Query params:
+- `start_date`: date - required - `YYYY-MM-DD`
+- `end_date`: date - required - `YYYY-MM-DD` and must be after `start_date`
+- `quantity`: integer - optional - requested units, defaults to `1`
+
+Success response (HTTP 200):
+- `CarAvailabilityByDateRangeResponse`
+- includes:
+  - `search_period`: object with `start_date`, `end_date`
+  - `quantity_requested`: integer
+  - `available_cars_count`: integer
+  - `available_cars`: array of objects with:
+    - `car_listing_id`
+    - `title`
+    - `brand`
+    - `model`
+    - `base_price`
+    - `availability`: object|null
+
+Error responses:
+- `400`: missing dates, invalid date format, or `end_date <= start_date`
+
+React notes:
+- use this for provider-side availability browsing across multiple cars in one date range
+- the endpoint returns only cars whose availability check reports `is_available=true`
 
 ### Workspace Bookings
 Workflow reference: `REACT_WORKFLOW.md` Section 4

@@ -21,7 +21,7 @@ from rest_framework.response import Response
 from django.db import transaction
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.throttling import ScopedRateThrottle
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiTypes, inline_serializer
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes, inline_serializer
 from apps.account.serializers import HotelProfileResponseSerializer, ListingImageSerializer
 from apps.core.serializers import FacilityResponseSerializer
 from django.contrib.contenttypes.models import ContentType
@@ -112,6 +112,7 @@ from apps.listing.serializers import (
     AvailabilityCheckSerializer,
     CarSearchSerializer,
     CarRentalPreviewSerializer,
+    CarRentalPreviewValidationErrorResponseSerializer,
     CarRentalSerializer,
     CarRentalExtensionInitiateResponseSerializer,
     CarRentalExtensionInitiateSerializer,
@@ -807,6 +808,32 @@ def _verify_guest_contact_reveal_request(serializer, *, reveal_type):
         phone=buyer_phone,
         reveal_type=reveal_type,
     )
+
+
+def _normalize_validation_error_node(node):
+    if isinstance(node, dict):
+        return {key: _normalize_validation_error_node(value) for key, value in node.items()}
+    if isinstance(node, list):
+        if node and any(isinstance(item, dict) for item in node):
+            return [_normalize_validation_error_node(item) for item in node]
+        return [str(item) for item in node]
+    return [str(node)]
+
+
+def _car_rental_preview_validation_response(errors):
+    normalized = _normalize_validation_error_node(errors)
+    detail = "Price preview could not be created."
+
+    if isinstance(normalized, dict):
+        non_field_errors = normalized.get("non_field_errors")
+        if non_field_errors and len(normalized) == 1:
+            return {"detail": non_field_errors[0]}
+        return {"detail": detail, "errors": normalized}
+
+    if isinstance(normalized, list) and normalized:
+        return {"detail": normalized[0]}
+
+    return {"detail": detail}
 
 
 class SavedListingDeletionNotificationMixin:
@@ -2681,12 +2708,16 @@ class CarRentalViewSet(AbstractModelViewSet):
                 description="Optional: Request price preview in a specific currency (e.g., USD) using triangulation.",
             )
         ],
-        responses={200: PricePreviewResponseSerializer, 400: OpenApiTypes.OBJECT, 409: OpenApiTypes.OBJECT},
+        responses={200: PricePreviewResponseSerializer, 400: CarRentalPreviewValidationErrorResponseSerializer, 409: OpenApiTypes.OBJECT},
     )
     @action(detail=False, methods=['post'], url_path='price-preview')
     def price_preview(self, request):
         serializer = CarRentalPreviewSerializer(data=request.data, context=self.get_serializer_context())
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            return Response(
+                _car_rental_preview_validation_response(serializer.errors),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         data = serializer.validated_data
         preview_phone = data.get('guest_phone') or (request.user.phone if request.user.is_authenticated else None)
@@ -3021,13 +3052,32 @@ class CarAvailabilitySearchView(APIView):
             "availability": availability
         })
 
-class CarAvailabilityByDateRangeView(APIView):
-    permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = 'availability_check'
-
-    @extend_schema(
+@extend_schema_view(
+    get=extend_schema(
         summary="Search all available cars in a date range",
+        parameters=[
+            OpenApiParameter(
+                name="start_date",
+                type=OpenApiTypes.DATE,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Inclusive rental start date in YYYY-MM-DD format.",
+            ),
+            OpenApiParameter(
+                name="end_date",
+                type=OpenApiTypes.DATE,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Exclusive rental end date in YYYY-MM-DD format. Must be after start_date.",
+            ),
+            OpenApiParameter(
+                name="quantity",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Requested number of cars. Defaults to 1 when omitted.",
+            ),
+        ],
         responses=inline_serializer(
             name="CarAvailabilityByDateRangeResponse",
             fields={
@@ -3055,6 +3105,11 @@ class CarAvailabilityByDateRangeView(APIView):
             },
         ),
     )
+)
+class CarAvailabilityByDateRangeView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'availability_check'
     def get(self, request):
         _, start_date, end_date, quantity_or_resp = ParseDatesAndQuantity.parse_dates_and_quantity(request)
         if isinstance(quantity_or_resp, Response):
@@ -3079,13 +3134,39 @@ class CarAvailabilityByDateRangeView(APIView):
             "available_cars": results
         })
 
-class CarAvailabilityByCarAndDateView(APIView):
-    permission_classes = [AllowAny]
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = 'availability_check'
-
-    @extend_schema(
+@extend_schema_view(
+    get=extend_schema(
         summary="Get availability for a specific car listing within a date range",
+        parameters=[
+            OpenApiParameter(
+                name="car_listing",
+                type=OpenApiTypes.UUID,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Target car listing UUID.",
+            ),
+            OpenApiParameter(
+                name="start_date",
+                type=OpenApiTypes.DATE,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Inclusive rental start date in YYYY-MM-DD format.",
+            ),
+            OpenApiParameter(
+                name="end_date",
+                type=OpenApiTypes.DATE,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description="Exclusive rental end date in YYYY-MM-DD format. Must be after start_date.",
+            ),
+            OpenApiParameter(
+                name="quantity",
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description="Requested number of cars. Defaults to 1 when omitted.",
+            ),
+        ],
         responses=inline_serializer(
             name="CarAvailabilityByCarAndDateResponse",
             fields={
@@ -3111,6 +3192,11 @@ class CarAvailabilityByCarAndDateView(APIView):
             },
         ),
     )
+)
+class CarAvailabilityByCarAndDateView(APIView):
+    permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'availability_check'
     def get(self, request):
         car_listing_id, start_date, end_date, quantity_or_resp = ParseDatesAndQuantity.parse_dates_and_quantity(request, require_car=True)
         if isinstance(quantity_or_resp, Response):

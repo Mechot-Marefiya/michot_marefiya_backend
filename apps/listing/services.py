@@ -3800,6 +3800,22 @@ class PropertyRentalBookingService:
 
 class CarRentalService:
     @staticmethod
+    def resolve_mode_price(listing, selected_rental_mode):
+        if selected_rental_mode == CarListing.RentalModeChoices.WITHOUT_DRIVER:
+            return Decimal(
+                str(
+                    listing.without_driver_base_price
+                    or listing.base_price
+                )
+            )
+        return Decimal(
+            str(
+                listing.with_driver_base_price
+                or listing.base_price
+            )
+        )
+
+    @staticmethod
     def _build_snapshot(rental: "CarRental", *, fee_rate):
         duration = (rental.end_date - rental.start_date).days or 1
         items_snapshots = []
@@ -3814,6 +3830,7 @@ class CarRentalService:
                         "id": str(item.car_listing.id),
                         "title": f"{item.car_listing.brand} {item.car_listing.model}",
                     },
+                    "selected_rental_mode": item.selected_rental_mode,
                     "units_booked": item.units_rent,
                     "nights": duration,
                     "nightly_rate": f"{item.price_per_unit:.2f}",
@@ -3876,7 +3893,12 @@ class CarRentalService:
         # Calculate Total Price
         rental_days = (validated_data["end_date"] - validated_data["start_date"]).days or 1
         total_price = sum(
-            item['units_rent'] * item['price_per_unit'] * rental_days
+            item['units_rent']
+            * CarRentalService.resolve_mode_price(
+                item["car_listing"],
+                item.get("selected_rental_mode", item["car_listing"].rental_mode),
+            )
+            * rental_days
             for item in rental_items_data
         )
         validated_data["total_price"] = total_price
@@ -3908,6 +3930,9 @@ class CarRentalService:
         for item in rental_items_data:
             listing = item["car_listing"]
             units = item["units_rent"]
+            selected_rental_mode = item.get("selected_rental_mode", listing.rental_mode)
+            item["price_per_unit"] = CarRentalService.resolve_mode_price(listing, selected_rental_mode)
+            item["selected_rental_mode"] = selected_rental_mode
 
             CarRentalItem.objects.create(
                 car_rental=rental, **item
@@ -3963,6 +3988,7 @@ class CarRentalService:
         for item in items:
             listing = item["car_listing"]
             units = item["units_rent"]
+            selected_rental_mode = item.get("selected_rental_mode", listing.rental_mode)
 
             availability = CarAvailabilityService.check_daily_availability(
                 car_listing=listing,
@@ -3975,15 +4001,29 @@ class CarRentalService:
                     f"{listing.title} is not available: {availability.get('reason', 'unavailable')}"
                 )
 
-            price_details = PriceService.resolve_price_details_batch(listing, start_date, end_date)
-            item_base_total = sum(Decimal(str(detail["price_per_unit"])) for detail in price_details) * units
+            price_per_unit = CarRentalService.resolve_mode_price(listing, selected_rental_mode)
+            item_base_total = price_per_unit * Decimal(nights or 1) * units
+            price_details = [
+                {
+                    "date": cursor,
+                    "price_per_unit": price_per_unit,
+                    "currency": listing.currency,
+                    "selected_rental_mode": selected_rental_mode,
+                }
+                for cursor in (
+                    [start_date + timedelta(days=offset) for offset in range(nights)]
+                    if nights > 0
+                    else [start_date]
+                )
+            ]
             item_subtotals.append(item_base_total)
             total_items.append(
                 {
                     "id": str(listing.id),
                     "title": listing.title,
+                    "selected_rental_mode": selected_rental_mode,
                     "units": units,
-                    "price_per_unit": f"{(price_details[0]['price_per_unit'] if price_details else listing.base_price):.2f}",
+                    "price_per_unit": f"{price_per_unit:.2f}",
                     "subtotal": f"{item_base_total:.2f}",
                     "breakdown": price_details,
                 }

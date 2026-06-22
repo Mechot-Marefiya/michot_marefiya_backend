@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from django.core.cache import cache
 from django.contrib.contenttypes.models import ContentType
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 
 from apps.account.models import HotelProfile, OwnerComplianceAgreement
@@ -202,6 +203,7 @@ def _mock_extension_chapa_initialize(settings, monkeypatch, checkout_url="https:
     settings.CHAPA_CALLBACK_URL = "https://api.example.com/payment/callback"
     settings.FRONTEND_URL = "https://app.example.com"
     settings.CHAPA_SECRET_KEY = "test-secret"
+    settings.CHAPA_SANDBOX_SUBACCOUNT_ID = "test-sandbox-subaccount"
 
     class DummyResponse:
         def json(self):
@@ -1836,7 +1838,7 @@ def test_get_car_detail_public_contract(api_client, car_listing):
     _assert_verification_fields(data)
 
 
-def test_post_car_listing_create_success(company_client, company):
+def test_post_car_listing_create_requires_business_license_upload(company_client, company):
     response = company_client.post(
         "/api/v1/listing/cars/",
         {
@@ -1855,6 +1857,8 @@ def test_post_car_listing_create_success(company_client, company):
             "seats": 4,
             "listing_type": CarListing.ListingTypeChoices.RENT,
             "rental_mode": CarListing.RentalModeChoices.WITHOUT_DRIVER,
+            "with_driver_base_price": "1600.00",
+            "without_driver_base_price": "1850.00",
             "car_class": CarListing.CarClassChoices.NORMAL,
             "quantity": 1,
             "requires_code_3": True,
@@ -1864,15 +1868,60 @@ def test_post_car_listing_create_success(company_client, company):
         format="json",
     )
 
+    assert response.status_code == 400
+    assert "business_license_document" in response.json()
+
+
+def test_post_car_listing_create_success(company_client, company):
+    upload = SimpleUploadedFile(
+        "business-license.pdf",
+        b"provider business license",
+        content_type="application/pdf",
+    )
+    response = company_client.post(
+        "/api/v1/listing/cars/",
+        {
+            "title": "Car Draft",
+            "description": "Car created in tests",
+            "base_price": "1500.00",
+            "currency": "ETB",
+            "company": str(company.id),
+            "brand": CarListing.CarBrandChoices.TOYOTA,
+            "model": "Camry",
+            "year": 2024,
+            "mileage": 1000,
+            "fuel_type": CarListing.FuelTypeChoices.PETROL,
+            "transmission": CarListing.TransmissionChoices.AUTOMATIC,
+            "condition": CarListing.ConditionChoices.USED,
+            "seats": 4,
+            "listing_type": CarListing.ListingTypeChoices.RENT,
+            "rental_mode": CarListing.RentalModeChoices.WITHOUT_DRIVER,
+            "with_driver_base_price": "1600.00",
+            "without_driver_base_price": "1850.00",
+            "car_class": CarListing.CarClassChoices.NORMAL,
+            "quantity": 1,
+            "requires_code_3": True,
+            "requires_business_license": True,
+            "business_license_document": upload,
+            "pre_rental_requirements": "Bring original IDs and complete a pre-rental checklist.",
+        },
+        format="multipart",
+    )
+
     assert response.status_code == 201
     data = response.json()
     assert data["title"] == "Car Draft"
     assert data["rental_mode"] == CarListing.RentalModeChoices.WITHOUT_DRIVER
+    assert data["with_driver_base_price"] == "1600.00"
+    assert data["without_driver_base_price"] == "1850.00"
     assert data["requires_code_3"] is True
     assert data["requires_business_license"] is True
+    assert data["business_license_document"]
     car_listing = CarListing.objects.get(id=data["id"])
     assert car_listing.is_active is False
     assert car_listing.pre_rental_requirements == "Bring original IDs and complete a pre-rental checklist."
+    assert "business-license" in car_listing.business_license_document.name
+    assert car_listing.business_license_document.name.endswith(".pdf")
 
 
 def test_patch_car_listing_success(company_client, car_listing):
@@ -1884,6 +1933,36 @@ def test_patch_car_listing_success(company_client, car_listing):
 
     assert response.status_code == 200
     assert response.json()["title"] == "Updated Car Title"
+
+
+def test_patch_car_listing_can_upload_business_license_document(company_client, car_listing):
+    upload = SimpleUploadedFile(
+        "renewed-license.pdf",
+        b"renewed provider business license",
+        content_type="application/pdf",
+    )
+
+    response = company_client.patch(
+        f"/api/v1/listing/cars/{car_listing.id}/",
+        {
+            "rental_mode": CarListing.RentalModeChoices.WITHOUT_DRIVER,
+            "requires_business_license": True,
+            "with_driver_base_price": "1650.00",
+            "without_driver_base_price": "1900.00",
+            "business_license_document": upload,
+        },
+        format="multipart",
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["requires_business_license"] is True
+    assert data["with_driver_base_price"] == "1650.00"
+    assert data["without_driver_base_price"] == "1900.00"
+    assert data["business_license_document"]
+    car_listing.refresh_from_db()
+    assert "renewed-license" in car_listing.business_license_document.name
+    assert car_listing.business_license_document.name.endswith(".pdf")
 
 
 def test_patch_car_listing_forbidden_for_non_owner(auth_client, car_listing):
@@ -2088,8 +2167,120 @@ def test_post_car_rental_price_preview_rejects_availability_conflict(api_client,
         format="json",
     )
 
-    assert response.status_code == 409
-    assert "not available" in response.json()["detail"].lower()
+    assert response.status_code == 400, response.json()
+    data = response.json()
+    assert data["detail"] == "Price preview could not be created."
+    assert data["errors"]["items"][0]["car_listing"] == [
+        "This car is unavailable for the selected dates."
+    ]
+
+
+def test_post_car_rental_price_preview_rejects_insufficient_units_with_normalized_errors(api_client, car_listing):
+    start_date = date.today() + timedelta(days=4)
+    end_date = start_date + timedelta(days=2)
+    _create_car_availability(car_listing, start_date, end_date, available_units=1)
+
+    response = api_client.post(
+        "/api/v1/listing/car-rentals/price-preview/",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "items": [{"car_listing": str(car_listing.id), "units_rent": 2}],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400, response.json()
+    data = response.json()
+    assert data["detail"] == "Price preview could not be created."
+    assert data["errors"]["items"][0]["units_rent"] == ["Only 1 unit is available."]
+
+
+def test_post_car_rental_price_preview_rejects_invalid_date_range_with_normalized_errors(api_client, car_listing):
+    start_date = date.today() + timedelta(days=4)
+
+    response = api_client.post(
+        "/api/v1/listing/car-rentals/price-preview/",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": start_date.isoformat(),
+            "items": [{"car_listing": str(car_listing.id), "units_rent": 1}],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400, response.json()
+    data = response.json()
+    assert data["detail"] == "Price preview could not be created."
+    assert data["errors"]["end_date"] == ["End date must be after start date."]
+
+
+def test_post_car_rental_price_preview_rejects_invalid_selected_rental_mode_with_normalized_errors(api_client, car_listing):
+    start_date = date.today() + timedelta(days=4)
+    end_date = start_date + timedelta(days=1)
+    _create_car_availability(car_listing, start_date, end_date, available_units=1)
+
+    response = api_client.post(
+        "/api/v1/listing/car-rentals/price-preview/",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "items": [
+                {
+                    "car_listing": str(car_listing.id),
+                    "units_rent": 1,
+                    "selected_rental_mode": "pilot_only",
+                }
+            ],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400, response.json()
+    data = response.json()
+    assert data["detail"] == "Price preview could not be created."
+    assert "selected_rental_mode" in data["errors"]["items"][0]
+
+
+def test_post_car_rental_price_preview_requires_compliance_fields_for_without_driver(api_client, car_listing):
+    start_date = date.today() + timedelta(days=4)
+    end_date = start_date + timedelta(days=2)
+    car_listing.rental_mode = CarListing.RentalModeChoices.WITHOUT_DRIVER
+    car_listing.requires_code_3 = True
+    car_listing.requires_business_license = True
+    car_listing.save(
+        update_fields=["rental_mode", "requires_code_3", "requires_business_license"]
+    )
+    _create_car_availability(car_listing, start_date, end_date, available_units=1)
+
+    response = api_client.post(
+        "/api/v1/listing/car-rentals/price-preview/",
+        {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "items": [
+                {
+                    "car_listing": str(car_listing.id),
+                    "units_rent": 1,
+                    "selected_rental_mode": CarListing.RentalModeChoices.WITHOUT_DRIVER,
+                }
+            ],
+        },
+        format="json",
+    )
+
+    assert response.status_code == 400, response.json()
+    data = response.json()
+    assert data["detail"] == "Price preview could not be created."
+    assert data["errors"]["renter_driver_license_number"] == [
+        "Driver license number is required for without-driver rentals."
+    ]
+    assert data["errors"]["renter_code_3_license_number"] == [
+        "Code 3 license number is required for at least one selected without-driver car."
+    ]
+    assert data["errors"]["renter_business_license_number"] == [
+        "Business license number is required for at least one selected without-driver car."
+    ]
 
 
 def test_post_car_rental_price_preview_supports_display_currency(api_client, car_listing):
@@ -3826,6 +4017,8 @@ def test_post_car_rental_extension_price_preview_success(auth_client, user, car_
 
 def test_post_car_rental_request_extension_holds_inventory_and_returns_checkout(auth_client, user, car_listing, settings, monkeypatch):
     _mock_extension_chapa_initialize(settings, monkeypatch)
+    car_listing.company.chapa_subaccount_id = "sub-car-extension"
+    car_listing.company.save(update_fields=["chapa_subaccount_id"])
     rental = _create_car_rental_record(
         car_listing=car_listing,
         renter=user,
