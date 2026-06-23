@@ -13,11 +13,140 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.account.models import IndividualOwnerProfile, ListingImage, OtpChallenge, OwnerComplianceAgreement
+from apps.account.enums import RoleCode
+from apps.account.models import IndividualOwnerProfile, ListingImage, OtpChallenge, OwnerComplianceAgreement, Role
 from apps.account.tasks import OtpChallengeCache, send_otp_sms_task
+from apps.account.utils import generate_password
 from apps.favorites.models import Favorite, GuestFavorite
+from services.sms import SMSDeliveryError, send_sms
 
 logger = logging.getLogger(__name__)
+User = get_user_model()
+
+
+@dataclass(frozen=True)
+class IndividualOwnerLoginProvisionResult:
+    user: object
+    password: str | None
+    created: bool
+    password_changed: bool
+    sms_sent: bool
+    sms_error: str | None = None
+
+
+def _placeholder_email_for_phone(phone: str | None, owner_id=None) -> str:
+    normalized_phone = OtpService.normalize_phone(phone or "")
+    suffix = normalized_phone or str(owner_id)
+    return f"{suffix}@phone.local"
+
+
+def ensure_individual_owner_login(
+    owner,
+    *,
+    email: str | None = None,
+    password: str | None = None,
+    send_credentials_sms: bool = True,
+    reset_password: bool = False,
+):
+    """Create or repair the login User behind an admin-managed owner profile."""
+    _assert_individual_owner(owner)
+    normalized_phone = OtpService.normalize_phone(owner.phone)
+    if not normalized_phone:
+        raise ValidationError("Individual owner phone is required before creating login credentials.")
+
+    role, _ = Role.objects.get_or_create(
+        code=RoleCode.INDIVIDUAL_OWNER.value,
+        defaults={"name": "Individual Owner"},
+    )
+    email = (email or "").strip().lower() or _placeholder_email_for_phone(
+        normalized_phone,
+        owner_id=owner.id,
+    )
+
+    linked_user = User.objects.filter(individual_owner=owner).order_by("created_at").first()
+    phone_user = User.objects.filter(phone=normalized_phone).order_by("created_at").first()
+    user = linked_user or phone_user
+
+    if user and user.individual_owner_id and user.individual_owner_id != owner.id:
+        raise ValidationError("A different individual owner already uses this phone login.")
+    if user and getattr(user, "company_id", None):
+        raise ValidationError("This phone belongs to a company staff account and cannot be reused for an owner login.")
+
+    email_owner = User.objects.filter(email=email).exclude(pk=getattr(user, "pk", None)).first()
+    if email_owner:
+        raise ValidationError("A user with this email already exists.")
+
+    generated_password = None
+    password_changed = False
+    created = user is None
+
+    if user is None:
+        generated_password = password or generate_password(email or normalized_phone)
+        user = User(
+            email=email,
+            first_name=owner.first_name,
+            last_name=owner.last_name,
+            phone=normalized_phone,
+            role=role,
+            individual_owner=owner,
+            is_active=True,
+            phone_verified_at=timezone.now(),
+        )
+        user.set_password(generated_password)
+        password_changed = True
+        user.save()
+    else:
+        update_fields = set()
+        for field, value in {
+            "email": email,
+            "first_name": owner.first_name,
+            "last_name": owner.last_name,
+            "phone": normalized_phone,
+            "role": role,
+            "individual_owner": owner,
+            "is_active": True,
+        }.items():
+            current_value = getattr(user, f"{field}_id", None) if field in {"role", "individual_owner"} else getattr(user, field)
+            target_value = value.id if field in {"role", "individual_owner"} else value
+            if current_value != target_value:
+                setattr(user, field, value)
+                update_fields.add(field)
+
+        if not user.phone_verified_at:
+            user.phone_verified_at = timezone.now()
+            update_fields.add("phone_verified_at")
+
+        if reset_password or not user.has_usable_password():
+            generated_password = password or generate_password(email or normalized_phone)
+            user.set_password(generated_password)
+            update_fields.add("password")
+            password_changed = True
+
+        if update_fields:
+            update_fields.add("updated_at")
+            user.save(update_fields=list(update_fields))
+
+    sms_sent = False
+    sms_error = None
+    if password_changed and send_credentials_sms:
+        message = (
+            "Michot Marefiya owner account created. "
+            f"Phone: {normalized_phone}. Password: {generated_password}"
+        )
+        try:
+            send_sms(normalized_phone, message)
+            sms_sent = True
+        except SMSDeliveryError as exc:
+            sms_error = str(exc)
+
+    return IndividualOwnerLoginProvisionResult(
+        user=user,
+        password=generated_password,
+        created=created,
+        password_changed=password_changed,
+        sms_sent=sms_sent,
+        sms_error=sms_error,
+    )
 
 
 class ImageCreationService:

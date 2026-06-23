@@ -17,7 +17,7 @@ from django.utils import timezone
 from unittest.mock import patch
 
 from apps.account.enums import RoleCode
-from apps.account.services import create_agreement
+from apps.account.services import create_agreement, ensure_individual_owner_login
 from apps.account.models import CompanyProfile, HotelProfile, IndividualOwnerProfile, OtpChallenge, OwnerComplianceAgreement, Role, User
 from apps.account.serializers import IndividualOwnerRegistrationSerializer
 from apps.core.models import Address
@@ -692,6 +692,47 @@ def test_individual_owner_registration_serializer_uses_individual_owner_role():
     assert linked_user.role.code == RoleCode.INDIVIDUAL_OWNER.value
 
 
+def test_admin_managed_individual_owner_credentials_enable_phone_login(api_client, monkeypatch):
+    Role.objects.get_or_create(name="Individual Owner", code=RoleCode.INDIVIDUAL_OWNER.value)
+    sms_calls = []
+    monkeypatch.setattr(
+        "apps.account.services.send_sms",
+        lambda phone, message: sms_calls.append((phone, message)) or True,
+    )
+    owner = IndividualOwnerProfile.objects.create(
+        first_name="Admin",
+        last_name="Owner",
+        phone="0911777000",
+        national_id_number=111222333,
+        address=Address.objects.create(**_address_payload()),
+    )
+
+    result = ensure_individual_owner_login(
+        owner,
+        password="OwnerPass123",
+        send_credentials_sms=True,
+    )
+
+    assert result.created is True
+    assert result.sms_sent is True
+    assert sms_calls
+    linked_user = User.objects.get(individual_owner=owner)
+    assert linked_user.is_active is True
+    assert linked_user.phone_verified_at is not None
+    assert linked_user.role.code == RoleCode.INDIVIDUAL_OWNER.value
+
+    login_response = api_client.post(
+        "/api/v1/auth/token/",
+        {"phone": owner.phone, "password": "OwnerPass123"},
+        format="json",
+    )
+
+    assert login_response.status_code == 200, login_response.json()
+    data = login_response.json()
+    assert data["role"] == RoleCode.INDIVIDUAL_OWNER.value
+    assert data["individual_owner"]["id"] == str(owner.id)
+
+
 def test_get_roles_admin_list_success(admin_client, admin_role, user_role):
     response = admin_client.get("/api/v1/account/roles/")
 
@@ -1190,10 +1231,12 @@ def test_post_hotel_create_success(company_client, company, image_file):
     assert "id" in data
     assert data["name"] == "Creations Hotel"
     assert data["company_name"] == company.name
-    assert data["is_active"] is False
+    assert data["is_active"] is True
+    assert data["is_verified"] is False
     hotel_profile = HotelProfile.objects.get(id=data["id"])
     assert hotel_profile.name == "Creations Hotel"
-    assert hotel_profile.is_active is False
+    assert hotel_profile.is_active is True
+    assert hotel_profile.is_verified is False
 
 
 def test_patch_hotel_success(company_client, hotel):

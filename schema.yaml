@@ -4265,6 +4265,13 @@ paths:
         name: is_active
         schema:
           type: boolean
+      - in: query
+        name: managed
+        schema:
+          type: boolean
+        description: When true, authentication is required and results are limited
+          to the caller's company/individual-owner inventory. Managed records include
+          seller contact fields. Admins may view all managed records.
       - name: ordering
         required: false
         in: query
@@ -4309,7 +4316,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedCarSaleListingResponseList'
+                $ref: '#/components/schemas/PaginatedCarSaleListingCollectionResponseList'
           description: ''
     post:
       operationId: v1_listing_car_sales_create
@@ -4334,7 +4341,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CarSaleListing'
+                $ref: '#/components/schemas/CarSaleListingManagedResponse'
           description: ''
   /api/v1/listing/car-sales/{id}/:
     get:
@@ -4347,6 +4354,12 @@ paths:
           format: uuid
         description: A UUID string identifying this Car Sale Listing.
         required: true
+      - in: query
+        name: managed
+        schema:
+          type: boolean
+        description: When true, return owner/admin management detail including seller
+          contact. Foreign inventory is not accessible.
       tags:
       - Car Sales
       security:
@@ -4357,7 +4370,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CarSaleListingResponse'
+                $ref: '#/components/schemas/CarSaleListingDetailResponse'
           description: ''
     patch:
       operationId: v1_listing_car_sales_partial_update
@@ -4389,7 +4402,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CarSaleListing'
+                $ref: '#/components/schemas/CarSaleListingManagedResponse'
           description: ''
     delete:
       operationId: v1_listing_car_sales_destroy
@@ -4696,6 +4709,13 @@ paths:
 
           * `sale` - For Sale
           * `rent` - For Rent
+      - in: query
+        name: managed
+        schema:
+          type: boolean
+        description: When true, authentication is required and results are limited
+          to the caller's company/individual-owner car inventory, including inactive
+          and unverified records.
       - name: ordering
         required: false
         in: query
@@ -12658,87 +12678,202 @@ components:
       - seller_contact_name
       - seller_phone
       - status
-    CarSaleListing:
+    CarSaleListingCollectionResponse:
+      oneOf:
+      - $ref: '#/components/schemas/CarSaleListingResponse'
+      - $ref: '#/components/schemas/CarSaleListingManagedResponse'
+    CarSaleListingDetailResponse:
+      oneOf:
+      - $ref: '#/components/schemas/CarSaleListingResponse'
+      - $ref: '#/components/schemas/CarSaleListingManagedResponse'
+    CarSaleListingManagedResponse:
       type: object
+      description: Owner/admin representation; seller contact must never be used publicly.
       properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
         title:
           type: string
+          readOnly: true
           description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
-          maxLength: 255
         description:
           type: string
+          readOnly: true
           description: Detailed description of the listing.
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListingImage'
+          readOnly: true
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+        formatted_address:
+          type: string
+          readOnly: true
+          nullable: true
+        place_id:
+          type: string
+          readOnly: true
+          nullable: true
         base_price:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
           nullable: true
           title: Price
           description: Price of the service/product (if applicable).
         currency:
           type: string
+          readOnly: true
           description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
-          maxLength: 3
-        company:
-          type: string
-          format: uuid
-          nullable: true
-        individual_owner:
-          type: string
-          format: uuid
-          nullable: true
         brand:
-          $ref: '#/components/schemas/BrandEnum'
+          allOf:
+          - $ref: '#/components/schemas/BrandEnum'
+          readOnly: true
         model:
           type: string
-          maxLength: 100
+          readOnly: true
         year:
           type: integer
-          maximum: 2147483647
-          minimum: 0
+          readOnly: true
         mileage:
           type: integer
-          maximum: 2147483647
-          minimum: 0
+          readOnly: true
           title: Mileage (km)
         fuel_type:
           allOf:
           - $ref: '#/components/schemas/FuelTypeEnum'
+          readOnly: true
           title: Engine Type
         transmission:
-          $ref: '#/components/schemas/TransmissionEnum'
+          allOf:
+          - $ref: '#/components/schemas/TransmissionEnum'
+          readOnly: true
         condition:
-          $ref: '#/components/schemas/ConditionEnum'
+          allOf:
+          - $ref: '#/components/schemas/ConditionEnum'
+          readOnly: true
         car_class:
           allOf:
           - $ref: '#/components/schemas/CarClassEnum'
+          readOnly: true
           title: Class Category
         seats:
           type: integer
-          maximum: 32767
-          minimum: 0
-        seller_contact_name:
+          readOnly: true
+        company:
           type: string
-          maxLength: 150
-        seller_phone:
+          format: uuid
+          readOnly: true
+          nullable: true
+        individual_owner:
           type: string
-          maxLength: 20
-        seller_email:
-          type: string
-          format: email
+          format: uuid
+          readOnly: true
+          nullable: true
         reveal_fee:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+          description: Whether the listing is active and visible.
+        is_verified:
+          type: boolean
+          readOnly: true
+          description: Whether the listing has been verified by an administrator.
+        verified_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the listing was last verified by an administrator.
+        verified_by:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        verification_note:
+          type: string
+          readOnly: true
+          nullable: true
+          description: Optional note recorded by an administrator during verification.
+        reveal_state:
+          allOf:
+          - $ref: '#/components/schemas/CarSaleRevealState'
+          readOnly: true
+        conversion:
+          allOf:
+          - $ref: '#/components/schemas/CurrencyConversionMetadata'
+          readOnly: true
+          description: Metadata about currency conversion if requested
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        seller_contact_name:
+          type: string
+          readOnly: true
+        seller_phone:
+          type: string
+          readOnly: true
+        seller_email:
+          type: string
+          format: email
+          readOnly: true
       required:
+      - base_price
       - brand
+      - car_class
+      - company
       - condition
+      - conversion
+      - created_at
+      - currency
+      - description
+      - formatted_address
       - fuel_type
+      - id
+      - images
+      - individual_owner
+      - is_active
+      - is_verified
+      - latitude
+      - longitude
       - mileage
       - model
+      - place_id
+      - reveal_fee
+      - reveal_state
+      - seats
+      - seller_contact_name
+      - seller_email
       - seller_phone
       - title
       - transmission
+      - updated_at
+      - verification_note
+      - verified_at
+      - verified_by
       - year
     CarSaleListingRequest:
       type: object
@@ -12822,6 +12957,9 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        is_active:
+          type: boolean
+          description: Whether the listing is active and visible.
         place_id:
           type: string
           writeOnly: true
@@ -16580,7 +16718,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CarRental'
-    PaginatedCarSaleListingResponseList:
+    PaginatedCarSaleListingCollectionResponseList:
       type: object
       properties:
         count:
@@ -16608,7 +16746,7 @@ components:
         results:
           type: array
           items:
-            $ref: '#/components/schemas/CarSaleListingResponse'
+            $ref: '#/components/schemas/CarSaleListingCollectionResponse'
     PaginatedCompanyProfileResponseList:
       type: object
       properties:
@@ -17862,6 +18000,9 @@ components:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        is_active:
+          type: boolean
+          description: Whether the listing is active and visible.
         place_id:
           type: string
           writeOnly: true

@@ -6,6 +6,8 @@ import logging
 from decimal import Decimal
 from urllib.parse import quote
 from django.conf import settings
+from django.core.validators import validate_email
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils import timezone
 from django.utils.crypto import constant_time_compare
 from django.db import transaction as db_transaction
@@ -281,7 +283,7 @@ class ContactRevealPaymentService:
             return {"success": False, "error": "Callback URLs not configured", "tx_ref": tx_ref}
 
         buyer = reveal_request.buyer
-        email = (getattr(buyer, "email", "") or f"no-reply+{tx_ref[:8]}@example.com")
+        email = _safe_chapa_email(getattr(buyer, "email", ""), tx_ref)
         first_name = getattr(buyer, "first_name", "") or "User"
         last_name = getattr(buyer, "last_name", "") or ""
         return_url = return_base.rstrip("/") + f"/contact-reveal/complete?tx_ref={tx_ref}"
@@ -296,7 +298,7 @@ class ContactRevealPaymentService:
             "callback_url": callback_url,
             "return_url": return_url,
             "customization": {
-                "title": "Michot Marefiya Contact Reveal",
+                "title": "Contact Reveal",
                 "description": f"Contact reveal for {reveal_request.listing.title}",
             },
             "meta": {
@@ -354,7 +356,12 @@ class ContactRevealPaymentService:
             payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
             payment_tx.metadata["chapa_response"] = response_data
             payment_tx.save(update_fields=["status", "metadata", "updated_at"])
-            return {"success": False, "error": response_data, "tx_ref": tx_ref}
+            return {
+                "success": False,
+                "error": _chapa_error_message(response_data),
+                "provider_error": response_data,
+                "tx_ref": tx_ref,
+            }
 
     @staticmethod
     def unlock_contact_reveal(payment_tx, chapa_data):
@@ -687,6 +694,36 @@ def _is_chapa_subaccount_mismatch_response(response_data):
         return False
 
     return bool(message.get("subaccounts.id"))
+
+
+def _chapa_error_message(response_data, fallback="Payment initialization failed. Please try again."):
+    if not isinstance(response_data, dict):
+        return str(response_data or fallback)
+
+    message = response_data.get("message") or response_data.get("error")
+    if isinstance(message, str):
+        return message
+    if isinstance(message, dict):
+        parts = []
+        for field, errors in message.items():
+            if isinstance(errors, (list, tuple)):
+                joined_errors = ", ".join(str(error) for error in errors)
+            else:
+                joined_errors = str(errors)
+            parts.append(f"{field}: {joined_errors}")
+        return "; ".join(parts) or fallback
+    if message:
+        return str(message)
+    return fallback
+
+
+def _safe_chapa_email(email, tx_ref):
+    candidate = (email or "").strip()
+    try:
+        validate_email(candidate)
+    except DjangoValidationError:
+        return f"contact-{tx_ref[:8].lower()}@example.com"
+    return candidate
 
 
 SPLIT_PAYMENT_CONFIGURATION_ERROR = (

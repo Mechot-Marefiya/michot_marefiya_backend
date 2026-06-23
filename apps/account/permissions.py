@@ -214,6 +214,43 @@ class IsListingOwner(permissions.BasePermission):
         return False
 
 
+class IsCarSaleListingOwner(permissions.BasePermission):
+    """Allow car-sale mutations only for the owning provider or an admin."""
+
+    def has_permission(self, request, view):
+        user = request.user
+        if not user or not user.is_authenticated:
+            return False
+        if user.is_superuser or (
+            getattr(user, "role", None)
+            and user.role.code == RoleCode.ADMIN.value
+        ):
+            return True
+        return bool(
+            getattr(user, "company", None)
+            or getattr(user, "profile", None)
+            or getattr(user, "individual_owner", None)
+            or getattr(user, "individual_owner_profile", None)
+        )
+
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        if user.is_superuser or (
+            getattr(user, "role", None)
+            and user.role.code == RoleCode.ADMIN.value
+        ):
+            return True
+
+        company = getattr(user, "company", None) or getattr(user, "profile", None)
+        individual_owner = getattr(user, "individual_owner", None) or getattr(
+            user, "individual_owner_profile", None
+        )
+        return bool(
+            (company and obj.company_id == company.id)
+            or (individual_owner and obj.individual_owner_id == individual_owner.id)
+        )
+
+
 class IsBookingOwner(permissions.BasePermission):
     
     def has_object_permission(self, request, view, obj):

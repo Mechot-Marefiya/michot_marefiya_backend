@@ -1495,7 +1495,7 @@ class HotelProfileSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
         images = validated_data.pop("images", [])
         self._pop_session_token(validated_data)
         skip_async_geocoding = self._pop_skip_async_geocoding(validated_data)
-        validated_data.setdefault("is_active", False)
+        validated_data.setdefault("is_active", True)
         
         address = ListingService.get_or_create_address(address_data)
         

@@ -14,6 +14,13 @@ Scope rules used here:
   - `company_staff` maps to backend company-side access, including `company` and `front_desk`
   - `individual_owner` maps to backend role `individual_owner`
 
+Listing state rules:
+
+- new cars, hotels, hotel rooms, property rentals, property sales, guest houses, and guest-house rooms are created with `is_active=true` and `is_verified=false`
+- verification is admin-controlled trust metadata; do not treat unverified as hidden
+- public listing/search endpoints return active listings
+- owner/managed inventory endpoints must show the caller's own listings whether active, inactive, verified, or unverified
+
 ## Section 1: Authentication (all roles)
 
 ### Obtain JWT Token
@@ -632,6 +639,7 @@ Request body:
 
 Query params:
 - `brand`, `car_class`, `condition`, `fuel_type`, `is_active`, `listing_type`, `ordering`, `page`, `page_size`, `search`, `transmission`
+- `managed=true`: requires authentication; returns only the caller's owned cars, including inactive and unverified records
 
 Success response (HTTP 200):
 - paginated `CarListingResponse` records
@@ -644,6 +652,7 @@ Core response fields:
 - car attributes such as `brand`, `model`, `year`, `fuel_type`, `transmission`, `condition`, `car_class`, `seats`
 - rental/compliance attributes including `rental_mode`, `with_driver_base_price`, `without_driver_base_price`, `pricing_by_rental_mode`, `requires_code_3`, `requires_business_license`, `pre_rental_requirements`
 - `business_license_document`: string|null - owner-scoped document URL; public responses may return `null`
+- `is_active`: newly registered cars default to `true`
 - `is_verified`, `verified_at`, `verified_by`, `verification_note`
 - `conversion`
 
@@ -652,6 +661,8 @@ Error responses:
 
 React notes:
 - render rental requirements clearly before the user starts a booking
+- verification is trust metadata only; active unverified cars remain publicly visible
+- use `GET /api/v1/listing/cars/my_listings/` or `GET /api/v1/listing/cars/?managed=true` for owner inventory; both return the caller's owned cars even when inactive or unverified
 
 ### Car Listing Detail
 Workflow reference: `REACT_WORKFLOW.md` Section 3
@@ -687,9 +698,11 @@ Request body:
 
 Query params:
 - `brand`, `car_class`, `condition`, `fuel_type`, `is_active`, `ordering`, `page`, `page_size`, `search`, `transmission`
+- `managed=true`: requires authentication; returns only the caller's company/individual-owner listings, including inactive and unverified records
 
 Success response (HTTP 200):
 - paginated `CarSaleListingResponse` records
+- with `managed=true`, paginated `CarSaleListingManagedResponse` records
 
 Core response fields:
 - `id`, `title`, `description`, `images`
@@ -708,6 +721,8 @@ Error responses:
 
 React notes:
 - `reveal_state` is the contact-unlock state machine React should reflect
+- public results include active listings regardless of verification status; show verification as trust metadata only
+- managed records additionally expose `seller_contact_name`, `seller_phone`, and `seller_email` for owner edit forms; never copy these fields into public cards or detail state
 
 ### Car Sale Listing Detail
 Workflow reference: `REACT_WORKFLOW.md` Section 3
@@ -720,16 +735,18 @@ Request body:
 - none
 
 Query params:
-- none
+- `managed=true`: owner/admin management detail, including stored seller contact
 
 Success response (HTTP 200):
 - `CarSaleListingResponse`
+- with `managed=true`, `CarSaleListingManagedResponse`
 
 Error responses:
 - `404`: car sale listing not found
 
 React notes:
 - never derive seller contact from this endpoint; contact reveal is separate
+- the exception is an authenticated owner/admin request with `managed=true`, whose `CarSaleListingManagedResponse` contact fields are for provider management only
 
 ### Property Listings
 Workflow reference: `REACT_WORKFLOW.md` Section 3
@@ -743,6 +760,7 @@ Request body:
 
 Query params:
 - pagination and property filters as supported by schema
+- `managed=true`: requires authentication; returns only the caller's company/individual-owner listings, including inactive and unverified records
 
 Success response (HTTP 200):
 - paginated `PropertyListingResponse` records
@@ -761,6 +779,7 @@ Error responses:
 
 React notes:
 - this is the main property-rental listing family, not property sales
+- owner dashboards should use `managed=true` so inactive/unverified owned records are visible
 
 ### Property Listing Detail
 Workflow reference: `REACT_WORKFLOW.md` Section 3
@@ -796,6 +815,7 @@ Request body:
 
 Query params:
 - `is_active`, `is_furnished`, `ordering`, `page`, `page_size`, `property_type`, `search`
+- `managed=true`: requires authentication; returns only the caller's company/individual-owner sale listings, including inactive and unverified records
 
 Success response (HTTP 200):
 - paginated `PropertySaleListingResponse` records
@@ -812,6 +832,7 @@ Error responses:
 
 React notes:
 - treat this as a contact-reveal product, not a direct checkout product
+- new property-sale listings default to active and unverified
 
 ### Property Sale Listing Detail
 Workflow reference: `REACT_WORKFLOW.md` Section 3
@@ -1622,6 +1643,8 @@ Error responses:
 
 React notes:
 - keep create/edit controls permission-aware; many staff roles may be read-only
+- new hotels and hotel rooms default to active and unverified
+- owner hotel management should use authenticated owner/managed views so inactive or unverified owned records are still visible
 
 ### Read / Update Room Listing
 Workflow reference: `REACT_WORKFLOW.md` Section 4
@@ -1691,6 +1714,8 @@ Error responses:
 React notes:
 - use the room-level response for pricing-facing edits and preview context
 - authenticated owners can retrieve their own inactive guest house records from the same detail endpoint for management flows
+- new guest houses and guest-house rooms default to active and unverified
+- owner/managed guest-house screens must show active, inactive, verified, and unverified owned records
 
 ### Guest House Availability Matrix
 Workflow reference: `REACT_WORKFLOW.md` Section 4
@@ -1938,29 +1963,33 @@ Error responses:
 
 React notes:
 - `place_id` and `session_token` are the React-side map-input bridge for create flows
+- new property-rental listings default to active and unverified
 
 ### Create / Update Car Sale Listing
 Workflow reference: `REACT_WORKFLOW.md` Section 5
 Method: `POST` / `PATCH`
 URL: `/api/v1/listing/car-sales/` and `/api/v1/listing/car-sales/{id}/`
 Auth: yes (Bearer)
-Roles: individual_owner
+Roles: company / individual_owner
 
 Request body:
 - uses `CarSaleListingRequest` / `PatchedCarSaleListingRequest`
 - includes listing basics, sale details, seller contact, images, and address/place metadata
+- `is_active`: optional boolean; new listings default to active and owners may toggle visibility independently of verification
 
 Query params:
 - none
 
 Success response (HTTP 201 / 200):
-- `CarSaleListing` on write
+- `CarSaleListingManagedResponse` with verification/activation state and the owner's stored seller contact
 
 Error responses:
 - `400`, `401`, `403`
 
 React notes:
 - write flows should keep seller contact private in UI previews
+- fetch the owner record with `managed=true` to prefill seller contact; omitted contact fields on PATCH preserve their stored values
+- verification is admin-controlled trust metadata and does not determine public visibility; only `is_active` controls visibility
 
 ### Create / Update Property Sale Listing
 Workflow reference: `REACT_WORKFLOW.md` Section 5
@@ -1983,7 +2012,7 @@ Error responses:
 - `400`, `401`, `403`
 
 React notes:
-- show verification state after save but do not promise visibility until activation rules are satisfied
+- new property-sale listings default to active and unverified; show verification as trust metadata, not as visibility state
 
 ### Verification Status Fields
 Workflow reference: `REACT_WORKFLOW.md` Section 5

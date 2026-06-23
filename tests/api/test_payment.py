@@ -1452,6 +1452,29 @@ def test_contact_reveal_initialize_is_platform_only_even_when_owner_has_subaccou
     assert payment_tx.vendor_individual is None
 
 
+def test_contact_reveal_initialize_uses_chapa_safe_payload(settings, monkeypatch, company, user):
+    _enable_payment_settings(settings)
+    user.email = "not-a-valid-email"
+    user.save(update_fields=["email"])
+    listing = _build_car_sale(company)
+    reveal_request = _build_reveal_request(
+        listing,
+        user,
+        status=ContactRevealRequest.RevealStatus.REQUESTED,
+        tx_ref="",
+    )
+    captured = _mock_chapa_initialize(monkeypatch)
+
+    result = ContactRevealPaymentService.initialize_contact_reveal_payment(reveal_request)
+
+    assert result["success"] is True
+    payload = json.loads(captured["data"])
+    assert payload["email"].startswith("contact-")
+    assert payload["email"].endswith("@example.com")
+    assert payload["customization"]["title"] == "Contact Reveal"
+    assert len(payload["customization"]["title"]) <= 16
+
+
 def _force_repeat_booking_fee(user, room):
     prior = _build_booking(user, room)
     prior.booking_reference = "H-PRIOR01"

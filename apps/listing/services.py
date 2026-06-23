@@ -359,7 +359,7 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_room_listing(validated_data: dict):
-        validated_data.setdefault("is_active", False)
+        validated_data.setdefault("is_active", True)
         skip_async_geocoding = bool(validated_data.pop("_skip_async_geocoding", False))
         hotel_id = validated_data.pop("hotel_id")
         images = validated_data.pop("images")
@@ -401,7 +401,7 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_guest_house_listing(validated_data: dict):
-        validated_data.setdefault("is_active", False)
+        validated_data.setdefault("is_active", True)
         skip_async_geocoding = bool(validated_data.pop("_skip_async_geocoding", False))
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)
@@ -448,7 +448,7 @@ class ListingService:
     @staticmethod
     @transaction.atomic()
     def create_property_listing(validated_data: dict):
-        validated_data.setdefault("is_active", False)
+        validated_data.setdefault("is_active", True)
         skip_async_geocoding = bool(validated_data.pop("_skip_async_geocoding", False))
         images = validated_data.pop("images", [])
         address_data = validated_data.pop("address", None)

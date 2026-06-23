@@ -947,7 +947,7 @@ class GuestHouseRoomSerializer(PlaceResolutionMixin, serializers.ModelSerializer
          self._pop_skip_async_geocoding(validated_data)
          images = validated_data.pop("images", [])
          amenities = validated_data.pop("amenities", [])
-         validated_data.setdefault("is_active", False)
+         validated_data.setdefault("is_active", True)
          
          guest_house_id = validated_data.pop("guest_house_id")
          validated_data["guest_house"] = GuestHouseProfile.objects.get(id=guest_house_id)
@@ -1068,7 +1068,7 @@ class GuestHouseProfileSerializer(PlaceResolutionMixin, serializers.ModelSeriali
         
         if 'facility' in validated_data:
             validated_data['facilities'] = validated_data.pop('facility')
-        validated_data.setdefault("is_active", False)
+        validated_data["is_active"] = True
             
             
         return ListingService.create_guest_house_listing(validated_data)
@@ -1709,6 +1709,18 @@ class CarSaleListingResponseSerializer(CurrencyConversionMixin, serializers.Mode
         }
 
 
+class CarSaleListingManagedResponseSerializer(CarSaleListingResponseSerializer):
+    """Owner/admin representation; seller contact must never be used publicly."""
+
+    class Meta(CarSaleListingResponseSerializer.Meta):
+        fields = CarSaleListingResponseSerializer.Meta.fields + [
+            "seller_contact_name",
+            "seller_phone",
+            "seller_email",
+        ]
+        read_only_fields = fields
+
+
 class CarSaleListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     images = serializers.ListField(
         child=serializers.ImageField(),
@@ -1740,6 +1752,7 @@ class CarSaleListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer
             "seller_phone",
             "seller_email",
             "reveal_fee",
+            "is_active",
             "place_id",
             "session_token",
         ]
@@ -1802,7 +1815,7 @@ class CarSaleListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer
         self._pop_session_token(validated_data)
         images = validated_data.pop("images", [])
         self._pop_skip_async_geocoding(validated_data)
-        validated_data.setdefault("is_active", False)
+        validated_data.setdefault("is_active", True)
         instance = CarSaleListing.objects.create(**validated_data)
         if images:
             ImageCreationService.create_images(instance, images)
@@ -1824,7 +1837,7 @@ class CarSaleListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer
         return instance
 
     def to_representation(self, instance):
-        return CarSaleListingResponseSerializer(instance, context=self.context).data
+        return CarSaleListingManagedResponseSerializer(instance, context=self.context).data
 
 
 class ContactRevealRequestSerializer(serializers.Serializer):
@@ -2066,7 +2079,7 @@ class PropertySaleListingSerializer(PlaceResolutionMixin, serializers.ModelSeria
 
         address = Address.objects.create(**address_data)
         validated_data["address"] = address
-        validated_data.setdefault("is_active", False)
+        validated_data.setdefault("is_active", True)
         instance = PropertySaleListing.objects.create(**validated_data)
         if images:
             ImageCreationService.create_images(instance, images)
@@ -2258,7 +2271,7 @@ class CarListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
         self._pop_session_token(validated_data)
         images = validated_data.pop("images", [])
         self._pop_skip_async_geocoding(validated_data)
-        validated_data.setdefault("is_active", False)
+        validated_data.setdefault("is_active", True)
         
         car_listing_instance = CarListing.objects.create(**validated_data)
         
@@ -3013,7 +3026,7 @@ class PropertyListingSerializer(PlaceResolutionMixin, serializers.ModelSerialize
                 validated_data["company"] = request_company
             elif request_individual_owner:
                 validated_data["individual_owner"] = request_individual_owner
-        validated_data.setdefault("is_active", False)
+        validated_data.setdefault("is_active", True)
 
         return ListingService.create_property_listing(validated_data)
 

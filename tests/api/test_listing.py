@@ -154,6 +154,7 @@ def _create_car_sale_listing(company, **overrides):
         "seller_email": "seller@example.com",
         "reveal_fee": Decimal("100.00"),
         "is_active": True,
+        "is_verified": True,
     }
     defaults.update(overrides)
     return CarSaleListing.objects.create(**defaults)
@@ -199,6 +200,25 @@ def _mock_contact_reveal_chapa(settings, monkeypatch):
     monkeypatch.setattr("apps.payment.services.requests.post", lambda *args, **kwargs: DummyResponse())
 
 
+def _mock_contact_reveal_chapa_failure(settings, monkeypatch):
+    settings.CHAPA_CALLBACK_URL = "https://api.example.com/payment/callback"
+    settings.FRONTEND_URL = "https://app.example.com"
+    settings.CHAPA_SECRET_KEY = "test-secret"
+
+    class DummyResponse:
+        def json(self):
+            return {
+                "status": "failed",
+                "data": None,
+                "message": {
+                    "email": ["validation.email"],
+                    "customization.title": ["The customization.title must not exceed 16 characters."],
+                },
+            }
+
+    monkeypatch.setattr("apps.payment.services.requests.post", lambda *args, **kwargs: DummyResponse())
+
+
 def _mock_extension_chapa_initialize(settings, monkeypatch, checkout_url="https://checkout.example.com/extension"):
     settings.CHAPA_CALLBACK_URL = "https://api.example.com/payment/callback"
     settings.FRONTEND_URL = "https://app.example.com"
@@ -221,6 +241,7 @@ def _mock_contact_reveal_verification(monkeypatch, amount, currency="ETB"):
         lambda tx_ref: {
             "status": "success",
             "data": {
+                "status": "success",
                 "amount": str(amount),
                 "currency": currency,
                 "id": f"chapa-{tx_ref}",
@@ -498,6 +519,25 @@ def test_car_sales_happy_path_all_four_endpoints(api_client, auth_client, user, 
     assert "off_platform_notice" in contact
 
 
+def test_car_sales_contact_reveal_failure_returns_readable_error(auth_client, user, company, settings, monkeypatch):
+    listing = _create_car_sale_listing(company)
+    _mock_contact_reveal_chapa_failure(settings, monkeypatch)
+
+    response = auth_client.post(
+        f"/api/v1/listing/car-sales/{listing.id}/request-contact/",
+        {"buyer_note": "I want to inspect it.", "buyer_phone": user.phone},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    data = response.json()
+    assert data["success"] is False
+    assert isinstance(data["error"], str)
+    assert "[object Object]" not in data["error"]
+    assert "customization.title" in data["error"]
+    assert data["provider_error"]["message"]["email"] == ["validation.email"]
+
+
 def test_car_sales_create_success_for_company_owner(company_client):
     response = company_client.post(
         "/api/v1/listing/car-sales/",
@@ -526,8 +566,117 @@ def test_car_sales_create_success_for_company_owner(company_client):
     assert response.status_code == 201, response.json()
     data = response.json()
     assert data["title"] == "Sale Corolla"
-    assert data["is_active"] is False
-    assert "seller_phone" not in data
+    assert data["is_active"] is True
+    assert data["seller_phone"] == "0911222000"
+
+
+def test_car_sales_managed_response_exposes_contact_only_to_owner_and_admin(
+    api_client,
+    auth_client,
+    company_client,
+    individual_owner_client,
+    admin_client,
+    company,
+    individual_owner,
+):
+    listing = _create_car_sale_listing(company)
+
+    public_response = api_client.get(f"/api/v1/listing/car-sales/{listing.id}/")
+    assert public_response.status_code == 200
+    assert "seller_contact_name" not in public_response.json()
+    assert "seller_phone" not in public_response.json()
+    assert "seller_email" not in public_response.json()
+
+    assert api_client.get("/api/v1/listing/car-sales/?managed=true").status_code == 401
+
+    managed_list_response = company_client.get("/api/v1/listing/car-sales/?managed=true")
+    assert managed_list_response.status_code == 200
+    managed_item = managed_list_response.json()["results"][0]
+    assert managed_item["seller_contact_name"] == listing.seller_contact_name
+    assert managed_item["seller_phone"] == listing.seller_phone
+    assert managed_item["seller_email"] == listing.seller_email
+
+    managed_detail_response = company_client.get(
+        f"/api/v1/listing/car-sales/{listing.id}/?managed=true"
+    )
+    assert managed_detail_response.status_code == 200
+    assert managed_detail_response.json()["seller_phone"] == listing.seller_phone
+
+    foreign_response = individual_owner_client.get(
+        f"/api/v1/listing/car-sales/{listing.id}/?managed=true"
+    )
+    assert foreign_response.status_code == 404
+
+    individual_listing = _create_car_sale_listing(
+        None,
+        individual_owner=individual_owner,
+        title="Individual owner sale",
+    )
+    individual_managed_response = individual_owner_client.get(
+        "/api/v1/listing/car-sales/?managed=true"
+    )
+    assert individual_managed_response.status_code == 200
+    individual_items = individual_managed_response.json()["results"]
+    individual_item = next(
+        item for item in individual_items if item["id"] == str(individual_listing.id)
+    )
+    assert individual_item["seller_phone"] == individual_listing.seller_phone
+
+    individual_patch_response = individual_owner_client.patch(
+        f"/api/v1/listing/car-sales/{individual_listing.id}/",
+        {"title": "Individual owner updated sale"},
+        format="json",
+    )
+    assert individual_patch_response.status_code == 200
+    assert individual_patch_response.json()["seller_phone"] == individual_listing.seller_phone
+
+    non_provider_response = auth_client.get("/api/v1/listing/car-sales/?managed=true")
+    assert non_provider_response.status_code == 200
+    assert non_provider_response.json()["results"] == []
+
+    admin_response = admin_client.get(f"/api/v1/listing/car-sales/{listing.id}/")
+    assert admin_response.status_code == 200
+    assert admin_response.json()["seller_phone"] == listing.seller_phone
+
+
+def test_car_sales_patch_preserves_omitted_contact_and_allows_unverified_activation(company_client, company):
+    listing = _create_car_sale_listing(company, is_active=False, is_verified=False)
+    original_contact = (
+        listing.seller_contact_name,
+        listing.seller_phone,
+        listing.seller_email,
+    )
+
+    activation_response = company_client.patch(
+        f"/api/v1/listing/car-sales/{listing.id}/",
+        {"title": "Updated title", "is_active": True},
+        format="json",
+    )
+    assert activation_response.status_code == 200, activation_response.json()
+
+    listing.refresh_from_db()
+    assert listing.is_active is True
+    assert listing.is_verified is False
+    assert listing.title == "Updated title"
+    assert (
+        listing.seller_contact_name,
+        listing.seller_phone,
+        listing.seller_email,
+    ) == original_contact
+
+
+def test_car_sales_public_excludes_inactive_but_includes_unverified_listings(api_client, company):
+    inactive = _create_car_sale_listing(company, title="Inactive sale", is_active=False)
+    unverified = _create_car_sale_listing(company, title="Unverified sale", is_verified=False)
+
+    list_response = api_client.get("/api/v1/listing/car-sales/")
+    assert list_response.status_code == 200
+    public_ids = {item["id"] for item in list_response.json()["results"]}
+    assert str(inactive.id) not in public_ids
+    assert str(unverified.id) in public_ids
+
+    assert api_client.get(f"/api/v1/listing/car-sales/{inactive.id}/").status_code == 404
+    assert api_client.get(f"/api/v1/listing/car-sales/{unverified.id}/").status_code == 200
 
 
 def test_car_sales_auth_errors_and_wrong_role(api_client, auth_client, company):
@@ -779,7 +928,8 @@ def test_property_sales_create_success_for_company_owner(company_client):
     data = response.json()
     assert data["title"] == "Bole villa sale"
     assert data["property_type"] == PropertySaleListing.PropertyTypeChoices.VILLA
-    assert data["is_active"] is False
+    assert data["is_active"] is True
+    assert data["is_verified"] is False
     assert "seller_phone" not in data
     assert PropertySaleListing.objects.filter(title="Bole villa sale").exists()
 
@@ -1641,9 +1791,10 @@ def test_post_guesthouse_create_success(company_client, api_client, company, ima
     data = response.json()
     assert data["title"] == "Guest House Draft"
     guest_house_profile = GuestHouseProfile.objects.get(id=data["id"])
-    assert guest_house_profile.is_active is False
+    assert guest_house_profile.is_active is True
+    assert guest_house_profile.is_verified is False
     list_response = api_client.get("/api/v1/listing/guest-houses/")
-    assert all(item["id"] != data["id"] for item in list_response.json()["results"])
+    assert any(item["id"] == data["id"] for item in list_response.json()["results"])
 
 
 def test_patch_guesthouse_success(company_client, guest_house):
@@ -1763,7 +1914,8 @@ def test_post_guesthouse_room_create_success(company_client, guest_house):
     data = response.json()
     assert data["title"] == "Room Draft"
     guest_house_room = GuestHouseRoom.objects.get(id=data["id"])
-    assert guest_house_room.is_active is False
+    assert guest_house_room.is_active is True
+    assert guest_house_room.is_verified is False
 
 
 def test_patch_guesthouse_room_success(company_client, guest_house_room):
@@ -1838,6 +1990,40 @@ def test_get_car_detail_public_contract(api_client, car_listing):
     _assert_verification_fields(data)
 
 
+def test_get_car_my_listings_owner_sees_inactive_unverified(company_client, company):
+    inactive_car = CarListing.objects.create(
+        company=company,
+        title="Inactive owner car",
+        description="Owner should still see this car",
+        base_price=Decimal("1200.00"),
+        currency="ETB",
+        brand=CarListing.CarBrandChoices.TOYOTA,
+        model="Yaris",
+        year=2022,
+        mileage=12000,
+        fuel_type=CarListing.FuelTypeChoices.PETROL,
+        transmission=CarListing.TransmissionChoices.AUTOMATIC,
+        condition=CarListing.ConditionChoices.USED,
+        seats=4,
+        listing_type=CarListing.ListingTypeChoices.RENT,
+        rental_mode=CarListing.RentalModeChoices.WITH_DRIVER,
+        with_driver_base_price=Decimal("1200.00"),
+        without_driver_base_price=Decimal("1000.00"),
+        car_class=CarListing.CarClassChoices.NORMAL,
+        quantity=1,
+        is_active=False,
+        is_verified=False,
+    )
+
+    response = company_client.get("/api/v1/listing/cars/my_listings/")
+
+    assert response.status_code == 200
+    payload = response.json()
+    results = payload["results"] if isinstance(payload, dict) and "results" in payload else payload
+    ids = {item["id"] for item in results}
+    assert str(inactive_car.id) in ids
+
+
 def test_post_car_listing_create_requires_business_license_upload(company_client, company):
     response = company_client.post(
         "/api/v1/listing/cars/",
@@ -1872,7 +2058,7 @@ def test_post_car_listing_create_requires_business_license_upload(company_client
     assert "business_license_document" in response.json()
 
 
-def test_post_car_listing_create_success(company_client, company):
+def test_post_car_listing_create_success(api_client, company_client, company):
     upload = SimpleUploadedFile(
         "business-license.pdf",
         b"provider business license",
@@ -1918,7 +2104,9 @@ def test_post_car_listing_create_success(company_client, company):
     assert data["requires_business_license"] is True
     assert data["business_license_document"]
     car_listing = CarListing.objects.get(id=data["id"])
-    assert car_listing.is_active is False
+    assert car_listing.is_active is True
+    assert car_listing.is_verified is False
+    assert api_client.get(f"/api/v1/listing/cars/{car_listing.id}/").status_code == 200
     assert car_listing.pre_rental_requirements == "Bring original IDs and complete a pre-rental checklist."
     assert "business-license" in car_listing.business_license_document.name
     assert car_listing.business_license_document.name.endswith(".pdf")
@@ -4466,7 +4654,8 @@ def test_post_property_listing_create_success(company):
     )
 
     assert property_listing.title == "Property Draft"
-    assert property_listing.is_active is False
+    assert property_listing.is_active is True
+    assert property_listing.is_verified is False
 
 
 def test_patch_property_success(company_client, property_listing):
@@ -4557,7 +4746,7 @@ def test_post_listing_unverify_success(admin_client, admin_user, request, fixtur
     _assert_verification_fields(response.json())
 
 
-def test_post_car_sale_listing_verify_success(admin_client, admin_user, company):
+def test_post_car_sale_listing_verify_success(api_client, admin_client, admin_user, company):
     listing = CarSaleListing.objects.create(
         company=company,
         title="Verify Car Sale",
@@ -4595,6 +4784,17 @@ def test_post_car_sale_listing_verify_success(admin_client, admin_user, company)
         expected_verified_by=str(admin_user.id),
         expected_note="Physical inspection completed",
     )
+
+    unverify_response = admin_client.post(
+        f"/api/v1/listing/car-sales/{listing.id}/unverify/",
+        {},
+        format="json",
+    )
+    assert unverify_response.status_code == 200
+    listing.refresh_from_db()
+    assert listing.is_verified is False
+    assert listing.is_active is True
+    assert api_client.get(f"/api/v1/listing/car-sales/{listing.id}/").status_code == 200
 
 
 def test_post_property_sale_listing_verify_success(admin_client, admin_user, company):

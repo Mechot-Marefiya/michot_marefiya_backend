@@ -21,7 +21,14 @@ from rest_framework.response import Response
 from django.db import transaction
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.throttling import ScopedRateThrottle
-from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes, inline_serializer
+from drf_spectacular.utils import (
+    PolymorphicProxySerializer,
+    extend_schema,
+    extend_schema_view,
+    OpenApiParameter,
+    OpenApiTypes,
+    inline_serializer,
+)
 from apps.account.serializers import HotelProfileResponseSerializer, ListingImageSerializer
 from apps.core.serializers import FacilityResponseSerializer
 from django.contrib.contenttypes.models import ContentType
@@ -39,6 +46,7 @@ from apps.account.permissions import (
     IsCompanyOwner,
     IsPublicReadOnly,
     IsAdmin,
+    IsCarSaleListingOwner,
     IsListingOwner,
     IsBookingOwner,
     IsCarRentalOwner,
@@ -81,6 +89,7 @@ from apps.listing.serializers import (
     CarListingResponseSerializer,
     CarListingSerializer,
     CarSaleContactSerializer,
+    CarSaleListingManagedResponseSerializer,
     CarSaleListingResponseSerializer,
     CarSaleListingSerializer,
     ContactRevealRequestResponseSerializer,
@@ -1920,6 +1929,8 @@ class CarListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelView
             return [IsAuthenticated()]
         # 'list' is the action for GET /api/v1/listing/cars/
         elif self.action in ['list', 'retrieve', 'check_availability', 'available_for_rent', 'search']:
+            if self.action in ['list', 'retrieve'] and self.request.query_params.get("managed", "").lower() == "true":
+                return [IsAuthenticated()]
             return [AllowAny()]
         elif self.action in ["verify", "unverify"]:
             return [IsAdmin()]
@@ -1943,13 +1954,18 @@ class CarListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelView
         )
         user = self.request.user
 
-        # Admin sees all
-        if user.is_authenticated and (user.is_superuser or getattr(user, 'role', None) and user.role.code == RoleCode.ADMIN.value):
+        is_admin = user.is_authenticated and (
+            user.is_superuser or getattr(user, 'role', None) and user.role.code == RoleCode.ADMIN.value
+        )
+        managed_only = self.request.query_params.get("managed", "").lower() == "true"
+
+        if is_admin:
             pass
-        # Company sees all
-        elif user.is_authenticated and getattr(user, 'role', None) and user.role.code == RoleCode.COMPANY.value:
-            pass
-        # Others see only active
+        elif managed_only and user.is_authenticated:
+            queryset = queryset.filter(self._owner_query(user))
+        elif user.is_authenticated and self.action in ["retrieve", "update", "partial_update", "destroy"]:
+            owner_query = self._owner_query(user)
+            queryset = queryset.filter(Q(is_active=True) | owner_query).distinct()
         else:
             queryset = queryset.filter(is_active=True)
 
@@ -1986,7 +2002,36 @@ class CarListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelView
             serializer.save()
         else:
             serializer.save()
-    @extend_schema(responses=CarListingResponseSerializer)
+
+    def _owner_query(self, user):
+        company = getattr(user, 'company', None) or getattr(user, 'profile', None)
+        individual_owner = getattr(user, 'individual_owner', None) or getattr(
+            user,
+            'individual_owner_profile',
+            None,
+        )
+        query = Q(pk__in=[])
+        if company:
+            query |= Q(company=company)
+        if individual_owner:
+            query |= Q(individual_owner=individual_owner)
+        return query
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="managed",
+                type=OpenApiTypes.BOOL,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "When true, authentication is required and results are limited to the "
+                    "caller's company/individual-owner car inventory, including inactive and unverified records."
+                ),
+            )
+        ],
+        responses=CarListingResponseSerializer,
+    )
     def list(self, request):
         """
         Handles GET /api/v1/listing/cars/ - the default endpoint.
@@ -2104,11 +2149,15 @@ class CarListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelView
         if user.is_authenticated:
             if user.is_superuser or getattr(user, 'role', None) and user.role.code == RoleCode.ADMIN.value:
                 # The get_queryset method handles filtering by role/active status already
-                queryset = self.get_queryset() 
+                queryset = self.get_queryset()
             else:
-                # Fetch only listings belonging to the user's company/profile
-                # NOTE: Depending on your model relationships, you might need to adjust this filter
-                queryset = CarListing.objects.filter(company__user=user).distinct()
+                queryset = (
+                    CarListing.objects.select_related('company', 'individual_owner')
+                    .prefetch_related('images', 'daily_availabilities')
+                    .filter(self._owner_query(user))
+                    .distinct()
+                    .order_by("-created_at")
+                )
         else:
             return Response({"error": "Authentication required."}, status=status.HTTP_401_UNAUTHORIZED)
 
@@ -2139,17 +2188,50 @@ class CarSaleListingViewSet(SavedListingDeletionNotificationMixin, AbstractModel
 
     def get_permissions(self):
         if self.action in ["list", "retrieve"]:
+            if self.request.query_params.get("managed", "").lower() == "true":
+                return [IsAuthenticated()]
             return [AllowAny()]
         if self.action in ["request_contact", "contact", "guest_otp"]:
             return [AllowAny()]
         if self.action in ["verify", "unverify"]:
             return [IsAdmin()]
-        return [IsListingOwner()]
+        return [IsCarSaleListingOwner()]
 
     def get_serializer_class(self):
         if self.action in ["create", "update", "partial_update"]:
             return CarSaleListingSerializer
+        if self._uses_managed_response():
+            return CarSaleListingManagedResponseSerializer
         return CarSaleListingResponseSerializer
+
+    def _is_admin(self, user):
+        return bool(
+            user.is_authenticated
+            and (
+                user.is_superuser
+                or getattr(user, "role", None)
+                and user.role.code == RoleCode.ADMIN.value
+            )
+        )
+
+    def _uses_managed_response(self):
+        user = self.request.user
+        return self._is_admin(user) or (
+            user.is_authenticated
+            and self.request.query_params.get("managed", "").lower() == "true"
+        )
+
+    def _owner_query(self, user):
+        company = getattr(user, "company", None) or getattr(user, "profile", None)
+        individual_owner = getattr(user, "individual_owner", None) or getattr(
+            user, "individual_owner_profile", None
+        )
+        query = Q(pk__in=[])
+        if company:
+            query |= Q(company=company)
+        if individual_owner:
+            query |= Q(individual_owner=individual_owner)
+        return query
 
     def get_queryset(self):
         queryset = super().get_queryset().select_related(
@@ -2158,23 +2240,77 @@ class CarSaleListingViewSet(SavedListingDeletionNotificationMixin, AbstractModel
         ).prefetch_related("images", "contact_reveal_requests")
         user = self.request.user
 
-        if user.is_authenticated and (
-            user.is_superuser or getattr(user, "role", None) and user.role.code == RoleCode.ADMIN.value
-        ):
+        if self._is_admin(user):
             return queryset
 
-        managed_only = self.request.query_params.get("managed") == "true"
+        managed_only = self.request.query_params.get("managed", "").lower() == "true"
         if managed_only and user.is_authenticated:
-            company = getattr(user, "company", None) or getattr(user, "profile", None)
-            individual_owner = getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)
-            q = Q()
-            if company:
-                q |= Q(company=company)
-            if individual_owner:
-                q |= Q(individual_owner=individual_owner)
-            return queryset.filter(q).order_by("-created_at")
+            return queryset.filter(self._owner_query(user)).order_by("-created_at")
+
+        if self.action in ["update", "partial_update", "destroy"] and user.is_authenticated:
+            return queryset.filter(self._owner_query(user)).order_by("-created_at")
 
         return queryset.filter(is_active=True).order_by("-created_at")
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="managed",
+                type=OpenApiTypes.BOOL,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "When true, authentication is required and results are limited to the "
+                    "caller's company/individual-owner inventory. Managed records include "
+                    "seller contact fields. Admins may view all managed records."
+                ),
+            )
+        ],
+        responses=PolymorphicProxySerializer(
+            component_name="CarSaleListingCollectionResponse",
+            serializers=[
+                CarSaleListingResponseSerializer,
+                CarSaleListingManagedResponseSerializer,
+            ],
+            resource_type_field_name=None,
+            many=True,
+        ),
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="managed",
+                type=OpenApiTypes.BOOL,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "When true, return owner/admin management detail including seller contact. "
+                    "Foreign inventory is not accessible."
+                ),
+            )
+        ],
+        responses=PolymorphicProxySerializer(
+            component_name="CarSaleListingDetailResponse",
+            serializers=[
+                CarSaleListingResponseSerializer,
+                CarSaleListingManagedResponseSerializer,
+            ],
+            resource_type_field_name=None,
+        ),
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(responses={201: CarSaleListingManagedResponseSerializer})
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    @extend_schema(responses={200: CarSaleListingManagedResponseSerializer})
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         user = self.request.user

@@ -1,4 +1,5 @@
-from django.contrib import admin
+from django import forms
+from django.contrib import admin, messages
 from django.contrib.contenttypes.admin import GenericTabularInline
 from django.utils import timezone
 from apps.account.models import (
@@ -40,7 +41,11 @@ class HotelProfileModelAdmin(admin.ModelAdmin):
 admin.site.register(Role)
 from django.utils import timezone
 from apps.account.enums import RoleCode
-from apps.account.services import revoke_agreement as revoke_owner_agreement_service, sign_agreement as sign_owner_agreement_service
+from apps.account.services import (
+    ensure_individual_owner_login,
+    revoke_agreement as revoke_owner_agreement_service,
+    sign_agreement as sign_owner_agreement_service,
+)
 
 
 def approve_companies(modeladmin, request, queryset):
@@ -85,18 +90,133 @@ class CompanyProfileAdmin(admin.ModelAdmin):
     actions = [approve_companies, reject_companies]
 
 
+class IndividualOwnerProfileAdminForm(forms.ModelForm):
+    login_email = forms.EmailField(
+        required=False,
+        help_text="Optional. If empty, a phone-based placeholder email is used.",
+    )
+    login_password = forms.CharField(
+        required=False,
+        widget=forms.PasswordInput(render_value=True),
+        help_text="Optional. Leave blank to generate one when creating/resetting credentials.",
+    )
+    reset_login_password = forms.BooleanField(
+        required=False,
+        help_text="For existing owners, set/reset the login password.",
+    )
+    send_login_sms = forms.BooleanField(
+        required=False,
+        initial=True,
+        help_text="Send generated or reset credentials to the owner's phone.",
+    )
+
+    class Meta:
+        model = IndividualOwnerProfile
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            linked_user = self.instance.staff_members.order_by("created_at").first()
+            if linked_user:
+                self.fields["login_email"].initial = linked_user.email
+
+
 @admin.register(IndividualOwnerProfile)
 class IndividualOwnerProfileAdmin(admin.ModelAdmin):
+    form = IndividualOwnerProfileAdminForm
     list_display = (
         "first_name",
         "last_name",
         "phone",
+        "login_user",
         "split_config_active",
         "split_type",
         "split_value",
     )
     list_filter = ("split_config_active", "split_type")
     search_fields = ("first_name", "last_name", "phone", "chapa_subaccount_id")
+    readonly_fields = ("login_user",)
+    fieldsets = (
+        (
+            "Owner Profile",
+            {
+                "fields": (
+                    "first_name",
+                    "last_name",
+                    "address",
+                    "phone",
+                    "national_id_number",
+                )
+            },
+        ),
+        (
+            "Login Credentials",
+            {
+                "fields": (
+                    "login_user",
+                    "login_email",
+                    "login_password",
+                    "reset_login_password",
+                    "send_login_sms",
+                ),
+                "description": (
+                    "Individual owners log in through the normal phone + password endpoint. "
+                    "Saving this profile creates or repairs the linked login user."
+                ),
+            },
+        ),
+        (
+            "Payment Split",
+            {
+                "fields": (
+                    "chapa_subaccount_id",
+                    "split_type",
+                    "split_value",
+                    "split_config_active",
+                )
+            },
+        ),
+    )
+
+    def login_user(self, obj):
+        if not obj or not obj.pk:
+            return "Will be created on save."
+        user = obj.staff_members.order_by("created_at").first()
+        return user.email if user else "Missing - save to create credentials."
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        result = ensure_individual_owner_login(
+            obj,
+            email=form.cleaned_data.get("login_email"),
+            password=form.cleaned_data.get("login_password"),
+            send_credentials_sms=form.cleaned_data.get("send_login_sms", True),
+            reset_password=bool(form.cleaned_data.get("reset_login_password")),
+        )
+
+        if result.created:
+            self.message_user(request, "Created linked individual-owner login user.", messages.SUCCESS)
+        elif result.password_changed:
+            self.message_user(request, "Updated individual-owner login password.", messages.SUCCESS)
+        else:
+            self.message_user(request, "Individual-owner login user is linked and active.", messages.INFO)
+
+        if result.password_changed:
+            if result.sms_sent:
+                self.message_user(request, "Login credentials were sent by SMS.", messages.SUCCESS)
+            elif result.sms_error:
+                self.message_user(
+                    request,
+                    f"SMS failed: {result.sms_error}. Temporary password: {result.password}",
+                    messages.WARNING,
+                )
+            else:
+                self.message_user(
+                    request,
+                    f"SMS was not sent. Temporary password: {result.password}",
+                    messages.WARNING,
+                )
 
 
 admin.site.register(User)
