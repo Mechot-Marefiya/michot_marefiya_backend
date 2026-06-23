@@ -1,6 +1,8 @@
 import secrets
 import string
 
+from apps.account.enums import RoleCode
+
 
 WORKSPACE_CATEGORY_LABELS = {
     "hotel": "Hotel",
@@ -95,3 +97,33 @@ def get_individual_owner_scope(user):
     if not user:
         return None
     return getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)
+
+
+def is_individual_owner_user(user):
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+
+    if not get_individual_owner_scope(user):
+        return False
+
+    role_code = getattr(getattr(user, "role", None), "code", None)
+    if role_code == RoleCode.INDIVIDUAL_OWNER.value:
+        return True
+
+    if role_code == RoleCode.FRONT_DESK.value:
+        return False
+
+    if get_company_scope(user) or getattr(user, "workspace", None):
+        return False
+
+    return role_code in {None, RoleCode.USER.value}
+
+
+def get_effective_role_code(user):
+    if not user:
+        return None
+
+    if is_individual_owner_user(user):
+        return RoleCode.INDIVIDUAL_OWNER.value
+
+    return getattr(getattr(user, "role", None), "code", None)

@@ -34,8 +34,10 @@ from django.utils import timezone
 from apps.account.utils import (
     generate_password,
     get_company_scope,
+    get_effective_role_code,
     get_individual_owner_scope,
     get_workspace_summary,
+    is_individual_owner_user,
 )
 from rest_framework import serializers
 from django.contrib.auth.tokens import default_token_generator
@@ -159,28 +161,24 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 "User account is disabled. Please contact the admin."
             )
         
-        if self.user.role:
-            data["role"] = self.user.role.code
+        effective_role_code = get_effective_role_code(self.user)
+        data["role"] = effective_role_code
 
-            if self.user.role.code == RoleCode.COMPANY.value:
-                if hasattr(self.user, "profile"):
-                    data["company"] = {
-                        "id": self.user.profile.id,
-                        "name": self.user.profile.name,
-                    }
-            elif self.user.role.code in [RoleCode.FRONT_DESK.value, "front_desk"]:
-                if self.user.workspace:
-                    data["workspace"] = get_workspace_summary(self.user.workspace)
-            
-            if hasattr(self.user, "individual_owner") and self.user.individual_owner and (
-                self.user.role.code == RoleCode.INDIVIDUAL_OWNER.value or self.user.role.code == "individual_owner"
-            ):
-                 data["individual_owner"] = {
-                    "id": self.user.individual_owner.id,
-                    "name": f"{self.user.individual_owner.first_name} {self.user.individual_owner.last_name}",
+        if effective_role_code == RoleCode.COMPANY.value:
+            if hasattr(self.user, "profile"):
+                data["company"] = {
+                    "id": self.user.profile.id,
+                    "name": self.user.profile.name,
                 }
-        else:
-            data["role"] = None
+        elif effective_role_code in [RoleCode.FRONT_DESK.value, "front_desk"]:
+            if self.user.workspace:
+                data["workspace"] = get_workspace_summary(self.user.workspace)
+
+        if is_individual_owner_user(self.user):
+            data["individual_owner"] = {
+                "id": self.user.individual_owner.id,
+                "name": f"{self.user.individual_owner.first_name} {self.user.individual_owner.last_name}",
+            }
 
         return data
 
@@ -450,7 +448,7 @@ class UserSerializer(serializers.ModelSerializer):
 
 
 class UserResponseSerializer(serializers.ModelSerializer):
-    role = RoleSerializer(read_only=True, allow_null=True)
+    role = serializers.SerializerMethodField()
     workspace = serializers.SerializerMethodField()
     company = serializers.SerializerMethodField()
     individual_owner = serializers.SerializerMethodField()
@@ -477,6 +475,24 @@ class UserResponseSerializer(serializers.ModelSerializer):
             "workspace",
         ]
 
+    @extend_schema_field(RoleSerializer(allow_null=True))
+    def get_role(self, instance):
+        effective_role_code = get_effective_role_code(instance)
+        if not effective_role_code:
+            return None
+
+        role = getattr(instance, "role", None)
+        if role and role.code == effective_role_code:
+            return RoleSerializer(role, context=self.context).data
+
+        effective_role = Role.objects.filter(code=effective_role_code).first()
+        if effective_role is None:
+            effective_role = Role(
+                code=effective_role_code,
+                name=effective_role_code.replace("_", " ").title(),
+            )
+        return RoleSerializer(effective_role, context=self.context).data
+
     @extend_schema_field(LoginProfileSummarySerializer(allow_null=True))
     def get_company(self, instance):
         company = getattr(instance, "profile", None) or getattr(instance, "company", None)
@@ -490,7 +506,7 @@ class UserResponseSerializer(serializers.ModelSerializer):
     @extend_schema_field(LoginProfileSummarySerializer(allow_null=True))
     def get_individual_owner(self, instance):
         owner = getattr(instance, "individual_owner", None)
-        if not owner:
+        if not owner or not is_individual_owner_user(instance):
             return None
         name = f"{owner.first_name} {owner.last_name}".strip()
         return {

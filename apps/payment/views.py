@@ -18,6 +18,7 @@ from rest_framework.throttling import ScopedRateThrottle
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db.models import Q, Sum
 from apps.account.permissions import IsAdmin, IsCompanyOwner
+from apps.account.utils import is_individual_owner_user
 from .serializers import (
     PaymentInitializeSerializer, 
     PaymentTransactionSerializer, 
@@ -785,7 +786,7 @@ class OwnerPaymentViewSet(viewsets.ReadOnlyModelViewSet):
         if hasattr(user, 'company') and user.company:
             return PaymentTransaction.objects.filter(vendor_company=user.company)
         
-        elif hasattr(user, 'individual_owner') and user.individual_owner:
+        elif is_individual_owner_user(user):
             return PaymentTransaction.objects.filter(vendor_individual=user.individual_owner)
         
         return PaymentTransaction.objects.none()

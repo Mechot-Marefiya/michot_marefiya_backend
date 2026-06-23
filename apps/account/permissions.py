@@ -1,5 +1,6 @@
 from rest_framework import permissions
 from apps.account.enums import RoleCode
+from apps.account.utils import is_individual_owner_user
 
 
 class IsAdmin(permissions.BasePermission):
@@ -119,7 +120,10 @@ class IsCompanyOwner(permissions.BasePermission):
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-            
+
+        if is_individual_owner_user(request.user):
+            return True
+
         return request.user.is_superuser or (
             hasattr(request.user, 'role') and 
             request.user.role and 
@@ -165,7 +169,10 @@ class IsListingOwner(permissions.BasePermission):
     def has_permission(self, request, view):
         if not request.user or not request.user.is_authenticated:
             return False
-            
+
+        if is_individual_owner_user(request.user):
+            return True
+
         return request.user.is_superuser or (
             hasattr(request.user, 'role') and 
             request.user.role and 
@@ -305,7 +312,8 @@ class IsCarRentalOwner(permissions.BasePermission):
                             if car.company.user == request.user:
                                 return True
                     if hasattr(car, 'individual_owner') and car.individual_owner:
-                        return False
+                        if hasattr(request.user, 'individual_owner') and request.user.individual_owner == car.individual_owner:
+                            return True
         
         return False
 
@@ -414,5 +422,8 @@ class IsGuestHouseBookingOwner(permissions.BasePermission):
                         if hasattr(guesthouse.company, 'user') and guesthouse.company.user:
                             if guesthouse.company.user == request.user:
                                 return True
+                    if hasattr(guesthouse, 'individual_owner') and guesthouse.individual_owner:
+                        if hasattr(request.user, 'individual_owner') and request.user.individual_owner == guesthouse.individual_owner:
+                            return True
         
         return False

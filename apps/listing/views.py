@@ -55,7 +55,7 @@ from apps.account.permissions import (
     IsCompanyOrFrontDesk,
 )
 from apps.account.enums import RoleCode
-from apps.account.utils import get_company_scope
+from apps.account.utils import get_company_scope, get_individual_owner_scope, is_individual_owner_user
 from apps.listing.models import (
     Amenity,
     CarListing,
@@ -1617,6 +1617,7 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
             return GuestHouseBooking.objects.none()
             
         queryset = super().get_queryset()
+        owner_scope = get_individual_owner_scope(user) if is_individual_owner_user(user) else None
         
         # Admin sees all
         if user.is_superuser or (
@@ -1635,10 +1636,8 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
             if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
                 # Filter by company user
                 return queryset.filter(items__room__guest_house__company__user=user).distinct()
-            # Individual owner logic could go here if needed, but for now enforcing company/role check
-             # If individual owner logic is needed:
-            if hasattr(user, 'individual_owner') and user.individual_owner:
-                 return queryset.filter(items__room__guest_house__individual_owner=user.individual_owner).distinct()
+            if owner_scope:
+                return queryset.filter(items__room__guest_house__individual_owner=owner_scope).distinct()
 
             return queryset.none()
         
@@ -1648,8 +1647,8 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         if mode == 'host':
             if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
                 return queryset.filter(items__room__guest_house__company__user=user).distinct()
-            if hasattr(user, 'individual_owner') and user.individual_owner:
-                 return queryset.filter(items__room__guest_house__individual_owner=user.individual_owner).distinct()
+            if owner_scope:
+                return queryset.filter(items__room__guest_house__individual_owner=owner_scope).distinct()
             return queryset.none()
 
         # Base filter: User sees own bookings as renter
@@ -1661,6 +1660,8 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
         # Company sees bookings for their guesthouses
         if hasattr(user, 'role') and user.role and user.role.code == RoleCode.COMPANY.value:
             query |= Q(items__room__guest_house__company__user=user)
+        if owner_scope:
+            query |= Q(items__room__guest_house__individual_owner=owner_scope)
         
         return queryset.filter(query).distinct()
 
@@ -2813,11 +2814,23 @@ class CarRentalViewSet(AbstractModelViewSet):
 
         # User sees own rentals
         user_rentals = queryset.filter(renter=user)
+        owner_scope = get_individual_owner_scope(user) if is_individual_owner_user(user) else None
+        mode = self.request.query_params.get("mode")
 
         # Company sees rentals for their cars + own rentals
         if getattr(user, 'role', None) and user.role.code == RoleCode.COMPANY.value:
             company_rentals = queryset.filter(rental_items__car_listing__company=user.profile).distinct()
+            if mode == "host":
+                return company_rentals.order_by("-created_at")
             return (user_rentals.distinct() | company_rentals).distinct()
+
+        if owner_scope:
+            owner_rentals = queryset.filter(
+                rental_items__car_listing__individual_owner=owner_scope
+            ).distinct()
+            if mode == "host":
+                return owner_rentals.order_by("-created_at")
+            return (user_rentals.distinct() | owner_rentals).distinct()
 
         return user_rentals
 
