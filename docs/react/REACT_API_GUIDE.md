@@ -815,10 +815,11 @@ Request body:
 
 Query params:
 - `is_active`, `is_furnished`, `ordering`, `page`, `page_size`, `property_type`, `search`
-- `managed=true`: requires authentication; returns only the caller's company/individual-owner sale listings, including inactive and unverified records
+- `managed=true`: requires authentication; returns only the caller's company/individual-owner sale listings, including inactive and unverified records, using the managed response with seller contact
 
 Success response (HTTP 200):
-- paginated `PropertySaleListingResponse` records
+- paginated `PropertySaleListingResponse` records for public reads
+- paginated `PropertySaleListingManagedResponse` records for `managed=true`
 
 Core response fields:
 - same trust and geo fields as other listing responses
@@ -845,10 +846,11 @@ Request body:
 - none
 
 Query params:
-- none
+- `managed=true`: for owner/admin management detail with seller contact
 
 Success response (HTTP 200):
-- `PropertySaleListingResponse`
+- `PropertySaleListingResponse` for public reads
+- `PropertySaleListingManagedResponse` for `managed=true`
 
 Error responses:
 - `404`: property sale listing not found
@@ -1443,6 +1445,7 @@ Error responses:
 
 React notes:
 - this endpoint starts the reveal state machine and usually leads to payment
+- do not send a buyer email; backend derives a Chapa-safe checkout email from the authenticated user or guest phone proof
 - do not assume seller contact is included here
 
 ### Read Car-Sale Seller Contact
@@ -1512,6 +1515,7 @@ Error responses:
 
 React notes:
 - this is the property-sale reveal initiation step, not the final unlock step
+- do not send a buyer email; backend derives a Chapa-safe checkout email from the authenticated user or guest phone proof
 
 ### Read Property-Sale Seller Contact
 Workflow reference: `REACT_WORKFLOW.md` Section 3
@@ -1991,28 +1995,33 @@ React notes:
 - fetch the owner record with `managed=true` to prefill seller contact; omitted contact fields on PATCH preserve their stored values
 - verification is admin-controlled trust metadata and does not determine public visibility; only `is_active` controls visibility
 
-### Create / Update Property Sale Listing
+### Create / Update / Delete Property Sale Listing
 Workflow reference: `REACT_WORKFLOW.md` Section 5
-Method: `POST` / `PATCH`
+Method: `POST` / `PATCH` / `DELETE`
 URL: `/api/v1/listing/property-sales/` and `/api/v1/listing/property-sales/{id}/`
 Auth: yes (Bearer)
-Roles: individual_owner
+Roles: company, individual_owner, admin
 
 Request body:
-- uses `PropertySaleListingRequest`
-- includes address and place metadata plus sale descriptors
+- `POST`: uses `PropertySaleListingRequest`
+- `PATCH`: uses `PatchedPropertySaleListingRequest`
+- includes address and place metadata plus sale descriptors, including seller contact fields on managed write flows
+- `DELETE`: no body
 
 Query params:
 - none
 
-Success response (HTTP 201 / 200):
-- `PropertySaleListing` or `PropertySaleListingResponse` according to action
+Success response (HTTP 201 / 200 / 204):
+- `POST` / `PATCH`: `PropertySaleListingManagedResponse`
+- `DELETE`: `204 No Content`
 
 Error responses:
 - `400`, `401`, `403`
+- `404`: foreign or missing property-sale record on scoped update/delete
 
 React notes:
 - new property-sale listings default to active and unverified; show verification as trust metadata, not as visibility state
+- fetch the owner record with `managed=true` to prefill seller contact; omitted contact fields on PATCH preserve their stored values
 
 ### Verification Status Fields
 Workflow reference: `REACT_WORKFLOW.md` Section 5

@@ -98,6 +98,7 @@ from apps.listing.serializers import (
     PropertyRentalBookingPreviewSerializer,
     PropertyRentalBookingResponseSerializer,
     PropertyRentalBookingSerializer,
+    PropertySaleListingManagedResponseSerializer,
     PropertySaleListingResponseSerializer,
     PropertySaleListingSerializer,
     BookingRatingSerializer,
@@ -2467,7 +2468,7 @@ class CarSaleListingViewSet(SavedListingDeletionNotificationMixin, AbstractModel
 
 @extend_schema(tags=["Property Sales"])
 class PropertySaleListingViewSet(SavedListingDeletionNotificationMixin, AbstractModelViewSet):
-    http_method_names = ["get", "post"]
+    http_method_names = ["get", "post", "patch", "delete"]
     queryset = PropertySaleListing.objects.all()
     serializer_class = PropertySaleListingSerializer
     throttle_scope = None
@@ -2493,9 +2494,27 @@ class PropertySaleListingViewSet(SavedListingDeletionNotificationMixin, Abstract
         return [IsAuthenticated()]
 
     def get_serializer_class(self):
-        if self.action == "create":
+        if self.action in ["create", "partial_update", "update"]:
             return PropertySaleListingSerializer
+        if self._uses_managed_response():
+            return PropertySaleListingManagedResponseSerializer
         return PropertySaleListingResponseSerializer
+
+    def _uses_managed_response(self):
+        user = self.request.user
+        return self._is_admin(user) or (
+            user.is_authenticated
+            and self.request.query_params.get("managed", "").lower() == "true"
+        )
+
+    def _owner_query(self, user):
+        company, individual_owner = self._current_owner_paths()
+        query = Q(pk__in=[])
+        if company:
+            query |= Q(company=company)
+        if individual_owner:
+            query |= Q(individual_owner=individual_owner)
+        return query
 
     def get_queryset(self):
         queryset = super().get_queryset().select_related(
@@ -2505,21 +2524,15 @@ class PropertySaleListingViewSet(SavedListingDeletionNotificationMixin, Abstract
         ).prefetch_related("images", "contact_reveal_requests")
         user = self.request.user
 
-        if user.is_authenticated and (
-            user.is_superuser or getattr(user, "role", None) and user.role.code == RoleCode.ADMIN.value
-        ):
+        if self._is_admin(user):
             return queryset
 
-        managed_only = self.request.query_params.get("managed") == "true"
+        managed_only = self.request.query_params.get("managed", "").lower() == "true"
         if managed_only and user.is_authenticated:
-            company = getattr(user, "company", None) or getattr(user, "profile", None)
-            individual_owner = getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)
-            q = Q()
-            if company:
-                q |= Q(company=company)
-            if individual_owner:
-                q |= Q(individual_owner=individual_owner)
-            return queryset.filter(q).order_by("-created_at")
+            return queryset.filter(self._owner_query(user)).order_by("-created_at")
+
+        if self.action in ["update", "partial_update", "destroy"] and user.is_authenticated:
+            return queryset.filter(self._owner_query(user)).order_by("-created_at")
 
         return queryset.filter(is_active=True).order_by("-created_at")
 
@@ -2532,6 +2545,59 @@ class PropertySaleListingViewSet(SavedListingDeletionNotificationMixin, Abstract
         individual_owner = getattr(user, "individual_owner", None) or getattr(user, "individual_owner_profile", None)
         return company, individual_owner
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="managed",
+                type=OpenApiTypes.BOOL,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "When true, authentication is required and results are limited to the "
+                    "caller's company/individual-owner inventory. Managed records include "
+                    "seller contact fields. Admins may view all managed records."
+                ),
+            )
+        ],
+        responses=PolymorphicProxySerializer(
+            component_name="PropertySaleListingCollectionResponse",
+            serializers=[
+                PropertySaleListingResponseSerializer,
+                PropertySaleListingManagedResponseSerializer,
+            ],
+            resource_type_field_name=None,
+            many=True,
+        ),
+    )
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name="managed",
+                type=OpenApiTypes.BOOL,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "When true, return owner/admin management detail including seller contact. "
+                    "Foreign inventory is not accessible."
+                ),
+            )
+        ],
+        responses=PolymorphicProxySerializer(
+            component_name="PropertySaleListingDetailResponse",
+            serializers=[
+                PropertySaleListingResponseSerializer,
+                PropertySaleListingManagedResponseSerializer,
+            ],
+            resource_type_field_name=None,
+        ),
+    )
+    def retrieve(self, request, *args, **kwargs):
+        return super().retrieve(request, *args, **kwargs)
+
+    @extend_schema(responses={201: PropertySaleListingManagedResponseSerializer})
     def create(self, request, *args, **kwargs):
         company, individual_owner = self._current_owner_paths()
         if not self._is_admin(request.user) and not company and not individual_owner:
@@ -2540,6 +2606,10 @@ class PropertySaleListingViewSet(SavedListingDeletionNotificationMixin, Abstract
                 status=status.HTTP_403_FORBIDDEN,
             )
         return super().create(request, *args, **kwargs)
+
+    @extend_schema(responses={200: PropertySaleListingManagedResponseSerializer})
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
 
     def perform_create(self, serializer):
         user = self.request.user

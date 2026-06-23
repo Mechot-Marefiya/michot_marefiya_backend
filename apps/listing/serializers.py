@@ -1961,6 +1961,18 @@ class PropertySaleListingResponseSerializer(CurrencyConversionMixin, serializers
         }
 
 
+class PropertySaleListingManagedResponseSerializer(PropertySaleListingResponseSerializer):
+    """Owner/admin representation; seller contact must never be used publicly."""
+
+    class Meta(PropertySaleListingResponseSerializer.Meta):
+        fields = PropertySaleListingResponseSerializer.Meta.fields + [
+            "seller_contact_name",
+            "seller_phone",
+            "seller_email",
+        ]
+        read_only_fields = fields
+
+
 class PropertySaleListingSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
     address = FlexibleAddressField()
     images = serializers.ListField(
@@ -2112,7 +2124,7 @@ class PropertySaleListingSerializer(PlaceResolutionMixin, serializers.ModelSeria
         return instance
 
     def to_representation(self, instance):
-        return PropertySaleListingResponseSerializer(instance, context=self.context).data
+        return PropertySaleListingManagedResponseSerializer(instance, context=self.context).data
 
 
 @extend_schema_field(serializers.ListField(child=serializers.UUIDField()))

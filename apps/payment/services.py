@@ -286,7 +286,7 @@ class ContactRevealPaymentService:
         email = _safe_chapa_email(getattr(buyer, "email", ""), tx_ref)
         first_name = getattr(buyer, "first_name", "") or "User"
         last_name = getattr(buyer, "last_name", "") or ""
-        return_url = return_base.rstrip("/") + f"/contact-reveal/complete?tx_ref={tx_ref}"
+        return_url = return_base.rstrip("/") + f"/payments/complete?tx_ref={tx_ref}"
 
         payload = {
             "amount": str(reveal_request.amount),
@@ -336,6 +336,24 @@ class ContactRevealPaymentService:
                     timeout=15,
                 )
                 response_data = res.json()
+
+                msg = response_data.get("message") or {}
+                email_errors = msg.get("email") if isinstance(msg, dict) else None
+                if email_errors and any("validation.email" in str(error) for error in email_errors):
+                    fallback_email = _fallback_chapa_email(tx_ref)
+                    logger.warning(
+                        "Chapa rejected contact reveal email %s, retrying initialize with fallback %s",
+                        payload.get("email"),
+                        fallback_email,
+                    )
+                    payload["email"] = fallback_email
+                    res = requests.post(
+                        ChapaPaymentService.BASE_URL + "transaction/initialize",
+                        headers=ChapaPaymentService._get_headers(),
+                        data=json.dumps(payload),
+                        timeout=15,
+                    )
+                    response_data = res.json()
             except Exception as e:
                 payment_tx.status = PaymentTransaction.PaymentStatus.FAILED
                 payment_tx.metadata["error"] = str(e)
@@ -717,12 +735,27 @@ def _chapa_error_message(response_data, fallback="Payment initialization failed.
     return fallback
 
 
+def _fallback_chapa_email(tx_ref):
+    configured = getattr(settings, "CHAPA_FALLBACK_EMAIL", None)
+    if configured:
+        try:
+            validate_email(configured)
+            return configured
+        except DjangoValidationError:
+            pass
+
+    token = "".join(ch for ch in str(tx_ref).lower() if ch.isalnum())[:16]
+    if not token:
+        token = hashlib.sha256(str(tx_ref).encode("utf-8")).hexdigest()[:16]
+    return f"no-reply+{token}@gmail.com"
+
+
 def _safe_chapa_email(email, tx_ref):
     candidate = (email or "").strip()
     try:
         validate_email(candidate)
     except DjangoValidationError:
-        return f"contact-{tx_ref[:8].lower()}@example.com"
+        return _fallback_chapa_email(tx_ref)
     return candidate
 
 

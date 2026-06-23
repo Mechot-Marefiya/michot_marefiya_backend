@@ -6902,6 +6902,13 @@ paths:
         name: is_furnished
         schema:
           type: boolean
+      - in: query
+        name: managed
+        schema:
+          type: boolean
+        description: When true, authentication is required and results are limited
+          to the caller's company/individual-owner inventory. Managed records include
+          seller contact fields. Admins may view all managed records.
       - name: ordering
         required: false
         in: query
@@ -6956,7 +6963,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedPropertySaleListingResponseList'
+                $ref: '#/components/schemas/PaginatedPropertySaleListingCollectionResponseList'
           description: ''
     post:
       operationId: v1_listing_property_sales_create
@@ -6981,7 +6988,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PropertySaleListing'
+                $ref: '#/components/schemas/PropertySaleListingManagedResponse'
           description: ''
   /api/v1/listing/property-sales/{id}/:
     get:
@@ -6994,6 +7001,12 @@ paths:
           format: uuid
         description: A UUID string identifying this Property Sale Listing.
         required: true
+      - in: query
+        name: managed
+        schema:
+          type: boolean
+        description: When true, return owner/admin management detail including seller
+          contact. Foreign inventory is not accessible.
       tags:
       - Property Sales
       security:
@@ -7004,8 +7017,57 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PropertySaleListingResponse'
+                $ref: '#/components/schemas/PropertySaleListingDetailResponse'
           description: ''
+    patch:
+      operationId: v1_listing_property_sales_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Property Sale Listing.
+        required: true
+      tags:
+      - Property Sales
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPropertySaleListingRequest'
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/PatchedPropertySaleListingRequest'
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/PatchedPropertySaleListingRequest'
+      security:
+      - jwtAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PropertySaleListingManagedResponse'
+          description: ''
+    delete:
+      operationId: v1_listing_property_sales_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: string
+          format: uuid
+        description: A UUID string identifying this Property Sale Listing.
+        required: true
+      tags:
+      - Property Sales
+      security:
+      - jwtAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/v1/listing/property-sales/{id}/contact/:
     get:
       operationId: v1_listing_property_sales_contact_retrieve
@@ -17219,7 +17281,7 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PropertyListingResponse'
-    PaginatedPropertySaleListingResponseList:
+    PaginatedPropertySaleListingCollectionResponseList:
       type: object
       properties:
         count:
@@ -17247,7 +17309,7 @@ components:
         results:
           type: array
           items:
-            $ref: '#/components/schemas/PropertySaleListingResponse'
+            $ref: '#/components/schemas/PropertySaleListingCollectionResponse'
     PaginatedRoleList:
       type: object
       properties:
@@ -18567,6 +18629,86 @@ components:
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
         is_furnished:
           type: boolean
+        place_id:
+          type: string
+          writeOnly: true
+        session_token:
+          type: string
+          writeOnly: true
+    PatchedPropertySaleListingRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
+          maxLength: 255
+        description:
+          type: string
+          description: Detailed description of the listing.
+        images:
+          type: array
+          items:
+            type: string
+            format: binary
+          writeOnly: true
+        base_price:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          nullable: true
+          title: Price
+          description: Price of the service/product (if applicable).
+        currency:
+          type: string
+          minLength: 1
+          description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
+          maxLength: 3
+        company:
+          type: string
+          format: uuid
+          nullable: true
+        individual_owner:
+          type: string
+          format: uuid
+          nullable: true
+        address:
+          $ref: '#/components/schemas/AddressSchemaRequest'
+        property_type:
+          $ref: '#/components/schemas/PropertySaleListingTypeEnum'
+        bedrooms:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        bathrooms:
+          type: integer
+          maximum: 2147483647
+          minimum: 0
+        square_meters:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+        land_size_square_meters:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          nullable: true
+        is_furnished:
+          type: boolean
+        seller_contact_name:
+          type: string
+          maxLength: 150
+        seller_phone:
+          type: string
+          minLength: 1
+          maxLength: 20
+        seller_email:
+          type: string
+          format: email
+        reveal_fee:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
         place_id:
           type: string
           writeOnly: true
@@ -19989,77 +20131,194 @@ components:
       - total_item_cost
       - total_price
       - updated_at
-    PropertySaleListing:
+    PropertySaleListingCollectionResponse:
+      oneOf:
+      - $ref: '#/components/schemas/PropertySaleListingResponse'
+      - $ref: '#/components/schemas/PropertySaleListingManagedResponse'
+    PropertySaleListingDetailResponse:
+      oneOf:
+      - $ref: '#/components/schemas/PropertySaleListingResponse'
+      - $ref: '#/components/schemas/PropertySaleListingManagedResponse'
+    PropertySaleListingManagedResponse:
       type: object
+      description: Owner/admin representation; seller contact must never be used publicly.
       properties:
+        id:
+          type: string
+          format: uuid
+          readOnly: true
         title:
           type: string
+          readOnly: true
           description: Title of the listing, e.g., 'Luxury Suite with Pool View'.
-          maxLength: 255
         description:
           type: string
+          readOnly: true
           description: Detailed description of the listing.
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ListingImage'
+          readOnly: true
+        latitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+        longitude:
+          type: string
+          format: decimal
+          pattern: ^-?\d{0,3}(?:\.\d{0,6})?$
+          readOnly: true
+          nullable: true
+        formatted_address:
+          type: string
+          readOnly: true
+          nullable: true
+        place_id:
+          type: string
+          readOnly: true
+          nullable: true
         base_price:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
           nullable: true
           title: Price
           description: Price of the service/product (if applicable).
         currency:
           type: string
+          readOnly: true
           description: ISO 4217 currency code for the price fields, e.g., 'ETB'.
-          maxLength: 3
         company:
           type: string
           format: uuid
+          readOnly: true
           nullable: true
         individual_owner:
           type: string
           format: uuid
+          readOnly: true
           nullable: true
         address:
-          $ref: '#/components/schemas/AddressSchema'
+          allOf:
+          - $ref: '#/components/schemas/Address'
+          readOnly: true
         property_type:
-          $ref: '#/components/schemas/PropertySaleListingTypeEnum'
+          allOf:
+          - $ref: '#/components/schemas/PropertySaleListingTypeEnum'
+          readOnly: true
         bedrooms:
           type: integer
-          maximum: 2147483647
-          minimum: 0
+          readOnly: true
         bathrooms:
           type: integer
-          maximum: 2147483647
-          minimum: 0
+          readOnly: true
         square_meters:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
         land_size_square_meters:
           type: string
           format: decimal
           pattern: ^-?\d{0,10}(?:\.\d{0,2})?$
+          readOnly: true
           nullable: true
         is_furnished:
           type: boolean
-        seller_contact_name:
-          type: string
-          maxLength: 150
-        seller_phone:
-          type: string
-          maxLength: 20
-        seller_email:
-          type: string
-          format: email
+          readOnly: true
         reveal_fee:
           type: string
           format: decimal
           pattern: ^-?\d{0,8}(?:\.\d{0,2})?$
+          readOnly: true
+        is_active:
+          type: boolean
+          readOnly: true
+          description: Whether the listing is active and visible.
+        is_verified:
+          type: boolean
+          readOnly: true
+          description: Whether the listing has been verified by an administrator.
+        verified_at:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+          description: When the listing was last verified by an administrator.
+        verified_by:
+          type: string
+          format: uuid
+          readOnly: true
+          nullable: true
+        verification_note:
+          type: string
+          readOnly: true
+          nullable: true
+          description: Optional note recorded by an administrator during verification.
+        reveal_state:
+          allOf:
+          - $ref: '#/components/schemas/PropertySaleRevealState'
+          readOnly: true
+        conversion:
+          allOf:
+          - $ref: '#/components/schemas/CurrencyConversionMetadata'
+          readOnly: true
+          description: Metadata about currency conversion if requested
+        created_at:
+          type: string
+          format: date-time
+          readOnly: true
+        updated_at:
+          type: string
+          format: date-time
+          readOnly: true
+        seller_contact_name:
+          type: string
+          readOnly: true
+        seller_phone:
+          type: string
+          readOnly: true
+        seller_email:
+          type: string
+          format: email
+          readOnly: true
       required:
       - address
+      - base_price
+      - bathrooms
+      - bedrooms
+      - company
+      - conversion
+      - created_at
+      - currency
+      - description
+      - formatted_address
+      - id
+      - images
+      - individual_owner
+      - is_active
+      - is_furnished
+      - is_verified
+      - land_size_square_meters
+      - latitude
+      - longitude
+      - place_id
       - property_type
+      - reveal_fee
+      - reveal_state
+      - seller_contact_name
+      - seller_email
       - seller_phone
       - square_meters
       - title
+      - updated_at
+      - verification_note
+      - verified_at
+      - verified_by
     PropertySaleListingRequest:
       type: object
       properties:
