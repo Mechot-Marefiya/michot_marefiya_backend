@@ -88,8 +88,9 @@ MAP_PINS_CACHE_TTL = env("MAP_PINS_CACHE_TTL", default=180, cast=int)
 # ALLOWED_HOSTS = env("ALLOWED_HOSTS").split(",")
 
 #ALLOWED_HOSTS = [*]
-ALLOWED_HOSTS = env("ALLOWED_HOSTS", default="localhost,127.0.0.1").split(",")
-ALLOWED_HOSTS += ['0.0.0.0', '.ngrok-free.app', '.michotmarefia.com']
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["localhost", "127.0.0.1"])
+ALLOWED_HOSTS += ["0.0.0.0", ".ngrok-free.app", ".michotmarefia.com", ".onrender.com"]
+ALLOWED_HOSTS = list(dict.fromkeys(ALLOWED_HOSTS))
 
 
 # CORS_ALLOWED_ORIGINS = [
@@ -428,8 +429,15 @@ JAZZMIN_UI_TWEAKS = {
     "sidebar_nav_small_text": False,
 }
 
-SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-CSRF_TRUSTED_ORIGINS = ['https://michotmarefia.com', 'https://www.michotmarefia.com']
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+CSRF_TRUSTED_ORIGINS = env.list(
+    "CSRF_TRUSTED_ORIGINS",
+    default=[
+        "https://michotmarefia.com",
+        "https://www.michotmarefia.com",
+        "https://*.onrender.com",
+    ],
+)
 
 
 # config/settings/base.py (excerpt)
