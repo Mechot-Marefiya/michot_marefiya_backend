@@ -533,6 +533,12 @@ class OwnerComplianceAgreement(AbstractBaseModel):
         max_length=50,
         verbose_name=_("Agreement Version"),
     )
+    agreement_document = models.FileField(
+        upload_to="owner_compliance_agreements/",
+        blank=True,
+        null=True,
+        verbose_name=_("Agreement Document"),
+    )
     note = models.TextField(
         blank=True,
         default="",

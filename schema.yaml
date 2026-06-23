@@ -16380,6 +16380,10 @@ components:
         agreement_version:
           type: string
           maxLength: 50
+        agreement_document:
+          type: string
+          format: uri
+          nullable: true
         note:
           type: string
       required:
@@ -16394,6 +16398,10 @@ components:
           type: string
           minLength: 1
           maxLength: 50
+        agreement_document:
+          type: string
+          format: binary
+          nullable: true
         note:
           type: string
       required:
@@ -16413,7 +16421,13 @@ components:
         agreement_version:
           type: string
           readOnly: true
+        agreement_document:
+          type: string
+          format: uri
+          readOnly: true
+          nullable: true
       required:
+      - agreement_document
       - agreement_version
       - signed_at
       - status
@@ -18468,6 +18482,10 @@ components:
           type: string
           minLength: 1
           maxLength: 50
+        agreement_document:
+          type: string
+          format: binary
+          nullable: true
         note:
           type: string
     PatchedPromotionCampaignRequest:

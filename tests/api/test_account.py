@@ -13,6 +13,7 @@ from rest_framework.exceptions import ValidationError
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.hashers import make_password
 from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from unittest.mock import patch
 
@@ -829,8 +830,12 @@ def test_get_individual_owner_detail_public_contract(api_client, individual_owne
 def test_post_owner_agreement_create_admin_success(admin_client, individual_owner):
     response = admin_client.post(
         f"/api/v1/account/individual-owners/{individual_owner.id}/agreement/",
-        {"agreement_version": "v1", "note": "Initial agreement"},
-        format="json",
+        {
+            "agreement_version": "v1",
+            "note": "Initial agreement",
+            "agreement_document": SimpleUploadedFile("agreement.pdf", b"signed agreement"),
+        },
+        format="multipart",
     )
 
     assert response.status_code == 201
@@ -838,12 +843,14 @@ def test_post_owner_agreement_create_admin_success(admin_client, individual_owne
     assert data["status"] == OwnerComplianceAgreement.Status.PENDING
     assert data["agreement_version"] == "v1"
     assert data["note"] == "Initial agreement"
+    assert data["agreement_document"]
 
 
 def test_post_owner_agreement_sign_admin_success(admin_client, admin_user, individual_owner):
     agreement = OwnerComplianceAgreement.objects.create(
         owner=individual_owner,
         agreement_version="v1",
+        agreement_document=SimpleUploadedFile("agreement.pdf", b"signed agreement"),
     )
 
     response = admin_client.post(
@@ -859,6 +866,21 @@ def test_post_owner_agreement_sign_admin_success(admin_client, admin_user, indiv
     assert agreement.status == OwnerComplianceAgreement.Status.SIGNED
     assert agreement.signed_at is not None
     assert agreement.signed_by_admin == admin_user
+
+
+def test_post_owner_agreement_sign_requires_document(admin_client, individual_owner):
+    OwnerComplianceAgreement.objects.create(
+        owner=individual_owner,
+        agreement_version="v1",
+    )
+
+    response = admin_client.post(
+        f"/api/v1/account/individual-owners/{individual_owner.id}/agreement/sign/",
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "agreement_document" in response.json()
 
 
 def test_post_owner_agreement_revoke_admin_success(admin_client, admin_user, individual_owner):
@@ -935,6 +957,7 @@ def test_owner_reads_own_agreement_safe_fields_only(individual_owner_client, ind
         status=OwnerComplianceAgreement.Status.SIGNED,
         signed_at=timezone.now(),
         signed_by_admin=admin_user,
+        agreement_document=SimpleUploadedFile("agreement.pdf", b"signed agreement"),
         note="Hidden note",
     )
 
@@ -942,9 +965,10 @@ def test_owner_reads_own_agreement_safe_fields_only(individual_owner_client, ind
 
     assert response.status_code == 200
     data = response.json()
-    assert set(data.keys()) == {"status", "signed_at", "agreement_version"}
+    assert set(data.keys()) == {"status", "signed_at", "agreement_version", "agreement_document"}
     assert data["status"] == OwnerComplianceAgreement.Status.SIGNED
     assert data["agreement_version"] == "v1"
+    assert data["agreement_document"]
 
 
 def test_owner_cannot_read_another_owner_agreement(individual_owner_client, admin_user):

@@ -2165,6 +2165,7 @@ Success response (HTTP 200):
 - `status`: enum - `pending`, `signed`, `revoked`
 - `signed_at`: datetime|null
 - `agreement_version`: string
+- `agreement_document`: file URL|null
 
 Error responses:
 - `401`: unauthenticated
@@ -2172,6 +2173,7 @@ Error responses:
 
 React notes:
 - show this prominently on owner dashboards
+- property-rental booking is allowed only when the owner has a signed agreement with an uploaded document
 - there is no owner self-sign endpoint in the allowed React scope
 
 ### Read Agreement By Owner Id
@@ -2191,6 +2193,7 @@ Success response (HTTP 200):
 - `status`
 - `signed_at`
 - `agreement_version`
+- `agreement_document`
 
 Error responses:
 - `401`, `403`, `404`

@@ -11,6 +11,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.contrib.contenttypes.models import ContentType
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 
 from apps.account.models import CompanyProfile, OwnerComplianceAgreement
@@ -204,6 +205,7 @@ def test_property_rental_tax_applies_to_individual_owner(settings, individual_ow
         agreement_version="v1",
         status=OwnerComplianceAgreement.Status.SIGNED,
         signed_at=timezone.now(),
+        agreement_document=SimpleUploadedFile("agreement.pdf", b"signed agreement"),
     )
     booking = _build_property_rental(listing, user)
 
@@ -280,6 +282,7 @@ def test_property_rental_breakdown_and_serializer_grand_total(settings, individu
         agreement_version="v1",
         status=OwnerComplianceAgreement.Status.SIGNED,
         signed_at=timezone.now(),
+        agreement_document=SimpleUploadedFile("agreement.pdf", b"signed agreement"),
     )
     booking = _build_property_rental(listing, user)
 

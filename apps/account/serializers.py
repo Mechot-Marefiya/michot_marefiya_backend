@@ -1144,7 +1144,7 @@ class AgreementStatusSerializer(serializers.ModelSerializer):
 class OwnerComplianceAgreementReadSerializer(serializers.ModelSerializer):
     class Meta:
         model = OwnerComplianceAgreement
-        fields = ["status", "signed_at", "agreement_version"]
+        fields = ["status", "signed_at", "agreement_version", "agreement_document"]
         read_only_fields = fields
 
 
@@ -1159,6 +1159,7 @@ class OwnerComplianceAgreementSerializer(serializers.ModelSerializer):
             "signed_at",
             "signed_by_admin",
             "agreement_version",
+            "agreement_document",
             "note",
         ]
         read_only_fields = ["id", "signed_at", "signed_by_admin"]
@@ -1166,11 +1167,13 @@ class OwnerComplianceAgreementSerializer(serializers.ModelSerializer):
 
 class OwnerComplianceAgreementCreateSerializer(serializers.Serializer):
     agreement_version = serializers.CharField(max_length=50)
+    agreement_document = serializers.FileField(required=False, allow_null=True)
     note = serializers.CharField(required=False, allow_blank=True)
 
 
 class OwnerComplianceAgreementPatchSerializer(serializers.Serializer):
     agreement_version = serializers.CharField(max_length=50, required=False)
+    agreement_document = serializers.FileField(required=False, allow_null=True)
     note = serializers.CharField(required=False, allow_blank=True)
 
 

@@ -11,6 +11,7 @@ from unittest.mock import patch
 from django.contrib.contenttypes.models import ContentType
 from django.contrib.auth.hashers import make_password
 from django.core.cache import cache
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 
 from apps.account.enums import RoleCode
@@ -224,6 +225,7 @@ def test_flutter_contract_individual_owner_agreement(individual_owner_client, in
         agreement_version="v1",
         status=OwnerComplianceAgreement.Status.SIGNED,
         signed_at=timezone.now(),
+        agreement_document=SimpleUploadedFile("agreement.pdf", b"signed agreement"),
     )
 
     detail_response = individual_owner_client.get(
@@ -233,11 +235,13 @@ def test_flutter_contract_individual_owner_agreement(individual_owner_client, in
 
     assert detail_response.status_code == 200
     detail_data = detail_response.json()
-    assert set(detail_data.keys()) == {"status", "signed_at", "agreement_version"}
+    assert set(detail_data.keys()) == {"status", "signed_at", "agreement_version", "agreement_document"}
+    assert detail_data["agreement_document"]
 
     assert profile_response.status_code == 200
     profile_data = profile_response.json()
-    assert set(profile_data.keys()) == {"status", "signed_at", "agreement_version"}
+    assert set(profile_data.keys()) == {"status", "signed_at", "agreement_version", "agreement_document"}
+    assert profile_data["agreement_document"]
 
 
 def test_flutter_contract_listing_verification_fields(

@@ -698,6 +698,7 @@ class Command(BaseCommand):
                     "status": OwnerComplianceAgreement.Status.SIGNED,
                     "signed_at": self.now - timedelta(days=30 - index),
                     "signed_by_admin": admin_user,
+                    "agreement_document": f"owner_compliance_agreements/demo-owner-{index}-agreement.pdf",
                     "note": "Seeded compliance agreement for demo owner onboarding.",
                 },
             )

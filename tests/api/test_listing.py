@@ -1435,6 +1435,7 @@ def test_property_rental_booking_allows_signed_owner_agreement(api_client, admin
         status=OwnerComplianceAgreement.Status.SIGNED,
         signed_at=timezone.now(),
         signed_by_admin=admin_user,
+        agreement_document=SimpleUploadedFile("agreement.pdf", b"signed agreement"),
     )
     start_date = date.today() + timedelta(days=5)
     end_date = start_date + timedelta(days=2)

@@ -549,7 +549,7 @@ def get_latest_agreement(owner):
     return owner.compliance_agreements.order_by("-created_at").first()
 
 
-def create_agreement(owner, admin, version, note=None) -> OwnerComplianceAgreement:
+def create_agreement(owner, admin, version, note=None, agreement_document=None) -> OwnerComplianceAgreement:
     _assert_individual_owner(owner)
     _assert_admin_actor(admin)
     if not str(version or "").strip():
@@ -569,12 +569,15 @@ def create_agreement(owner, admin, version, note=None) -> OwnerComplianceAgreeme
         owner=owner,
         status=OwnerComplianceAgreement.Status.PENDING,
         agreement_version=str(version).strip(),
+        agreement_document=agreement_document,
         note=note or "",
     )
 
 
 def sign_agreement(agreement, admin) -> OwnerComplianceAgreement:
     _assert_admin_actor(admin)
+    if not agreement.agreement_document:
+        raise ValidationError({"agreement_document": "Upload the signed agreement document before signing."})
     if agreement.status == OwnerComplianceAgreement.Status.SIGNED:
         return agreement
 
@@ -598,4 +601,4 @@ def is_agreement_active(owner) -> bool:
     _assert_individual_owner(owner)
     return owner.compliance_agreements.filter(
         status=OwnerComplianceAgreement.Status.SIGNED
-    ).exists()
+    ).exclude(agreement_document="").filter(agreement_document__isnull=False).exists()

@@ -748,6 +748,7 @@ class IndividualOwnerProfileViewSet(AbstractModelViewSet):
                 request.user,
                 serializer.validated_data["agreement_version"],
                 note=serializer.validated_data.get("note"),
+                agreement_document=serializer.validated_data.get("agreement_document"),
             )
             return Response(OwnerComplianceAgreementSerializer(agreement).data, status=status.HTTP_201_CREATED)
 
@@ -762,6 +763,9 @@ class IndividualOwnerProfileViewSet(AbstractModelViewSet):
         if "note" in serializer.validated_data:
             agreement.note = serializer.validated_data["note"]
             changed_fields.append("note")
+        if "agreement_document" in serializer.validated_data:
+            agreement.agreement_document = serializer.validated_data["agreement_document"]
+            changed_fields.append("agreement_document")
         if changed_fields:
             changed_fields.append("updated_at")
             agreement.save(update_fields=changed_fields)

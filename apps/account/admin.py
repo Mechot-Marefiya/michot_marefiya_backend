@@ -42,6 +42,7 @@ admin.site.register(Role)
 from django.utils import timezone
 from apps.account.enums import RoleCode
 from apps.account.services import (
+    create_agreement as create_owner_agreement_service,
     ensure_individual_owner_login,
     revoke_agreement as revoke_owner_agreement_service,
     sign_agreement as sign_owner_agreement_service,
@@ -91,6 +92,30 @@ class CompanyProfileAdmin(admin.ModelAdmin):
 
 
 class IndividualOwnerProfileAdminForm(forms.ModelForm):
+    agreement_status = forms.CharField(
+        required=False,
+        disabled=True,
+        help_text="Current latest agreement status for this owner.",
+    )
+    agreement_document_status = forms.CharField(
+        required=False,
+        disabled=True,
+        help_text="Shows whether the owner already has an uploaded agreement document.",
+    )
+    agreement_document = forms.FileField(
+        required=False,
+        help_text="Upload the signed owner compliance agreement document. Uploading a document signs the agreement.",
+    )
+    agreement_version = forms.CharField(
+        required=False,
+        initial="admin-created",
+        help_text="Version to use when creating/signing a new agreement.",
+    )
+    agreement_note = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 3}),
+        help_text="Optional note stored on the agreement.",
+    )
     login_email = forms.EmailField(
         required=False,
         help_text="Optional. If empty, a phone-based placeholder email is used.",
@@ -120,6 +145,22 @@ class IndividualOwnerProfileAdminForm(forms.ModelForm):
             linked_user = self.instance.staff_members.order_by("created_at").first()
             if linked_user:
                 self.fields["login_email"].initial = linked_user.email
+            agreement = self.instance.compliance_agreements.order_by("-created_at").first()
+            if agreement:
+                self.fields["agreement_status"].initial = (
+                    f"{agreement.status} ({agreement.agreement_version})"
+                )
+                self.fields["agreement_document_status"].initial = (
+                    "uploaded" if agreement.agreement_document else "missing"
+                )
+                self.fields["agreement_version"].initial = agreement.agreement_version
+                self.fields["agreement_note"].initial = agreement.note
+            else:
+                self.fields["agreement_status"].initial = "missing"
+                self.fields["agreement_document_status"].initial = "missing"
+        else:
+            self.fields["agreement_status"].initial = "will be available after first save"
+            self.fields["agreement_document_status"].initial = "will be available after first save"
 
 
 @admin.register(IndividualOwnerProfile)
@@ -137,6 +178,7 @@ class IndividualOwnerProfileAdmin(admin.ModelAdmin):
     list_filter = ("split_config_active", "split_type")
     search_fields = ("first_name", "last_name", "phone", "chapa_subaccount_id")
     readonly_fields = ("login_user",)
+    actions = []
     fieldsets = (
         (
             "Owner Profile",
@@ -167,6 +209,22 @@ class IndividualOwnerProfileAdmin(admin.ModelAdmin):
             },
         ),
         (
+            "Owner Compliance Agreement",
+            {
+                "fields": (
+                    "agreement_status",
+                    "agreement_document_status",
+                    "agreement_document",
+                    "agreement_version",
+                    "agreement_note",
+                ),
+                "description": (
+                    "Property-rental booking is blocked until an individual owner has a signed "
+                    "compliance agreement. Upload the agreement document and save to create/sign it here."
+                ),
+            },
+        ),
+        (
             "Payment Split",
             {
                 "fields": (
@@ -179,6 +237,52 @@ class IndividualOwnerProfileAdmin(admin.ModelAdmin):
         ),
     )
 
+    def _save_compliance_agreement_document_from_form(self, request, obj, form):
+        uploaded_document = form.cleaned_data.get("agreement_document")
+        if not uploaded_document:
+            return
+
+        signed_agreement = obj.compliance_agreements.filter(
+            status=OwnerComplianceAgreement.Status.SIGNED
+        ).first()
+        if signed_agreement:
+            signed_agreement.agreement_document = uploaded_document
+            signed_agreement.save(update_fields=["agreement_document", "updated_at"])
+            self.message_user(request, "Owner compliance agreement document updated.", messages.SUCCESS)
+            return
+
+        agreement = obj.compliance_agreements.filter(
+            status=OwnerComplianceAgreement.Status.PENDING
+        ).order_by("-created_at").first()
+        if agreement is None:
+            version = form.cleaned_data.get("agreement_version") or "admin-created"
+            note = form.cleaned_data.get("agreement_note") or "Created from Django admin owner detail."
+            agreement = create_owner_agreement_service(
+                obj,
+                request.user,
+                version=version,
+                note=note,
+                agreement_document=uploaded_document,
+            )
+        else:
+            changed_fields = []
+            version = form.cleaned_data.get("agreement_version")
+            note = form.cleaned_data.get("agreement_note")
+            if version and agreement.agreement_version != version:
+                agreement.agreement_version = version
+                changed_fields.append("agreement_version")
+            if note is not None and agreement.note != note:
+                agreement.note = note
+                changed_fields.append("note")
+            agreement.agreement_document = uploaded_document
+            changed_fields.append("agreement_document")
+            if changed_fields:
+                changed_fields.append("updated_at")
+                agreement.save(update_fields=changed_fields)
+
+        sign_owner_agreement_service(agreement, request.user)
+        self.message_user(request, "Owner compliance agreement document uploaded and signed.", messages.SUCCESS)
+
     def login_user(self, obj):
         if not obj or not obj.pk:
             return "Will be created on save."
@@ -187,6 +291,7 @@ class IndividualOwnerProfileAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
+        self._save_compliance_agreement_document_from_form(request, obj, form)
         result = ensure_individual_owner_login(
             obj,
             email=form.cleaned_data.get("login_email"),
@@ -223,9 +328,18 @@ admin.site.register(User)
 
 
 def sign_owner_agreement(modeladmin, request, queryset):
+    signed_count = 0
+    skipped_count = 0
     for agreement in queryset:
+        if not agreement.agreement_document:
+            skipped_count += 1
+            continue
         sign_owner_agreement_service(agreement, request.user)
-    modeladmin.message_user(request, f"Signed {queryset.count()} agreement(s).")
+        signed_count += 1
+    modeladmin.message_user(
+        request,
+        f"Signed {signed_count} agreement(s). Skipped {skipped_count} without documents.",
+    )
 
 
 def revoke_owner_agreement(modeladmin, request, queryset):
@@ -236,7 +350,7 @@ def revoke_owner_agreement(modeladmin, request, queryset):
 
 @admin.register(OwnerComplianceAgreement)
 class OwnerComplianceAgreementAdmin(admin.ModelAdmin):
-    list_display = ("owner", "status", "signed_at", "signed_by_admin", "agreement_version")
+    list_display = ("owner", "status", "has_document", "signed_at", "signed_by_admin", "agreement_version")
     list_filter = ("status",)
     search_fields = (
         "owner__first_name",
@@ -246,6 +360,11 @@ class OwnerComplianceAgreementAdmin(admin.ModelAdmin):
     )
     readonly_fields = ("signed_at", "signed_by_admin")
     actions = [sign_owner_agreement, revoke_owner_agreement]
+
+    def has_document(self, obj):
+        return bool(obj.agreement_document)
+
+    has_document.boolean = True
 
 
 @admin.register(OtpChallenge)
