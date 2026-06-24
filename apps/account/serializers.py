@@ -984,9 +984,7 @@ class CompanyProfileSerializer(serializers.ModelSerializer):
         return value
 
     def validate_address(self, attr):
-        serializer = AddressSerializer(data=attr)
-        serializer.is_valid(raise_exception=True)
-        return serializer.validated_data
+        return attr
 
     def validate(self, attr):
         return attr
@@ -1058,9 +1056,7 @@ class CompanyApplicationSerializer(serializers.ModelSerializer):
         ]
 
     def validate_address(self, attr):
-        serializer = AddressSerializer(data=attr)
-        serializer.is_valid(raise_exception=True)
-        return serializer.validated_data
+        return attr
 
     def validate(self, attrs):
         user = self.context["request"].user
@@ -1297,9 +1293,7 @@ class CompanyRegistrationSerializer(serializers.ModelSerializer):
         return normalized_phone
 
     def validate_address(self, attr):
-        serializer = AddressSerializer(data=attr)
-        serializer.is_valid(raise_exception=True)
-        return serializer.validated_data
+        return attr
 
     def validate(self, attrs):
         if not attrs.get("phone"):
@@ -1400,9 +1394,7 @@ class IndividualOwnerRegistrationSerializer(serializers.ModelSerializer):
         return value
 
     def validate_address(self, attr):
-        serializer = AddressSerializer(data=attr)
-        serializer.is_valid(raise_exception=True)
-        return serializer.validated_data
+        return attr
         
     def validate(self, attrs):
         if not attrs.get("phone"):
@@ -1490,9 +1482,7 @@ class HotelProfileSerializer(PlaceResolutionMixin, serializers.ModelSerializer):
         ]
 
     def validate_address(self, attr):
-        serializer = AddressSerializer(data=attr)
-        serializer.is_valid(raise_exception=True)
-        return serializer.validated_data
+        return attr
 
     def validate(self, data):
         return self._resolve_place_detail(data)

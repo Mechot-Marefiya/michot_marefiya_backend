@@ -260,7 +260,7 @@ def test_event_space_booking_accepts_fallback_terms_id_and_exposes_accepted_term
     }
 
     lookup_response = booker_client.get(
-        f"/api/v1/listing/bookings-eventspaces/lookup/?reference={booking.booking_reference}&email=booker@example.com"
+        f"/api/v1/listing/bookings-eventspaces/lookup/?reference={booking.booking_reference}&guest_phone=0911000000"
     )
     assert lookup_response.status_code == status.HTTP_200_OK
     assert lookup_response.data["accepted_terms"]["id"] == str(hotel_terms.id)

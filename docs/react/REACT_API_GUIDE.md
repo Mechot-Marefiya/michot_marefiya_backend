@@ -1016,6 +1016,31 @@ React notes:
 - cancellation does not imply refund
 - always render returned status, not optimistic local state
 
+### Hotel Booking Lookup
+Workflow reference: `REACT_WORKFLOW.md` Section 3
+Method: `GET`
+URL: `/api/v1/listing/bookings/lookup/`
+Auth: no
+Roles: all
+
+Request body:
+- none
+
+Query params:
+- `reference`: string - required
+- `guest_phone`: string - required
+
+Success response (HTTP 200):
+- `BookingResponse`
+
+Error responses:
+- `400`: missing required query params, including legacy email-only attempts
+- `404`: no booking matches the supplied reference and guest phone pair
+
+React notes:
+- send only `reference + guest_phone`; do not send `email`
+- Ethiopian phone variants are normalized server-side during lookup
+
 ### Guest House Booking Price Preview
 Workflow reference: `REACT_WORKFLOW.md` Section 3
 Method: `POST`
@@ -1060,6 +1085,31 @@ Error responses:
 
 React notes:
 - behavior mirrors hotel booking, but with guesthouse inventory
+
+### Guest House Booking Lookup
+Workflow reference: `REACT_WORKFLOW.md` Section 3
+Method: `GET`
+URL: `/api/v1/listing/guesthouse-bookings/lookup/`
+Auth: no
+Roles: all
+
+Request body:
+- none
+
+Query params:
+- `reference`: string - required
+- `guest_phone`: string - required
+
+Success response (HTTP 200):
+- `GuestHouseBooking`
+
+Error responses:
+- `400`: missing required query params, including legacy email-only attempts
+- `404`: no guesthouse booking matches the supplied reference and guest phone pair
+
+React notes:
+- same guest recovery contract as hotel booking lookup
+- cancelled guesthouse bookings still resolve when the pair matches
 
 ### Property Rental Price Preview
 Workflow reference: `REACT_WORKFLOW.md` Section 3
@@ -1273,6 +1323,31 @@ React notes:
   - send `terms_id` when that `id` exists
   - send `terms_version` only as a fallback when React does not hold a fetched record id
 - after create, use `accepted_terms.scope_type` for receipt/detail labeling instead of assuming the accepted terms belonged to the event space itself
+
+### Event Space Booking Lookup
+Workflow reference: `REACT_WORKFLOW.md` Section 3
+Method: `GET`
+URL: `/api/v1/listing/bookings-eventspaces/lookup/`
+Auth: no
+Roles: all
+
+Request body:
+- none
+
+Query params:
+- `reference`: string - required
+- `guest_phone`: string - required
+
+Success response (HTTP 200):
+- `EventSpaceBookingResponse`
+
+Error responses:
+- `400`: missing required query params, including legacy email-only attempts
+- `404`: no event-space booking matches the supplied reference and guest phone pair
+
+React notes:
+- this lookup now follows the same phone-only recovery contract as hotel and guesthouse guest lookup
+- do not build any email fallback into the UI
 
 ### Initiate Payment
 Workflow reference: `REACT_WORKFLOW.md` Section 7
@@ -2410,6 +2485,10 @@ Request body:
 - `tin`: string - optional
 - `business_license_number`: string - optional
 - `address`: object or JSON string - required - flexible address payload
+  Preferred Geoapify payload:
+  `{"place_id":"...","session_token":"..."}`
+  Manual fallback payload:
+  `{"street_line1":"...","city":"...","country":"Ethiopia","sub_city":"...","state":"...","postal_code":"...","latitude":...,"longitude":...}`
 
 Success response (HTTP 201):
 - company profile payload using `CompanyProfileResponse`
@@ -2426,6 +2505,8 @@ React notes:
 - this is the direct public company sign-up route
 - the response includes OTP metadata, so React should route the user into verification after a successful create
 - send the request as multipart form data because it includes files and a nested address payload
+- when the user selects an address from Geoapify autocomplete, send `address.place_id` and `address.session_token` instead of manually collecting sub-city/state/postal fields
+- backend now derives `street_line1`, `city`, `sub_city`, `state`, `postal_code`, `latitude`, and `longitude` from the selected place when those manual fields are omitted
 
 ### Company Apply
 Workflow reference: `REACT_WORKFLOW.md` Section 4
@@ -2438,6 +2519,10 @@ Request body:
 - `name`: string - required - company name
 - `license`: file - required - company license document
 - `address`: object or JSON string - required - flexible address payload
+  Preferred Geoapify payload:
+  `{"place_id":"...","session_token":"..."}`
+  Manual fallback payload:
+  `{"street_line1":"...","city":"...","country":"Ethiopia","sub_city":"...","state":"...","postal_code":"...","latitude":...,"longitude":...}`
 - `phone`: string - required
 - `logo`: file - optional
 - `category`: string - required
@@ -2454,5 +2539,6 @@ React notes:
 - this is the authenticated company application route
 - the created profile is stored with `PENDING` status until admin approval
 - use this path when an already signed-in user applies for a company account instead of creating a fresh login
+- use the same Geoapify-selected address payload here as public company signup; do not require manual sub-city/state entry after autocomplete
 
 

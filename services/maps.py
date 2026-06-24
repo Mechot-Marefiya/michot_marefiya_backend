@@ -50,6 +50,13 @@ def _safe_components(properties: dict | None) -> dict:
             or properties.get("suburb")
             or properties.get("county")
         ),
+        "sub_city": (
+            properties.get("suburb")
+            or properties.get("district")
+            or properties.get("neighbourhood")
+            or properties.get("quarter")
+            or properties.get("borough")
+        ),
         "region": properties.get("state") or properties.get("region"),
         "country": properties.get("country"),
         "postcode": properties.get("postcode"),

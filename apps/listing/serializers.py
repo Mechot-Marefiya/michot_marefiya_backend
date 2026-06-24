@@ -3469,10 +3469,13 @@ class BookingLookupSerializer(serializers.Serializer):
         required=True,
         help_text="The unique booking reference (e.g., H-X7Y2Z9)"
     )
-    email = serializers.EmailField(
+    guest_phone = serializers.CharField(
         required=True,
-        help_text="The guest email associated with the booking"
+        help_text="The guest phone number associated with the booking"
     )
+
+    def validate_guest_phone(self, value):
+        return strip_tags(value).strip() if value else value
 
 
 class GuestPhoneVerifiedAccessSerializer(serializers.Serializer):

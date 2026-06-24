@@ -562,6 +562,8 @@ class CompanyProfileViewSet(AbstractModelViewSet):
     def get_permissions(self):
         if self.action == 'create':
             return [AllowAny()]
+        elif self.action == 'apply':
+            return [IsAuthenticated()]
         elif self.action in ['list', 'retrieve']:
             return [AllowAny()]
         else:

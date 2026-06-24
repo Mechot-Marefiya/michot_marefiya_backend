@@ -769,6 +769,20 @@ def _assert_guest_rental_phone_matches(rental, guest_phone):
         raise PermissionDenied("Verified phone does not match this rental.")
 
 
+def _get_guest_booking_by_reference_and_phone(queryset, *, reference, guest_phone):
+    phone_variants = _phone_variants(guest_phone)
+    if not phone_variants:
+        raise NotFound()
+
+    booking = queryset.filter(
+        booking_reference=reference,
+        guest_phone__in=phone_variants,
+    ).first()
+    if booking is None:
+        raise NotFound()
+    return booking
+
+
 def _request_guest_contact_reveal_otp(request, *, reveal_type):
     serializer = GuestContactRevealOtpRequestSerializer(
         data=request.data,
@@ -1667,10 +1681,10 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
 
     @extend_schema(
         summary="Lookup guest house booking status (Guest)",
-        description="Retrieve booking details using reference and guest email. No login required.",
+        description="Retrieve booking details using reference and guest phone. No login required.",
         parameters=[
             OpenApiParameter("reference", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
-            OpenApiParameter("email", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("guest_phone", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
         ],
         responses={200: GuestHouseBookingSerializer, 404: OpenApiTypes.OBJECT}
     )
@@ -1678,16 +1692,13 @@ class GuestHouseBookingViewSet(AbstractModelViewSet):
     def lookup(self, request):
         serializer = BookingLookupSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
-        
-        reference = serializer.validated_data['reference']
-        email = serializer.validated_data['email']
-        
-        booking = get_object_or_404(
+
+        booking = _get_guest_booking_by_reference_and_phone(
             GuestHouseBooking.objects.prefetch_related("items", "items__room"),
-            booking_reference=reference,
-            guest_email=email
+            reference=serializer.validated_data["reference"],
+            guest_phone=serializer.validated_data["guest_phone"],
         )
-        
+
         response_serializer = GuestHouseBookingSerializer(booking, context=self.get_serializer_context())
         return Response(response_serializer.data)
 
@@ -3837,10 +3848,10 @@ class BookingViewSet(AbstractModelViewSet):
 
     @extend_schema(
         summary="Lookup room booking status (Guest)",
-        description="Retrieve booking details using reference and guest email. No login required.",
+        description="Retrieve booking details using reference and guest phone. No login required.",
         parameters=[
             OpenApiParameter("reference", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
-            OpenApiParameter("email", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("guest_phone", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
         ],
         responses={200: BookingResponseSerializer, 404: OpenApiTypes.OBJECT}
     )
@@ -3848,16 +3859,13 @@ class BookingViewSet(AbstractModelViewSet):
     def lookup(self, request):
         serializer = BookingLookupSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
-        
-        reference = serializer.validated_data['reference']
-        email = serializer.validated_data['email']
-        
-        booking = get_object_or_404(
+
+        booking = _get_guest_booking_by_reference_and_phone(
             Booking.objects.prefetch_related("items", "items__room"),
-            booking_reference=reference,
-            guest_email=email
+            reference=serializer.validated_data["reference"],
+            guest_phone=serializer.validated_data["guest_phone"],
         )
-        
+
         response_serializer = BookingResponseSerializer(booking, context=self.get_serializer_context())
         return Response(response_serializer.data)
 
@@ -4738,10 +4746,10 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
 
     @extend_schema(
         summary="Lookup event space booking status (Guest)",
-        description="Retrieve event space booking details using reference and guest email. No login required.",
+        description="Retrieve event space booking details using reference and guest phone. No login required.",
         parameters=[
             OpenApiParameter("reference", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
-            OpenApiParameter("email", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
+            OpenApiParameter("guest_phone", OpenApiTypes.STR, location=OpenApiParameter.QUERY, required=True),
         ],
         responses={200: EventSpaceBookingResponseSerializer, 404: OpenApiTypes.OBJECT}
     )
@@ -4749,16 +4757,13 @@ class EventSpaceBookingViewSet(AbstractModelViewSet):
     def lookup(self, request):
         serializer = BookingLookupSerializer(data=request.query_params)
         serializer.is_valid(raise_exception=True)
-        
-        reference = serializer.validated_data['reference']
-        email = serializer.validated_data['email']
-        
-        booking = get_object_or_404(
+
+        booking = _get_guest_booking_by_reference_and_phone(
             EventSpaceBooking.objects.prefetch_related("items", "items__event_space"),
-            booking_reference=reference,
-            guest_email=email
+            reference=serializer.validated_data["reference"],
+            guest_phone=serializer.validated_data["guest_phone"],
         )
-        
+
         response_serializer = EventSpaceBookingResponseSerializer(booking, context=self.get_serializer_context())
         return Response(response_serializer.data)
 

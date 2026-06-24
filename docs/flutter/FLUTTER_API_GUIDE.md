@@ -976,13 +976,14 @@ URL: `/api/v1/listing/bookings/lookup/`
 Auth required: no
 
 Query params:
-- `email`: string - optional
 - `reference`: string - required
+- `guest_phone`: string - required
 
 Success response (200):
 - `BookingResponse`
 
 Error responses:
+- `400`: missing required query params, including legacy email-only attempts
 - `404`: booking not found
 
 ### Shared Terms Endpoints
@@ -1273,13 +1274,14 @@ URL: `/api/v1/listing/guesthouse-bookings/lookup/`
 Auth required: no
 
 Query params:
-- `email`: string - optional
 - `reference`: string - required
+- `guest_phone`: string - required
 
 Success response (200):
 - `GuestHouseBooking`
 
 Error responses:
+- `400`: missing required query params, including legacy email-only attempts
 - `404`: booking not found
 
 ## Section 8: Property Rental Listings and Booking
@@ -1716,6 +1718,23 @@ Success response (200):
 Flutter notes:
 - `active_terms` can come from the event space itself or fall back to hotel/company terms
 - `terms_url` is always the canonical event-space terms fetch route: `/api/v1/listing/terms/event-space/{event_space_id}/`
+
+### Event Space Booking Lookup
+Workflow reference: FLUTTER_WORKFLOW.md Section 4
+Method: GET
+URL: `/api/v1/listing/bookings-eventspaces/lookup/`
+Auth required: no
+
+Query params:
+- `reference`: string - required
+- `guest_phone`: string - required
+
+Success response (200):
+- `EventSpaceBookingResponse`
+
+Error responses:
+- `400`: missing required query params, including legacy email-only attempts
+- `404`: booking not found
 
 ## Section 9: Car Sales
 

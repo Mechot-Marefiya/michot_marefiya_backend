@@ -3024,11 +3024,11 @@ paths:
     get:
       operationId: v1_listing_bookings_eventspaces_lookup_retrieve
       description: Retrieve event space booking details using reference and guest
-        email. No login required.
+        phone. No login required.
       summary: Lookup event space booking status (Guest)
       parameters:
       - in: query
-        name: email
+        name: guest_phone
         schema:
           type: string
         required: true
@@ -3270,12 +3270,12 @@ paths:
   /api/v1/listing/bookings/lookup/:
     get:
       operationId: v1_listing_bookings_lookup_retrieve
-      description: Retrieve booking details using reference and guest email. No login
+      description: Retrieve booking details using reference and guest phone. No login
         required.
       summary: Lookup room booking status (Guest)
       parameters:
       - in: query
-        name: email
+        name: guest_phone
         schema:
           type: string
         required: true
@@ -6114,12 +6114,12 @@ paths:
   /api/v1/listing/guesthouse-bookings/lookup/:
     get:
       operationId: v1_listing_guesthouse_bookings_lookup_retrieve
-      description: Retrieve booking details using reference and guest email. No login
+      description: Retrieve booking details using reference and guest phone. No login
         required.
       summary: Lookup guest house booking status (Guest)
       parameters:
       - in: query
-        name: email
+        name: guest_phone
         schema:
           type: string
         required: true
@@ -10611,15 +10611,11 @@ components:
           type: string
           description: Postal code if available
           maxLength: 20
-      required:
-      - city
-      - street_line1
     AddressRequest:
       type: object
       properties:
         city:
           type: string
-          minLength: 1
           description: City name (e.g., 'Addis Ababa', 'Bahir Dar', 'Dire Dawa')
           maxLength: 100
         country:
@@ -10634,7 +10630,6 @@ components:
           maxLength: 100
         street_line1:
           type: string
-          minLength: 1
           title: Street Address
           description: Street address, building name, or nearby landmark (e.g., 'Bole
             Road, near Edna Mall')
@@ -10659,21 +10654,29 @@ components:
           type: string
           description: Postal code if available
           maxLength: 20
-      required:
-      - city
-      - street_line1
+        place_id:
+          type: string
+          writeOnly: true
+          description: Geoapify place identifier selected from autocomplete.
+        session_token:
+          type: string
+          writeOnly: true
+          description: Geoapify autocomplete session token paired with place_id.
     AddressSchema:
       type: object
       properties:
         city:
           type: string
+          nullable: true
         country:
           type: string
+          nullable: true
         sub_city:
           type: string
           nullable: true
         street_line1:
           type: string
+          nullable: true
         latitude:
           type: string
           format: decimal
@@ -10690,25 +10693,27 @@ components:
         postal_code:
           type: string
           nullable: true
-      required:
-      - city
-      - country
-      - street_line1
+        place_id:
+          type: string
+          nullable: true
+        session_token:
+          type: string
+          nullable: true
     AddressSchemaRequest:
       type: object
       properties:
         city:
           type: string
-          minLength: 1
+          nullable: true
         country:
           type: string
-          minLength: 1
+          nullable: true
         sub_city:
           type: string
           nullable: true
         street_line1:
           type: string
-          minLength: 1
+          nullable: true
         latitude:
           type: string
           format: decimal
@@ -10725,10 +10730,12 @@ components:
         postal_code:
           type: string
           nullable: true
-      required:
-      - city
-      - country
-      - street_line1
+        place_id:
+          type: string
+          nullable: true
+        session_token:
+          type: string
+          nullable: true
     AmenityResponseS:
       type: object
       properties:
@@ -22205,8 +22212,8 @@ components:
         role:
           allOf:
           - $ref: '#/components/schemas/Role'
-          readOnly: true
           nullable: true
+          readOnly: true
         company:
           allOf:
           - $ref: '#/components/schemas/LoginProfileSummary'

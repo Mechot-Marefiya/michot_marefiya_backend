@@ -3,6 +3,7 @@ from drf_spectacular.utils import extend_schema_field, inline_serializer, OpenAp
 from apps.core.models import Address, Facility, CurrencyRate
 from decimal import Decimal
 import json
+from services.maps import GeocodingError, get_place_detail
 
 class StringArrayField(serializers.ListField):
     def to_internal_value(self, data):
@@ -16,13 +17,27 @@ class StringArrayField(serializers.ListField):
 
 
 class AddressSerializer(serializers.ModelSerializer):
+    place_id = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        write_only=True,
+        help_text="Geoapify place identifier selected from autocomplete.",
+    )
+
+    session_token = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        write_only=True,
+        help_text="Geoapify autocomplete session token paired with place_id.",
+    )
     
     street_line1 = serializers.CharField(
         max_length=255,
+        required=False,
+        allow_blank=True,
         label="Street Address",
         help_text="Street address, building name, or nearby landmark (e.g., 'Bole Road, near Edna Mall')",
         error_messages={
-            'required': 'Street address is required to locate your listing',
             'blank': 'Street address cannot be empty',
             'max_length': 'Street address cannot exceed 255 characters'
         }
@@ -30,9 +45,10 @@ class AddressSerializer(serializers.ModelSerializer):
     
     city = serializers.CharField(
         max_length=100,
+        required=False,
+        allow_blank=True,
         help_text="City name (e.g., 'Addis Ababa', 'Bahir Dar', 'Dire Dawa')",
         error_messages={
-            'required': 'City is required to locate your listing',
             'blank': 'City name cannot be empty',
             'max_length': 'City name cannot exceed 100 characters'
         }
@@ -40,6 +56,7 @@ class AddressSerializer(serializers.ModelSerializer):
     
     country = serializers.CharField(
         max_length=100,
+        required=False,
         default="Ethiopia",
         help_text="Country name (defaults to Ethiopia)",
         error_messages={
@@ -114,6 +131,8 @@ class AddressSerializer(serializers.ModelSerializer):
             "longitude",
             "state",
             "postal_code",
+            "place_id",
+            "session_token",
         ]
     
     def validate_latitude(self, value):
@@ -133,6 +152,10 @@ class AddressSerializer(serializers.ModelSerializer):
         return value
     
     def validate_city(self, value):
+        if value is None:
+            return value
+        if not str(value).strip():
+            return ""
         if not value or not value.strip():
             raise serializers.ValidationError(
                 "City name cannot be empty or just whitespace"
@@ -145,6 +168,10 @@ class AddressSerializer(serializers.ModelSerializer):
         return normalized
     
     def validate_street_line1(self, value):
+        if value is None:
+            return value
+        if not str(value).strip():
+            return ""
         if not value or not value.strip():
             raise serializers.ValidationError(
                 "Street address cannot be empty or just whitespace"
@@ -170,6 +197,50 @@ class AddressSerializer(serializers.ModelSerializer):
         if value:
             return value.strip().upper()
         return value
+
+    def _resolve_place_detail(self, attrs):
+        place_id = (attrs.pop("place_id", "") or "").strip()
+        session_token = (attrs.pop("session_token", "") or "").strip()
+
+        if not place_id:
+            return attrs
+
+        if not session_token:
+            raise serializers.ValidationError(
+                {"session_token": "This field is required when place_id is provided."}
+            )
+
+        try:
+            detail = get_place_detail(place_id, session_token)
+        except GeocodingError as exc:
+            raise serializers.ValidationError({"place_id": str(exc)}) from exc
+
+        components = detail.get("components") or {}
+        formatted_address = (detail.get("formatted_address") or "").strip()
+        street_line1 = (attrs.get("street_line1") or "").strip()
+        attrs["street_line1"] = street_line1 or formatted_address.split(",", 1)[0].strip() or formatted_address
+        attrs["city"] = (attrs.get("city") or components.get("city") or "").strip()
+        attrs["country"] = (attrs.get("country") or components.get("country") or "Ethiopia").strip()
+        attrs["sub_city"] = (attrs.get("sub_city") or components.get("sub_city") or "").strip()
+        attrs["state"] = (attrs.get("state") or components.get("region") or "").strip()
+        attrs["postal_code"] = (attrs.get("postal_code") or components.get("postcode") or "").strip()
+        attrs["latitude"] = attrs.get("latitude") or detail.get("lat")
+        attrs["longitude"] = attrs.get("longitude") or detail.get("lng")
+        attrs["google_place_id"] = detail.get("place_id") or place_id
+        return attrs
+
+    def validate(self, attrs):
+        attrs = self._resolve_place_detail(attrs)
+
+        errors = {}
+        if not (attrs.get("street_line1") or "").strip():
+            errors["street_line1"] = "Street address is required to locate your listing"
+        if not (attrs.get("city") or "").strip():
+            errors["city"] = "City is required to locate your listing"
+        if errors:
+            raise serializers.ValidationError(errors)
+
+        return attrs
 class FacilitySerializer(serializers.ModelSerializer):
  class Meta:
         model = Facility
@@ -181,14 +252,16 @@ class FacilitySerializer(serializers.ModelSerializer):
 ADDRESS_SCHEMA = inline_serializer(
     name="AddressSchema",
     fields={
-        "city": serializers.CharField(),
-        "country": serializers.CharField(),
+        "city": serializers.CharField(required=False, allow_blank=True, allow_null=True),
+        "country": serializers.CharField(required=False, allow_blank=True, allow_null=True),
         "sub_city": serializers.CharField(required=False, allow_blank=True, allow_null=True),
-        "street_line1": serializers.CharField(),
+        "street_line1": serializers.CharField(required=False, allow_blank=True, allow_null=True),
         "latitude": serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True),
         "longitude": serializers.DecimalField(max_digits=9, decimal_places=6, required=False, allow_null=True),
         "state": serializers.CharField(required=False, allow_blank=True, allow_null=True),
         "postal_code": serializers.CharField(required=False, allow_blank=True, allow_null=True),
+        "place_id": serializers.CharField(required=False, allow_blank=True, allow_null=True),
+        "session_token": serializers.CharField(required=False, allow_blank=True, allow_null=True),
     },
 )
 
@@ -205,14 +278,14 @@ class FlexibleAddressField(serializers.Field):
                 raise serializers.ValidationError(
                     f"Invalid address format. Expected a JSON object or valid JSON string. "
                     f"Error at position {e.pos}: {e.msg}. "
-                    f"Example: {{\"city\": \"Addis Ababa\", \"street_line1\": \"Bole Road\"}}"
+                    f"Example: {{\"place_id\": \"...\", \"session_token\": \"...\"}}"
                 )
         
         if not isinstance(data, dict):
             raise serializers.ValidationError(
-                "Address must be an object with fields like 'city', 'street_line1', etc. "
+                "Address must be an object with Geoapify place fields or manual fields like 'city', 'street_line1'. "
                 f"Received type: {type(data).__name__}. "
-                "Example: {\"city\": \"Addis Ababa\", \"street_line1\": \"Bole Road\"}"
+                "Example: {\"place_id\": \"...\", \"session_token\": \"...\"}"
             )
         
         serializer = AddressSerializer(data=data)
