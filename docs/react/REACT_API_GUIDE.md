@@ -144,8 +144,8 @@ React notes:
 Workflow reference: `REACT_WORKFLOW.md` Section 2
 Method: `GET`
 URL: `/api/v1/auth/me/`
-Auth: yes (Bearer)
-Roles: regular_user / company_staff / individual_owner
+Auth: no
+Roles: all
 
 Request body:
 - none
@@ -180,8 +180,8 @@ React notes:
 Workflow reference: `REACT_WORKFLOW.md` Section 2
 Method: `GET` / `PATCH`
 URL: `/api/v1/account/users/me/`
-Auth: yes (Bearer)
-Roles: regular_user / company_staff / individual_owner
+Auth: no
+Roles: all
 
 Request body:
 - `email`: string - optional on patch - email
@@ -213,8 +213,8 @@ React notes:
 Workflow reference: `REACT_WORKFLOW.md` Section 6
 Method: `POST`
 URL: `/api/v1/account/location/`
-Auth: yes (Bearer)
-Roles: regular_user / company_staff / individual_owner
+Auth: no
+Roles: all
 
 Request body:
 - `lat`: decimal - required - current latitude
@@ -995,8 +995,8 @@ React notes:
 Workflow reference: `REACT_WORKFLOW.md` Section 3
 Method: `GET` / `POST`
 URL: `/api/v1/listing/bookings/{id}/` and `/api/v1/listing/bookings/{id}/cancel/`
-Auth: yes (Bearer)
-Roles: regular_user / company_staff / individual_owner
+Auth: no
+Roles: all
 
 Request body:
 - cancel endpoint may require guest cancellation data in guest paths
@@ -1398,8 +1398,8 @@ React notes:
 Workflow reference: `REACT_WORKFLOW.md` Section 7
 Method: `GET`
 URL: `/api/v1/payment/verify/{tx_ref}/`
-Auth: yes (Bearer)
-Roles: regular_user / company_staff / individual_owner
+Auth: no
+Roles: all
 
 Request body:
 - none
@@ -1450,8 +1450,8 @@ React notes:
 Workflow reference: `REACT_WORKFLOW.md` Section 7
 Method: `PUT`
 URL: `/api/v1/payment/cancel/{tx_ref}/`
-Auth: yes (Bearer)
-Roles: regular_user / company_staff / individual_owner
+Auth: no
+Roles: all
 
 Request body:
 - none
@@ -1620,8 +1620,8 @@ React notes:
 Workflow reference: `REACT_WORKFLOW.md` Section 6
 Method: `GET`
 URL: `/api/v1/maps/autocomplete/`
-Auth: yes (Bearer)
-Roles: regular_user / company_staff / individual_owner
+Auth: no
+Roles: all
 
 Request body:
 - none
@@ -1639,18 +1639,18 @@ Common response fields:
 
 Error responses:
 - `400`: invalid query
-- `401`: unauthenticated
 
 React notes:
-- use this in listing forms and authenticated address pickers
+- use this in the shared managed address field for company signup/apply and provider listing forms
+- anonymous and authenticated callers use the same backend bridge and the same response shape
 - backend provider is Geoapify-backed; React should not call Google directly for data
 
 ### Place Detail
 Workflow reference: `REACT_WORKFLOW.md` Section 6
 Method: `POST`
 URL: `/api/v1/maps/place-detail/`
-Auth: yes (Bearer)
-Roles: regular_user / company_staff / individual_owner
+Auth: no
+Roles: all
 
 Request body:
 - `place_id`: string - required
@@ -1665,20 +1665,26 @@ Success response (HTTP 200):
 - `formatted_address`: string
 - `place_id`: string
 - `components`: object - address components
+  Common component fields:
+  - `city`
+  - `sub_city`
+  - `region`
+  - `country`
+  - `postcode`
 
 Error responses:
 - `400`: invalid place request
-- `401`: unauthenticated
 
 React notes:
 - use this after suggestion selection to build the final location payload
+- this is public-safe for company signup and public discovery helpers; do not fork a company-only implementation
 
 ### Reverse Geocode
 Workflow reference: `REACT_WORKFLOW.md` Section 6
 Method: `GET`
 URL: `/api/v1/maps/reverse-geocode/`
-Auth: yes (Bearer)
-Roles: regular_user / company_staff / individual_owner
+Auth: no
+Roles: all
 
 Request body:
 - none
@@ -1691,7 +1697,6 @@ Success response (HTTP 200):
 
 Error responses:
 - `400`: invalid coordinates
-- `401`: unauthenticated
 
 React notes:
 - useful for “use current pin” and manual map-adjust flows
@@ -2413,7 +2418,7 @@ React notes:
 | Booking create and preview endpoints | Yes | Yes | No direct company use | Owner only where applicable to owned operations |
 | Booking read/cancel for own bookings | No | Yes | Limited by workspace/ownership | Limited by ownership |
 | Contact reveal request/read | Yes | Yes | No normal use | Possible for owner self-checks but not typical |
-| Maps helper endpoints `/api/v1/maps/*` | No | Yes | Yes | Yes |
+| Maps helper endpoints `/api/v1/maps/*` | Yes | Yes | Yes | Yes |
 | Workspace booking endpoints | No | No | Yes | No |
 | Owner ledger and subaccounts | No | No | Sometimes company-side equivalent exists separately | Yes |
 | Owner agreement endpoints | No | No | No | Yes |

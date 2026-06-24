@@ -213,13 +213,13 @@ USE_TZ = env("USE_TZ", cast=bool, default=True)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = "static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+STATIC_ROOT = Path(env("STATIC_ROOT", default=str(BASE_DIR / "staticfiles")))
 
 # Include the project's top-level `static/` directory when collecting static files
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
 MEDIA_URL = "media/"
-MEDIA_ROOT = BASE_DIR / "mediafiles"
+MEDIA_ROOT = Path(env("MEDIA_ROOT", default=str(BASE_DIR / "mediafiles")))
 
 # DATALOOKUP_MODEL = "core.DataLookup"
 

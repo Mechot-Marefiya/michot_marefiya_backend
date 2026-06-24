@@ -1,5 +1,16 @@
 # API Contract Changelog
 
+[2026-06-24] TASK-102 - Public Shared Maps Bridge
+Modified endpoints: GET /api/v1/maps/autocomplete/
+                    POST /api/v1/maps/place-detail/
+                    GET /api/v1/maps/reverse-geocode/
+Change type: NON-BREAKING auth relaxation plus additive response field
+Auth change: endpoints are now public-safe for anonymous and authenticated callers
+Stable response contract preserved for existing authenticated callers
+Additive response field: `components.sub_city`
+React action required: yes - stop assuming auth is required for shared managed address flows
+Flutter action required: yes - stop assuming auth is required for shared managed address flows
+
 [2026-06-13] TASK-607 - All Listing Family Map Coverage
 Modified: existing listing discovery, map pin, feed, search, and search suggestion endpoints
 Change type: NON-BREAKING additive listing_type filters

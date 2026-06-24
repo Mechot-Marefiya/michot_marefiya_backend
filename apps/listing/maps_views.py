@@ -1,5 +1,5 @@
 from rest_framework import status
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
@@ -18,13 +18,13 @@ from services.maps import GeocodingError, autocomplete_address, get_place_detail
 
 @extend_schema(tags=["Maps"])
 class MapsAutocompleteView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
     throttle_classes = [AnonRateThrottle, UserRateThrottle]
 
     @extend_schema(
         summary="Address autocomplete",
         parameters=[MapAutocompleteQuerySerializer],
-        responses={200: AutocompleteResultSerializer(many=True), 400: OpenApiTypes.OBJECT, 401: OpenApiTypes.OBJECT},
+        responses={200: AutocompleteResultSerializer(many=True), 400: OpenApiTypes.OBJECT},
     )
     def get(self, request):
         serializer = MapAutocompleteQuerySerializer(data=request.query_params)
@@ -41,12 +41,12 @@ class MapsAutocompleteView(APIView):
 
 @extend_schema(tags=["Maps"])
 class MapsPlaceDetailView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     @extend_schema(
         summary="Resolve place detail",
         request=MapPlaceDetailRequestSerializer,
-        responses={200: PlaceDetailSerializer, 400: OpenApiTypes.OBJECT, 401: OpenApiTypes.OBJECT},
+        responses={200: PlaceDetailSerializer, 400: OpenApiTypes.OBJECT},
     )
     def post(self, request):
         serializer = MapPlaceDetailRequestSerializer(data=request.data)
@@ -71,12 +71,12 @@ class MapsPlaceDetailView(APIView):
 
 @extend_schema(tags=["Maps"])
 class MapsReverseGeocodeView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     @extend_schema(
         summary="Reverse geocode coordinates",
         parameters=[ReverseGeocodeQuerySerializer],
-        responses={200: ReverseGeocodeSerializer, 400: OpenApiTypes.OBJECT, 401: OpenApiTypes.OBJECT},
+        responses={200: ReverseGeocodeSerializer, 400: OpenApiTypes.OBJECT},
     )
     def get(self, request):
         serializer = ReverseGeocodeQuerySerializer(data=request.query_params)

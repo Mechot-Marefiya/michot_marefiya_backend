@@ -49,6 +49,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
     depends_on:
       db:
         condition: service_healthy
@@ -65,6 +67,8 @@ services:
     user: "${UID}:${GID}"
     env_file:
       - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
     depends_on:
       - redis
       - api
@@ -81,6 +85,8 @@ services:
       - redis
     env_file:
       - .env
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
     volumes:
       - ./:/usr/src/app
 

@@ -309,6 +309,7 @@ class AutocompleteResultSerializer(serializers.Serializer):
 
 class MapAddressComponentsSerializer(serializers.Serializer):
     city = serializers.CharField(allow_null=True, required=False)
+    sub_city = serializers.CharField(allow_null=True, required=False)
     country = serializers.CharField(allow_null=True, required=False)
     postcode = serializers.CharField(allow_null=True, required=False)
     region = serializers.CharField(allow_null=True, required=False)

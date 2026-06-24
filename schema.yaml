@@ -8857,6 +8857,7 @@ paths:
       - Maps
       security:
       - jwtAuth: []
+      - {}
       responses:
         '200':
           content:
@@ -8867,13 +8868,6 @@ paths:
                   $ref: '#/components/schemas/AutocompleteResult'
           description: ''
         '400':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-          description: ''
-        '401':
           content:
             application/json:
               schema:
@@ -8900,6 +8894,7 @@ paths:
         required: true
       security:
       - jwtAuth: []
+      - {}
       responses:
         '200':
           content:
@@ -8908,13 +8903,6 @@ paths:
                 $ref: '#/components/schemas/PlaceDetail'
           description: ''
         '400':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-          description: ''
-        '401':
           content:
             application/json:
               schema:
@@ -8944,6 +8932,7 @@ paths:
       - Maps
       security:
       - jwtAuth: []
+      - {}
       responses:
         '200':
           content:
@@ -8952,13 +8941,6 @@ paths:
                 $ref: '#/components/schemas/ReverseGeocode'
           description: ''
         '400':
-          content:
-            application/json:
-              schema:
-                type: object
-                additionalProperties: {}
-          description: ''
-        '401':
           content:
             application/json:
               schema:
@@ -15905,6 +15887,9 @@ components:
       type: object
       properties:
         city:
+          type: string
+          nullable: true
+        sub_city:
           type: string
           nullable: true
         country:

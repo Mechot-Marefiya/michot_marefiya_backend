@@ -284,6 +284,7 @@ This removes existing local database and Redis volumes and recreates the local e
 - the app is meant to be run locally through Docker for the smoothest setup
 - the backend already exposes OpenAPI docs through `schema.yaml` generation and `/api/docs/`
 - seeded data is intended for local and demo environments, not production
+- Render deployment instructions live in `docs/django/RENDER_DEPLOYMENT.md`
 
 ## 14. Minimal Local Workflow Summary
 

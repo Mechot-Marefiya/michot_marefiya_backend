@@ -4,7 +4,7 @@ FROM python:3.13-slim
 ENV PYTHONUNBUFFERED=1 \
     PYTHONPYCACHEPREFIX=/tmp/pycache \
     MAIN_DIR=/usr/src/app \
-    DJANGO_SETTINGS_MODULE=config.settings.dev \
+    DJANGO_SETTINGS_MODULE=config.settings.prod \
     PORT=10000
 
 WORKDIR $MAIN_DIR
