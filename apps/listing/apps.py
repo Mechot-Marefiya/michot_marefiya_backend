@@ -6,3 +6,5 @@ class ListingConfig(AppConfig):
     name = "apps.listing"
     def ready(self):
             import apps.listing.signals
+
+            
